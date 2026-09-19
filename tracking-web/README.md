@@ -12,6 +12,8 @@ npm run dev
 
 Open `http://127.0.0.1:5173/`, choose a marker family, and use **Show matching marker #0** to display or download the exact image the detector expects. Print it or show it on another device with the **entire white margin** visible. Keep the phone display free of dark full-screen backgrounds around the marker, reflections, and UI overlays. Attach the printed marker rigidly to a blunt tool. Start the camera and keep the full marker in view. Camera access requires the browser's permission and a secure context; localhost works for local development. Do not use the setup on people or with a clinical instrument.
 
+To enable Z, measure the starting distance **from the camera lens to the marker plane** in millimetres. Enter it in the calibration panel above the video, start the camera, and hold the marker still facing the lens. Calibration starts automatically when a valid distance is already entered; **Calibrate Z** also restarts it. The page waits for eight stable detections before showing **Z READY**. Recalibrate after moving the camera, switching marker family or marker ID, or changing the marker mounting. If no distance is supplied, X/Y tracking still works and Z remains blank. A monocular camera cannot infer an absolute millimetre distance from marker pixels alone.
+
 If the browser reports **No camera found**, connect a webcam, open the page on a device with a camera, or choose **Open video file** to analyze a local recording. **Try synthetic demo** generates a moving marker in the browser so the tracker can be checked without hardware. Neither source is uploaded.
 
 The default marker family is OpenCV `DICT_5X5_250`, which recognizes IDs 0–249 and matches the common 5×5 marker generator shown in the camera test. The page also supports OpenCV `DICT_4X4_50` (IDs 0–49) and Surge Prep `ARUCO_MIP_36h12` (ID 0). Select the **exact dictionary** shown by your marker generator. The generated preview and downloads always match the selected family. A similarly shaped marker from another generator can have different bits or a different ID; use the image from this page if the family is unknown.
@@ -23,10 +25,10 @@ When tracking fails, the page distinguishes a visible square with a code mismatc
 - Marker center `x` and `y` in pixels of the processed camera image, origin at top left, +X right and +Y down.
 - Rotation of the marker's top edge in screen degrees, clockwise positive because image Y points down.
 - Approximate center speed in pixels per second and a recent 2D path.
-- Approximate Z distance in millimetres **only after** entering a measured camera-to-marker reference distance and clicking **Set reference** while the marker is visible. The estimate is `reference distance × reference marker size in pixels ÷ current marker size in pixels`.
+- Approximate Z distance in millimetres **only after** the stable reference capture above. The estimate is `reference distance × reference marker size in pixels ÷ current marker size in pixels`.
 - Detection loss, shown visibly; stale positions and speed are cleared.
 
-Processing is limited to 640 pixels wide to keep the browser responsive. The Z estimate assumes the marker keeps the same orientation toward the camera; tilt, lens distortion, and measurement error change the result. It is **not** calibrated 3D pose, and X/Y remain image pixels. This experiment performs no camera-intrinsic calibration, tip-offset correction, force/contact sensing, or anatomy registration. It does not record or transmit video frames. The detector runs locally in the browser.
+Processing is limited to 480 pixels wide and at most about 30 new video frames per second to keep the browser responsive. Fast motion can still blur a marker or exceed the camera's own frame rate; a lost marker is shown as lost instead of extrapolating a fictitious position. The Z estimate assumes the marker keeps the same orientation toward the camera; tilt, lens distortion, and measurement error change the result. It is **not** calibrated 3D pose, and X/Y remain image pixels. This experiment performs no camera-intrinsic calibration, tip-offset correction, force/contact sensing, or anatomy registration. It does not record or transmit video frames. The detector runs locally in the browser.
 
 ## Integration path
 

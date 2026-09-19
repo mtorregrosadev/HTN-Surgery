@@ -12,6 +12,7 @@ export const DICTIONARIES = {
 export const DEFAULT_DICTIONARY = DICTIONARIES.OPENCV_5X5_250;
 export const TARGET_MARKER_ID = 0;
 export const MAX_PATH_POINTS = 180;
+export const CALIBRATION_FRAMES = 8;
 
 AR.DICTIONARIES[DICTIONARIES.OPENCV_4X4_50] = {
   ...AR.DICTIONARIES.ARUCO_4X4_1000,
@@ -79,6 +80,26 @@ export function estimatedDepthMm(reference, markerSizePx) {
   const { distanceMm, sizePx } = reference;
   if (!Number.isFinite(distanceMm) || distanceMm <= 0 || !Number.isFinite(sizePx) || sizePx <= 0) return null;
   return distanceMm * sizePx / markerSizePx;
+}
+
+export function advanceDepthCalibration(samples, pose, distanceMm) {
+  if (!pose || !Number.isFinite(pose.sizePx) || pose.sizePx <= 0 ||
+      !Number.isFinite(distanceMm) || distanceMm < 50 || distanceMm > 5000) {
+    return { samples: [], reference: null };
+  }
+  const first = samples[0];
+  if (first && (
+    pose.markerId !== first.markerId ||
+    Math.hypot(pose.x - first.x, pose.y - first.y) > 12 ||
+    Math.abs(pose.sizePx - first.sizePx) > first.sizePx * 0.05
+  )) {
+    samples = [];
+  }
+  const next = [...samples, pose].slice(-CALIBRATION_FRAMES);
+  if (next.length < CALIBRATION_FRAMES) return { samples: next, reference: null };
+  const sizes = next.map((item) => item.sizePx).sort((a, b) => a - b);
+  const sizePx = (sizes[3] + sizes[4]) / 2;
+  return { samples: next, reference: { distanceMm, sizePx, markerId: pose.markerId } };
 }
 
 export function movementSpeed(previous, current) {

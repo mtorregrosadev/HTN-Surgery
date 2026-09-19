@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendPath, createDetector, DICTIONARIES, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DICTIONARIES, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
 
 function makeMarkerImage(detector, markerId) {
   const size = 320;
@@ -49,10 +49,10 @@ function rasterizeMarkerSvg(svg) {
 }
 
 test('generated Surge Prep marker #0 is detected', () => {
-  const detector = createDetector();
-  const marker = selectMarker(detector.detect(makeMarkerImage(detector, 0)));
+  const detector = createDetector(DICTIONARIES.SURGE_PREP);
+  const marker = selectMarker(detector.detect(makeMarkerImage(detector, 0)), DICTIONARIES.SURGE_PREP);
   assert.equal(marker?.id, 0);
-  assert.match(markerSvg(), /^<svg/);
+  assert.match(markerSvg(DICTIONARIES.SURGE_PREP), /^<svg/);
 });
 
 test('OpenCV 4x4 marker family decodes a nonzero ID', () => {
@@ -99,4 +99,22 @@ test('Z estimate uses a measured reference and rejects invalid measurements', ()
   assert.equal(estimatedDepthMm(reference, 60), 600);
   assert.equal(estimatedDepthMm(null, 120), null);
   assert.equal(estimatedDepthMm(reference, 0), null);
+});
+
+test('depth calibration waits for stable frames and resets after motion or marker loss', () => {
+  const pose = { markerId: 0, x: 100, y: 100, sizePx: 80 };
+  let samples = [];
+  for (let index = 0; index < CALIBRATION_FRAMES - 1; index += 1) {
+    const next = advanceDepthCalibration(samples, { ...pose, sizePx: 80 + index * 0.2 }, 300);
+    samples = next.samples;
+    assert.equal(next.reference, null);
+  }
+  const stable = advanceDepthCalibration(samples, pose, 300);
+  assert.equal(stable.reference.distanceMm, 300);
+  assert.equal(stable.reference.markerId, 0);
+  assert.ok(Math.abs(estimatedDepthMm(stable.reference, 40) - 600) < 5);
+  assert.equal(advanceDepthCalibration(samples, { ...pose, x: 130 }, 300).samples.length, 1);
+  assert.equal(advanceDepthCalibration(samples, { ...pose, markerId: 1 }, 300).samples.length, 1);
+  assert.equal(advanceDepthCalibration(samples, null, 300).samples.length, 0);
+  assert.equal(advanceDepthCalibration(samples, pose, 0).reference, null);
 });

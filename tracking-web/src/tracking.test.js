@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, detectPurpleScalpel, DICTIONARIES, isPurpleColor, projectiveMarkerCenter, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, detectPurpleScalpel, DICTIONARIES, isPurpleColor, projectiveMarkerCenter, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, SignalSmoother } from './tracking.js';
 
 function makeMarkerImage(detector, markerId) {
   const size = 320;
@@ -286,4 +286,101 @@ test('detectPurpleScalpel locates centroid, bounding box, tip, and angle', () =>
   assert.ok(scalpel.pixelCount > 0);
   assert.ok(Math.abs(scalpel.angleDeg) < 5); // horizontal
 });
+
+test('SignalSmoother suppresses noise, responds to fast motion, and clamps wild jumps', () => {
+  const smoother = new SignalSmoother({ minAlpha: 0.35, maxAlpha: 0.85, speedThreshold: 80, maxJumpPx: 50 });
+
+  // Initial reading
+  const p0 = smoother.filter(100, 100, 45, 1000);
+  assert.equal(p0.x, 100);
+  assert.equal(p0.y, 100);
+  assert.equal(p0.jumped, false);
+
+  // Small jitter (+2px, -2px) while stationary: output should remain very steady
+  const p1 = smoother.filter(102, 99, 46, 1033);
+  assert.ok(Math.abs(p1.x - 100) < 1.0);
+  assert.ok(Math.abs(p1.y - 100) < 1.0);
+  assert.equal(p1.jumped, false);
+
+  // Fast movement (moving to 125, 125: dist ~35px < maxJumpPx 50)
+  const p2 = smoother.filter(125, 125, 50, 1066);
+  assert.ok(p2.x > 108);
+  assert.equal(p2.jumped, false);
+
+  // Wild 1-frame jump/teleport (jump to 300, 300 = 200px away)
+  const p3 = smoother.filter(300, 300, 90, 1099);
+  assert.equal(p3.jumped, true);
+  // Clamped step: should not jump directly to 300
+  assert.ok(p3.x < 200);
+
+  // Reset clears state
+  smoother.reset();
+  const pReset = smoother.filter(50, 50, 0, 2000);
+  assert.equal(pReset.x, 50);
+});
+
+test('detectPurpleScalpel prioritizes downward cutting tip and respects previousTip lock', () => {
+  const width = 200;
+  const height = 250;
+  const data = new Uint8ClampedArray(width * height * 4);
+  data.fill(220);
+
+  // Draw a vertically tilted scalpel pointing downwards: x: 100..115, y: 50..200 (top at y=50, tip at y=200)
+  for (let y = 50; y <= 200; y += 1) {
+    for (let x = 100; x <= 115; x += 1) {
+      const idx = (y * width + x) * 4;
+      data[idx] = 170;     // R
+      data[idx + 1] = 45;  // G
+      data[idx + 2] = 205; // B
+      data[idx + 3] = 255;
+    }
+  }
+
+  // Without previousTip: should select lower end (y >= 190) pointing at the cutting surface
+  const scalpelDown = detectPurpleScalpel({ width, height, data }, { step: 2, minPixels: 10 });
+  assert.ok(scalpelDown);
+  assert.ok(scalpelDown.tipY >= 190, `Expected tipY >= 190, got ${scalpelDown.tipY}`);
+  assert.ok(scalpelDown.baseY <= 60, `Expected baseY <= 60, got ${scalpelDown.baseY}`);
+
+  // With previousTip locked at the top (e.g. handle anchor scenario): locks to the closer end
+  const scalpelLockedTop = detectPurpleScalpel({ width, height, data }, {
+    step: 2,
+    minPixels: 10,
+    previousTip: { x: 108, y: 55 },
+  });
+  assert.ok(scalpelLockedTop);
+  assert.ok(scalpelLockedTop.tipY <= 60, `Expected tipY <= 60 with top anchor, got ${scalpelLockedTop.tipY}`);
+});
+
+test('detectPurpleScalpel bridges finger grip gap and detects the blade tip below fingers', () => {
+  const width = 200;
+  const height = 300;
+  const data = new Uint8ClampedArray(width * height * 4);
+  data.fill(220);
+
+  // Upper segment (handle above hand): y: 50..160, x: 95..110
+  for (let y = 50; y <= 160; y += 1) {
+    for (let x = 95; x <= 110; x += 1) {
+      const idx = (y * width + x) * 4;
+      data[idx] = 170; data[idx + 1] = 45; data[idx + 2] = 205; data[idx + 3] = 255;
+    }
+  }
+
+  // Finger occlusion gap: y: 161..185 (covered by user fingers)
+
+  // Lower segment (blade tip below hand): y: 186..240, x: 97..108
+  for (let y = 186; y <= 240; y += 1) {
+    for (let x = 97; x <= 108; x += 1) {
+      const idx = (y * width + x) * 4;
+      data[idx] = 170; data[idx + 1] = 45; data[idx + 2] = 205; data[idx + 3] = 255;
+    }
+  }
+
+  const scalpel = detectPurpleScalpel({ width, height, data }, { step: 2, minPixels: 10 });
+  assert.ok(scalpel);
+  // The detected tip should be at the very bottom (y >= 235), NOT at y=160 (the middle finger edge)
+  assert.ok(scalpel.tipY >= 235, `Expected tipY >= 235, got ${scalpel.tipY}`);
+  assert.ok(scalpel.baseY <= 55, `Expected baseY <= 55, got ${scalpel.baseY}`);
+});
+
 

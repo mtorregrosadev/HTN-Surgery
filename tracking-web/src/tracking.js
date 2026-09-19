@@ -213,6 +213,72 @@ export function appendPath(path, pose, isContinuous = true) {
   return [...path, { x: pose.x, y: pose.y, continuous: isContinuous }].slice(-MAX_PATH_POINTS);
 }
 
+export class SignalSmoother {
+  constructor({ minAlpha = 0.35, maxAlpha = 0.85, speedThreshold = 80, maxJumpPx = 65 } = {}) {
+    this.x = null;
+    this.y = null;
+    this.angle = null;
+    this.minAlpha = minAlpha;
+    this.maxAlpha = maxAlpha;
+    this.speedThreshold = speedThreshold;
+    this.maxJumpPx = maxJumpPx;
+    this.lastTimestampMs = 0;
+  }
+
+  filter(rawX, rawY, rawAngle, timestampMs = 0) {
+    if (this.x === null || this.lastTimestampMs === 0) {
+      this.x = rawX;
+      this.y = rawY;
+      this.angle = rawAngle;
+      this.lastTimestampMs = timestampMs;
+      return { x: rawX, y: rawY, angle: rawAngle, jumped: false };
+    }
+
+    const dt = Math.max(1, Math.min(300, timestampMs - this.lastTimestampMs || 33));
+    this.lastTimestampMs = timestampMs;
+
+    const rawDist = Math.hypot(rawX - this.x, rawY - this.y);
+    let targetX = rawX;
+    let targetY = rawY;
+    let jumped = false;
+
+    // Suppress sudden teleportations across frames (e.g. 180-deg flip or stray reflection)
+    if (rawDist > this.maxJumpPx) {
+      const ratio = this.maxJumpPx / rawDist;
+      targetX = this.x + (rawX - this.x) * ratio;
+      targetY = this.y + (rawY - this.y) * ratio;
+      jumped = true;
+    }
+
+    // Dynamic alpha: stationary / slow motion -> high stability; rapid sweeps -> low latency
+    const speed = rawDist / (dt / 1000);
+    const t = Math.min(1, speed / (this.speedThreshold * 8));
+    const alpha = this.minAlpha + (this.maxAlpha - this.minAlpha) * t;
+
+    this.x = this.x + alpha * (targetX - this.x);
+    this.y = this.y + alpha * (targetY - this.y);
+
+    // Angle smoothing with 360-degree wrap-around
+    if (this.angle !== null && rawAngle !== undefined && !Number.isNaN(rawAngle)) {
+      let diff = (rawAngle - this.angle) % 360;
+      if (diff > 180) diff -= 360;
+      if (diff < -180) diff += 360;
+      this.angle = (this.angle + alpha * diff) % 360;
+    } else {
+      this.angle = rawAngle;
+    }
+
+    return { x: this.x, y: this.y, angle: this.angle, jumped };
+  }
+
+  reset() {
+    this.x = null;
+    this.y = null;
+    this.angle = null;
+    this.lastTimestampMs = 0;
+  }
+}
+
 export function isPurpleColor(r, g, b) {
   // Reject blown-out white glare, extreme darkness, or non-dominant blue
   if (b < 55 || b > 238) return false;
@@ -235,7 +301,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
   if (!imageData || !imageData.data) return null;
   const { width, height, data } = imageData;
   const step = options.step ?? 2;
-  const minPixels = options.minPixels ?? 30;
+  const minPixels = options.minPixels ?? 20;
 
   // 1. Scan and collect lilac pixels
   const pts = [];
@@ -251,7 +317,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
 
   if (pts.length < minPixels) return null;
 
-  // 2. Spatial clustering: grid-based connected components to reject scattered noise/reflections
+  // 2. Spatial clustering: grid-based connected components with finger-gap bridging
   const cellSize = 16;
   const cols = Math.ceil(width / cellSize);
   const rows = Math.ceil(height / cellSize);
@@ -281,29 +347,24 @@ export function detectPurpleScalpel(imageData, options = {}) {
 
         while (queue.length > 0) {
           const curr = queue.pop();
-          const neighbors = [
-            { r: curr.r - 1, c: curr.c },
-            { r: curr.r + 1, c: curr.c },
-            { r: curr.r, c: curr.c - 1 },
-            { r: curr.r, c: curr.c + 1 },
-            { r: curr.r - 1, c: curr.c - 1 },
-            { r: curr.r - 1, c: curr.c + 1 },
-            { r: curr.r + 1, c: curr.c - 1 },
-            { r: curr.r + 1, c: curr.c + 1 },
-          ];
-          for (let n = 0; n < neighbors.length; n += 1) {
-            const nr = neighbors[n].r;
-            const nc = neighbors[n].c;
-            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
-              const nIdx = nr * cols + nc;
-              if (grid[nIdx] >= 2 && labels[nIdx] === 0) {
-                labels[nIdx] = currentLabel;
-                queue.push({ r: nr, c: nc });
-                count += grid[nIdx];
-                if (nc < minC) minC = nc;
-                if (nc > maxC) maxC = nc;
-                if (nr < minR) minR = nr;
-                if (nr > maxR) maxR = nr;
+          // Search up to 2 cells away (Chebyshev dist <= 2) to bridge finger occlusion gaps (~32px)
+          for (let dr = -2; dr <= 2; dr += 1) {
+            for (let dc = -2; dc <= 2; dc += 1) {
+              if (dr === 0 && dc === 0) continue;
+              const nr = curr.r + dr;
+              const nc = curr.c + dc;
+              if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                const nIdx = nr * cols + nc;
+                const req = Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 2 : 3;
+                if (grid[nIdx] >= req && labels[nIdx] === 0) {
+                  labels[nIdx] = currentLabel;
+                  queue.push({ r: nr, c: nc });
+                  count += grid[nIdx];
+                  if (nc < minC) minC = nc;
+                  if (nc > maxC) maxC = nc;
+                  if (nr < minR) minR = nr;
+                  if (nr > maxR) maxR = nr;
+                }
               }
             }
           }
@@ -315,16 +376,15 @@ export function detectPurpleScalpel(imageData, options = {}) {
         const minor = Math.max(1, Math.min(compW, compH));
         const aspect = major / minor;
 
-        // Scalpel tool must be elongated and of reasonable size (rejects round faces / squares)
-        if (count >= minPixels && major >= 28 && aspect >= 1.5) {
+        // Scalpel tool must be elongated and of reasonable size
+        if (count >= minPixels && major >= 24 && aspect >= 1.35) {
           components.push({
             label: currentLabel,
             count,
-            minX: minC * cellSize,
-            maxX: (maxC + 1) * cellSize,
-            minY: minR * cellSize,
-            maxY: (maxR + 1) * cellSize,
             aspect,
+            major,
+            cx: (minC + maxC + 1) * cellSize / 2,
+            cy: (minR + maxR + 1) * cellSize / 2,
           });
         }
         currentLabel += 1;
@@ -334,11 +394,23 @@ export function detectPurpleScalpel(imageData, options = {}) {
 
   if (components.length === 0) return null;
 
-  // Pick the most scalpel-like elongated component
-  components.sort((a, b) => (b.count * b.aspect) - (a.count * a.aspect));
+  // Pick the primary scalpel body (elongated stick)
+  components.sort((a, b) => (b.major * b.aspect) - (a.major * a.aspect));
   const bestComp = components[0];
+  const activeLabels = new Set([bestComp.label]);
 
-  // Collect points belonging to best component
+  // Collinear tool merging across hand occlusion: unite blade tip with handle
+  for (let i = 1; i < components.length; i += 1) {
+    const comp = components[i];
+    const dx = comp.cx - bestComp.cx;
+    const dy = comp.cy - bestComp.cy;
+    const centerDist = Math.hypot(dx, dy);
+    if (centerDist < 140) {
+      activeLabels.add(comp.label);
+    }
+  }
+
+  // Collect points belonging to active scalpel component(s)
   const compPts = [];
   let sumX = 0;
   let sumY = 0;
@@ -349,7 +421,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
   for (let i = 0; i < pts.length; i += 1) {
     const c = Math.floor(pts[i].x / cellSize);
     const r = Math.floor(pts[i].y / cellSize);
-    if (labels[r * cols + c] === bestComp.label) {
+    if (activeLabels.has(labels[r * cols + c])) {
       compPts.push(pts[i]);
       sumX += pts[i].x;
       sumY += pts[i].y;
@@ -402,7 +474,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
   const projRange = maxProj - minProj;
   if (projRange < 18) return null;
 
-  // Measure thickness (perp spread) near End A vs End B to identify the cutting TIP
+  // Measure thickness (perp spread) near End A vs End B
   let perpSumSqA = 0;
   let countA = 0;
   let perpSumSqB = 0;
@@ -424,8 +496,31 @@ export function detectPurpleScalpel(imageData, options = {}) {
   const thickA = countA > 0 ? Math.sqrt(perpSumSqA / countA) : 999;
   const thickB = countB > 0 ? Math.sqrt(perpSumSqB / countB) : 999;
 
-  // The tip ("el final") is the narrower / tapered end
-  const isEndATip = thickA <= thickB;
+  // SELECT THE WORKING SURGICAL TIP ("el final, no tot"):
+  // Prioritize continuity if previously tracked, then downward surface orientation, then taper
+  let isEndATip;
+  const previousTip = options.previousTip;
+
+  if (previousTip && typeof previousTip.x === 'number' && typeof previousTip.y === 'number') {
+    const distA = Math.hypot(endA.x - previousTip.x, endA.y - previousTip.y);
+    const distB = Math.hypot(endB.x - previousTip.x, endB.y - previousTip.y);
+    if (Math.abs(distA - distB) >= 20) {
+      // Firm lock: tip cannot flip 180° to the other end of the stick
+      isEndATip = distA < distB;
+    } else {
+      const deltaY = endA.y - endB.y;
+      isEndATip = Math.abs(deltaY) >= 12 ? deltaY > 0 : thickA <= thickB;
+    }
+  } else {
+    // Initial detection: Tabletop surgical tool blade points downwards towards the surface
+    const deltaY = endA.y - endB.y;
+    if (Math.abs(deltaY) >= 14) {
+      isEndATip = deltaY > 0;
+    } else {
+      isEndATip = thickA <= thickB;
+    }
+  }
+
   const tip = isEndATip ? endA : endB;
   const base = isEndATip ? endB : endA;
 

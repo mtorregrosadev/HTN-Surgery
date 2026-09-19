@@ -1,5 +1,5 @@
 import './style.css';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, demoMarkerState, detectPurpleScalpel, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, demoMarkerState, detectPurpleScalpel, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, SignalSmoother, TARGET_MARKER_ID } from './tracking.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('camera');
@@ -33,7 +33,8 @@ let depthReference = null;
 let calibrationSamples = [];
 let lastDetectionMs = 0;
 let missingFrames = 0;
-let scalpelOffset = null;
+const scalpelSmoother = new SignalSmoother({ minAlpha: 0.35, maxAlpha: 0.85, speedThreshold: 80, maxJumpPx: 60 });
+let lastScalpelTip = null;
 const TRACKING_HOLD_MS = 450;
 
 function markerDescription() {
@@ -271,7 +272,31 @@ function processFrame(timestampMs) {
     $('frame-count').textContent = String(frameCount);
 
     const pose = markerPose2d(marker, timestampMs);
-    const scalpel = detectPurpleScalpel(pixels, { step: 2, minPixels: 14 });
+    const rawScalpel = detectPurpleScalpel(pixels, {
+      step: 2,
+      minPixels: 14,
+      previousTip: lastScalpelTip,
+    });
+    let scalpel = null;
+    let smoothedScalpel = null;
+
+    if (rawScalpel) {
+      smoothedScalpel = scalpelSmoother.filter(
+        rawScalpel.tipX,
+        rawScalpel.tipY,
+        rawScalpel.angleDeg,
+        timestampMs,
+      );
+      scalpel = {
+        ...rawScalpel,
+        tipX: smoothedScalpel.x,
+        tipY: smoothedScalpel.y,
+        x: smoothedScalpel.x,
+        y: smoothedScalpel.y,
+        angleDeg: smoothedScalpel.angle,
+      };
+      lastScalpelTip = { x: smoothedScalpel.x, y: smoothedScalpel.y };
+    }
 
     if (pose) {
       lastDetectionMs = timestampMs;
@@ -322,7 +347,6 @@ function processFrame(timestampMs) {
       missingFrames = 0;
 
       if (scalpel) {
-        scalpelOffset = { dx: scalpel.x - pose.x, dy: scalpel.y - pose.y };
         setStatus('DUAL: QR + SCALPEL', 'dual');
         setTracking('Dual tracking active', `Marker #${pose.markerId} and purple scalpel tracked simultaneously.`);
         $('marker-substatus').textContent = `#${pose.markerId}`;
@@ -353,11 +377,9 @@ function processFrame(timestampMs) {
     } else if (scalpel) {
       // Scalpel tracked without QR marker! Keep tracking alive
       lastDetectionMs = timestampMs;
-      const effectiveX = scalpelOffset ? scalpel.x - scalpelOffset.dx : scalpel.tipX;
-      const effectiveY = scalpelOffset ? scalpel.y - scalpelOffset.dy : scalpel.tipY;
       const scalpelPose = {
-        x: effectiveX,
-        y: effectiveY,
+        x: scalpel.tipX,
+        y: scalpel.tipY,
         timestampMs,
         angleDeg: scalpel.angleDeg,
       };
@@ -368,7 +390,8 @@ function processFrame(timestampMs) {
       if (previousPose) {
         const dt = timestampMs - previousPose.timestampMs;
         const dist = Math.hypot(scalpelPose.x - previousPose.x, scalpelPose.y - previousPose.y);
-        if (dt <= TRACKING_HOLD_MS && dist <= 200) {
+        // Only continuous surgical incisions within realistic per-frame displacement
+        if (dt <= 160 && dist <= 45 && !smoothedScalpel?.jumped) {
           isContinuous = true;
         } else {
           isContinuous = false;
@@ -410,6 +433,8 @@ function processFrame(timestampMs) {
       } else {
         // Truly lost after grace period
         previousPose = null;
+        scalpelSmoother.reset();
+        lastScalpelTip = null;
         if (!depthReference) {
           calibrationSamples = [];
           setCalibrationStatus('SHOW MARKER');
@@ -475,7 +500,8 @@ function stopSource() {
   previousPose = null;
   missingFrames = 0;
   lastDetectionMs = 0;
-  scalpelOffset = null;
+  scalpelSmoother.reset();
+  lastScalpelTip = null;
   $('marker-substatus').textContent = '—';
   $('marker-substatus').className = '';
   $('scalpel-substatus').textContent = '—';
@@ -623,7 +649,14 @@ $('video-button').addEventListener('click', () => source === 'file' ? stopSource
 $('video-file').addEventListener('change', startVideo);
 $('demo-button').addEventListener('click', () => source === 'demo' ? stopSource() : startDemo());
 $('depth-button').addEventListener('click', beginDepthCalibration);
-$('clear-button').addEventListener('click', () => { path = []; drawPreview(); drawOverlay(null); });
+$('clear-button').addEventListener('click', () => { path = []; drawPreview(); drawOverlay(previousPose, null); });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'c' || e.key === 'C') {
+    path = [];
+    drawPreview();
+    drawOverlay(previousPose, null);
+  }
+});
 $('dictionary').addEventListener('change', () => {
   dictionaryName = $('dictionary').value;
   detector = createDetector(dictionaryName);

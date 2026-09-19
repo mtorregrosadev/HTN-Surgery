@@ -147,17 +147,19 @@ namespace SurgePrep.Editor
             var steel = Material("Stainless", new Color(0.75f, 0.76f, 0.78f), 0.9f, 0.62f);
             var plastic = Material("ClinicalPlastic", new Color(0.9f, 0.91f, 0.92f), 0.05f, 0.4f);
             var rubber = Material("Rubber", new Color(0.12f, 0.12f, 0.13f), 0.0f, 0.18f);
-            var wall = Material("OrWall", new Color(0.88f, 0.90f, 0.91f), 0.0f, 0.22f);
-            var floor = Material("OrFloor", new Color(0.48f, 0.54f, 0.56f), 0.12f, 0.32f);
+            var wall = Material("OrWall", new Color(0.84f, 0.84f, 0.80f), 0.0f, 0.24f);
+            var floor = Material("OrFloor", new Color(0.52f, 0.48f, 0.42f), 0.08f, 0.30f);
             var mattress = Material("Mattress", new Color(0.93f, 0.93f, 0.94f), 0.0f, 0.2f);
-            var teal = Material("ErTeal", new Color(0.07f, 0.40f, 0.46f), 0.04f, 0.28f);
-            var yellow = Material("SafetyYellow", new Color(0.93f, 0.76f, 0.14f), 0.05f, 0.38f);
+            var cabinetBlue = Material("CabinetBlue", new Color(0.31f, 0.42f, 0.52f), 0.02f, 0.32f);
+            var scrubGreen = Material("ScrubGreen", new Color(0.22f, 0.46f, 0.43f), 0.02f, 0.28f);
+            var warmTrim = Material("WarmTrim", new Color(0.78f, 0.72f, 0.58f), 0.04f, 0.35f);
             var crashRed = Material("CrashRed", new Color(0.70f, 0.13f, 0.16f), 0.08f, 0.3f);
             var oxygen = Material("OxygenGreen", new Color(0.16f, 0.52f, 0.30f), 0.08f, 0.34f);
             var linen = Material("HospitalLinen", new Color(0.80f, 0.88f, 0.90f), 0.0f, 0.2f);
             var gloveBlue = Material("GloveBlue", new Color(0.25f, 0.48f, 0.72f), 0.04f, 0.28f);
             var screen = EmissiveMaterial("MonitorGlow", new Color(0.12f, 0.48f, 0.38f));
             var exitGlow = EmissiveMaterial("ExitGlow", new Color(0.15f, 0.78f, 0.32f));
+            var ceilingGlow = EmissiveMaterial("CeilingPanelGlow", new Color(1.0f, 0.94f, 0.78f));
             var scalpelYellow = Material("ScalpelHandle", new Color(0.93f, 0.78f, 0.12f), 0.05f, 0.4f);
             var dissectorBlue = Material("DissectorHandle", new Color(0.18f, 0.42f, 0.70f), 0.05f, 0.35f);
             var tubeAmber = Material("ChestTubeAmber", new Color(0.82f, 0.62f, 0.28f), 0.08f, 0.45f);
@@ -174,7 +176,8 @@ namespace SurgePrep.Editor
 
             var room = CreateOperatingRoom(
                 wall, floor, metal, steel, plastic, rubber, mattress, drape,
-                teal, yellow, crashRed, oxygen, linen, gloveBlue, screen, exitGlow
+                cabinetBlue, scrubGreen, warmTrim, crashRed, oxygen, linen,
+                gloveBlue, screen, exitGlow, ceilingGlow
             );
             var tableTop = room.transform.Find("RegistrationAnchor_Table");
 
@@ -278,117 +281,163 @@ namespace SurgePrep.Editor
         private static GameObject CreateOperatingRoom(
             Material wall, Material floor, Material metal, Material steel,
             Material plastic, Material rubber, Material mattress, Material drape,
-            Material teal, Material yellow, Material crashRed, Material oxygen,
-            Material linen, Material gloveBlue, Material screen, Material exitGlow
+            Material cabinetBlue, Material scrubGreen, Material warmTrim,
+            Material crashRed, Material oxygen, Material linen, Material gloveBlue,
+            Material screen, Material exitGlow, Material ceilingGlow
         )
         {
-            var room = new GameObject("Emergency bay");
+            var room = new GameObject("Modern teaching operating room");
             Cube("Floor", room.transform, new Vector3(0f, 0f, 0f), new Vector3(8f, 0.08f, 8f), floor);
-            Cube("Aisle stripe", room.transform, new Vector3(1.65f, 0.045f, 0f), new Vector3(0.12f, 0.01f, 6.4f), yellow);
-            Cube("Vinyl inset", room.transform, new Vector3(0f, 0.042f, 0f), new Vector3(2.4f, 0.008f, 3.2f), plastic);
+            Cube("Clean floor inset", room.transform, new Vector3(0f, 0.042f, 0f), new Vector3(4.8f, 0.008f, 5.8f), plastic);
             Cube("Ceiling", room.transform, new Vector3(0f, 3.05f, 0f), new Vector3(8f, 0.08f, 8f), wall);
             Cube("Back wall", room.transform, new Vector3(0f, 1.5f, -4f), new Vector3(8f, 3f, 0.1f), wall);
             Cube("Front wall", room.transform, new Vector3(0f, 1.5f, 4f), new Vector3(8f, 3f, 0.1f), wall);
             Cube("Left wall", room.transform, new Vector3(-4f, 1.5f, 0f), new Vector3(0.1f, 3f, 8f), wall);
             Cube("Right wall", room.transform, new Vector3(4f, 1.5f, 0f), new Vector3(0.1f, 3f, 8f), wall);
-            Cube("Teal dado L", room.transform, new Vector3(-3.94f, 0.72f, 0f), new Vector3(0.04f, 1.28f, 7.6f), teal);
-            Cube("Teal dado R", room.transform, new Vector3(3.94f, 0.72f, 0f), new Vector3(0.04f, 1.28f, 7.6f), teal);
-            Cube("Crash rail L", room.transform, new Vector3(-3.91f, 0.42f, 0f), new Vector3(0.05f, 0.08f, 7.4f), yellow);
-            Cube("Crash rail R", room.transform, new Vector3(3.91f, 0.42f, 0f), new Vector3(0.05f, 0.08f, 7.4f), yellow);
-            Cube("Outlet bank", room.transform, new Vector3(-3.88f, 0.9f, 1.4f), new Vector3(0.04f, 0.18f, 0.4f), metal);
-            Cube("O2 port", room.transform, new Vector3(-3.86f, 0.9f, 1.28f), new Vector3(0.03f, 0.05f, 0.05f), oxygen);
-            Cube("Air port", room.transform, new Vector3(-3.86f, 0.9f, 1.4f), new Vector3(0.03f, 0.05f, 0.05f), yellow);
-            Cube("Vac port", room.transform, new Vector3(-3.86f, 0.9f, 1.52f), new Vector3(0.03f, 0.05f, 0.05f), plastic);
+
+            // Warm ceiling panels and ventilation give the room the bright,
+            // enclosed teaching-OR character of the visual reference.
+            Cube("Ceiling light A", room.transform, new Vector3(-1.9f, 2.995f, -1.4f), new Vector3(1.25f, 0.015f, 0.55f), ceilingGlow);
+            Cube("Ceiling light B", room.transform, new Vector3(1.9f, 2.995f, -1.4f), new Vector3(1.25f, 0.015f, 0.55f), ceilingGlow);
+            Cube("Ceiling light C", room.transform, new Vector3(-1.9f, 2.995f, 1.45f), new Vector3(1.25f, 0.015f, 0.55f), ceilingGlow);
+            Cube("Ceiling light D", room.transform, new Vector3(1.9f, 2.995f, 1.45f), new Vector3(1.25f, 0.015f, 0.55f), ceilingGlow);
+            Cube("Vent grille", room.transform, new Vector3(0f, 2.992f, -2.65f), new Vector3(0.72f, 0.018f, 0.42f), metal);
+
+            CreateCabinetWall(room.transform, cabinetBlue, steel, plastic, warmTrim);
 
             var table = new GameObject("RegistrationAnchor_Table");
             table.transform.SetParent(room.transform, false);
             table.transform.localPosition = new Vector3(0f, 0.92f, 0f);
-            Cube("Table base", table.transform, new Vector3(0f, -0.55f, 0f), new Vector3(0.42f, 0.7f, 0.42f), metal);
-            Cube("Table column", table.transform, new Vector3(0f, -0.22f, 0f), new Vector3(0.16f, 0.4f, 0.16f), steel);
-            Cube("Table top", table.transform, new Vector3(0f, 0f, 0f), new Vector3(0.78f, 0.06f, 1.9f), steel);
-            Cube("Mattress", table.transform, new Vector3(0f, 0.06f, 0f), new Vector3(0.72f, 0.07f, 1.85f), mattress);
+            Cube("Table base", table.transform, new Vector3(0f, -0.61f, 0f), new Vector3(0.58f, 0.12f, 0.82f), metal);
+            Cube("Table pedestal", table.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.28f, 0.48f, 0.42f), steel);
+            Cube("Table top", table.transform, new Vector3(0f, 0f, 0f), new Vector3(0.82f, 0.07f, 2.02f), steel);
+            Cube("Mattress", table.transform, new Vector3(0f, 0.07f, 0f), new Vector3(0.74f, 0.08f, 1.94f), mattress);
+            Cube("Head cushion", table.transform, new Vector3(0f, 0.13f, 0.76f), new Vector3(0.48f, 0.07f, 0.34f), linen);
             Cube("Side rail L", table.transform, new Vector3(-0.405f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
             Cube("Side rail R", table.transform, new Vector3(0.405f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
             Cube("Table control", table.transform, new Vector3(0.22f, -0.18f, 0.55f), new Vector3(0.12f, 0.04f, 0.18f), plastic);
 
-            Cube("Instrument trolley", room.transform, new Vector3(1.15f, 0.72f, 0.35f), new Vector3(0.55f, 0.04f, 0.4f), steel);
-            Cube("Trolley leg A", room.transform, new Vector3(0.95f, 0.35f, 0.2f), new Vector3(0.04f, 0.7f, 0.04f), metal);
-            Cube("Trolley leg B", room.transform, new Vector3(1.35f, 0.35f, 0.5f), new Vector3(0.04f, 0.7f, 0.04f), metal);
-            Cube("Anesthesia cart", room.transform, new Vector3(-1.35f, 0.7f, -0.4f), new Vector3(0.5f, 1.2f, 0.42f), plastic);
-            Cube("Monitor", room.transform, new Vector3(-1.15f, 1.55f, -0.15f), new Vector3(0.42f, 0.28f, 0.06f), metal);
-            Cube("Monitor screen", room.transform, new Vector3(-1.15f, 1.55f, -0.12f), new Vector3(0.38f, 0.24f, 0.01f), screen);
-            Cube("Cabinet", room.transform, new Vector3(3.4f, 0.9f, -2.4f), new Vector3(0.9f, 1.8f, 1.4f), wall);
-            Cube("Work surface", room.transform, new Vector3(2.4f, 0.9f, -3.4f), new Vector3(1.8f, 0.06f, 0.55f), steel);
-            Cube("Boom arm", room.transform, new Vector3(0.2f, 2.55f, 0.1f), new Vector3(1.8f, 0.05f, 0.05f), metal);
-            DressEmergencyBay(
-                room.transform, metal, steel, plastic, rubber, teal, yellow,
-                crashRed, oxygen, linen, gloveBlue, drape, exitGlow
+            CreateCeilingEquipment(room.transform, metal, steel, plastic, rubber, screen, ceilingGlow);
+            CreateInstrumentTrolley(room.transform, steel, metal, scrubGreen);
+            CreateAnesthesiaCart(room.transform, crashRed, steel, rubber, plastic, oxygen);
+            CreateRoomDetails(
+                room.transform, metal, steel, plastic, scrubGreen, warmTrim,
+                oxygen, linen, gloveBlue, drape, exitGlow
             );
             return room;
         }
 
-        private static void DressEmergencyBay(
-            Transform room, Material metal, Material steel, Material plastic,
-            Material rubber, Material teal, Material yellow, Material crashRed,
-            Material oxygen, Material linen, Material gloveBlue, Material drape,
-            Material exitGlow
+        private static void CreateCabinetWall(
+            Transform room, Material cabinetBlue, Material steel,
+            Material plastic, Material warmTrim
         )
         {
-            Cube("Crash cart body", room, new Vector3(-2.35f, 0.62f, 1.15f), new Vector3(0.48f, 1.05f, 0.62f), crashRed);
-            Cube("Crash cart stripe", room, new Vector3(-2.35f, 1.08f, 1.15f), new Vector3(0.50f, 0.04f, 0.64f), yellow);
-            Cube("Crash drawer 1", room, new Vector3(-2.10f, 0.88f, 1.15f), new Vector3(0.02f, 0.12f, 0.52f), steel);
-            Cube("Crash drawer 2", room, new Vector3(-2.10f, 0.68f, 1.15f), new Vector3(0.02f, 0.12f, 0.52f), steel);
-            Cube("Crash drawer 3", room, new Vector3(-2.10f, 0.48f, 1.15f), new Vector3(0.02f, 0.12f, 0.52f), yellow);
-            Cube("Defibrillator", room, new Vector3(-2.35f, 1.22f, 1.15f), new Vector3(0.28f, 0.12f, 0.36f), rubber);
-            Cube("Defib paddle L", room, new Vector3(-2.46f, 1.30f, 1.02f), new Vector3(0.08f, 0.04f, 0.12f), yellow);
-            Cube("Defib paddle R", room, new Vector3(-2.24f, 1.30f, 1.28f), new Vector3(0.08f, 0.04f, 0.12f), yellow);
+            Cube("Lower cabinet carcass", room, new Vector3(1.95f, 0.46f, -3.72f), new Vector3(3.65f, 0.82f, 0.46f), cabinetBlue);
+            Cube("Countertop", room, new Vector3(1.95f, 0.91f, -3.60f), new Vector3(3.85f, 0.08f, 0.70f), steel);
+            for (var index = 0; index < 5; index++)
+            {
+                var x = 0.45f + index * 0.74f;
+                Cube("Lower cabinet door " + index, room, new Vector3(x, 0.48f, -3.475f), new Vector3(0.68f, 0.70f, 0.025f), cabinetBlue);
+                Cube("Lower cabinet handle " + index, room, new Vector3(x + 0.22f, 0.53f, -3.445f), new Vector3(0.025f, 0.20f, 0.018f), steel);
+                Cube("Upper cabinet " + index, room, new Vector3(x, 1.78f, -3.70f), new Vector3(0.68f, 0.82f, 0.48f), cabinetBlue);
+                Cube("Upper cabinet handle " + index, room, new Vector3(x + 0.22f, 1.76f, -3.445f), new Vector3(0.025f, 0.24f, 0.018f), steel);
+            }
+            Cube("Cabinet light valance", room, new Vector3(1.95f, 1.31f, -3.43f), new Vector3(3.75f, 0.055f, 0.05f), warmTrim);
+            Cube("Backsplash", room, new Vector3(1.95f, 1.10f, -3.92f), new Vector3(3.75f, 0.32f, 0.03f), plastic);
+        }
 
-            Capsule(
-                "IV pole", room, new Vector3(-1.85f, 1.15f, 0.55f),
-                new Vector3(0.03f, 1.05f, 0.03f), Quaternion.identity, steel
-            );
-            Cube("IV hook", room, new Vector3(-1.85f, 2.18f, 0.55f), new Vector3(0.28f, 0.02f, 0.02f), steel);
-            Cube("IV bag", room, new Vector3(-1.72f, 1.92f, 0.55f), new Vector3(0.10f, 0.22f, 0.04f), linen);
-            Cube("IV drip", room, new Vector3(-1.72f, 1.78f, 0.55f), new Vector3(0.03f, 0.06f, 0.03f), oxygen);
+        private static void CreateCeilingEquipment(
+            Transform room, Material metal, Material steel, Material plastic,
+            Material rubber, Material screen, Material ceilingGlow
+        )
+        {
+            // Every suspended object has an explicit ceiling mount, drop post,
+            // arm, and joint so no equipment reads as floating.
+            Capsule("Light ceiling drop", room, new Vector3(0.25f, 2.74f, 0.22f), new Vector3(0.055f, 0.28f, 0.055f), Quaternion.identity, steel);
+            Sphere("Light boom joint", room, new Vector3(0.25f, 2.50f, 0.22f), Vector3.one * 0.16f, metal);
+            Cube("Light boom arm A", room, new Vector3(-0.12f, 2.48f, 0.22f), new Vector3(0.74f, 0.055f, 0.055f), steel);
+            Sphere("Light elbow A", room, new Vector3(-0.49f, 2.48f, 0.22f), Vector3.one * 0.13f, metal);
+            Cube("Light boom arm B", room, new Vector3(-0.49f, 2.30f, 0.08f), new Vector3(0.055f, 0.36f, 0.33f), steel);
+            Cylinder("Surgical lamp housing", room, new Vector3(-0.49f, 2.10f, -0.08f), new Vector3(0.58f, 0.055f, 0.58f), Quaternion.identity, steel);
+            Cylinder("Surgical lamp lens", room, new Vector3(-0.49f, 2.055f, -0.08f), new Vector3(0.48f, 0.012f, 0.48f), Quaternion.identity, ceilingGlow);
+            Sphere("Lamp handle", room, new Vector3(-0.49f, 1.99f, -0.08f), Vector3.one * 0.09f, rubber);
 
-            Cube("Curtain rail", room, new Vector3(2.35f, 2.42f, 2.35f), new Vector3(2.4f, 0.03f, 0.04f), metal);
-            var curtain = ClothPanel(
-                "Privacy curtain", room, new Vector3(2.35f, 1.55f, 2.35f),
-                new Vector2(2.2f, 1.7f), 0.05f, drape, 1.4f
-            );
-            curtain.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            Capsule("Monitor ceiling drop", room, new Vector3(-1.35f, 2.68f, -0.75f), new Vector3(0.045f, 0.34f, 0.045f), Quaternion.identity, steel);
+            Sphere("Monitor boom joint", room, new Vector3(-1.35f, 2.38f, -0.75f), Vector3.one * 0.13f, metal);
+            Cube("Monitor boom arm", room, new Vector3(-1.05f, 2.37f, -0.75f), new Vector3(0.60f, 0.05f, 0.05f), steel);
+            Capsule("Monitor support", room, new Vector3(-0.75f, 2.08f, -0.75f), new Vector3(0.035f, 0.30f, 0.035f), Quaternion.identity, steel);
+            Cube("Patient monitor case", room, new Vector3(-0.75f, 1.78f, -0.68f), new Vector3(0.58f, 0.40f, 0.10f), plastic);
+            Cube("Patient monitor bezel", room, new Vector3(-0.75f, 1.80f, -0.62f), new Vector3(0.51f, 0.32f, 0.025f), rubber);
+            Cube("Patient monitor display", room, new Vector3(-0.75f, 1.80f, -0.603f), new Vector3(0.46f, 0.27f, 0.009f), screen);
+            Cube("ECG trace", room, new Vector3(-0.82f, 1.84f, -0.596f), new Vector3(0.27f, 0.012f, 0.005f), ceilingGlow);
+            Cube("Monitor controls", room, new Vector3(-0.52f, 1.66f, -0.595f), new Vector3(0.06f, 0.025f, 0.008f), steel);
+        }
 
-            Cube("Biohazard bin", room, new Vector3(1.55f, 0.28f, -0.55f), new Vector3(0.28f, 0.42f, 0.28f), crashRed);
-            Cube("Biohazard lid", room, new Vector3(1.55f, 0.50f, -0.55f), new Vector3(0.30f, 0.04f, 0.30f), yellow);
-            Cube("Sharps container", room, new Vector3(1.42f, 0.86f, 0.18f), new Vector3(0.12f, 0.18f, 0.10f), yellow);
-            Cube("Sharps lid", room, new Vector3(1.42f, 0.96f, 0.18f), new Vector3(0.13f, 0.02f, 0.11f), rubber);
+        private static void CreateInstrumentTrolley(
+            Transform room, Material steel, Material metal, Material accent
+        )
+        {
+            Cube("Instrument trolley tray", room, new Vector3(1.18f, 0.82f, 0.42f), new Vector3(0.72f, 0.05f, 0.48f), steel);
+            Cube("Instrument trolley shelf", room, new Vector3(1.18f, 0.34f, 0.42f), new Vector3(0.62f, 0.035f, 0.40f), metal);
+            foreach (var x in new[] { 0.91f, 1.45f })
+            {
+                foreach (var z in new[] { 0.24f, 0.60f })
+                {
+                    Capsule("Trolley leg", room, new Vector3(x, 0.43f, z), new Vector3(0.025f, 0.39f, 0.025f), Quaternion.identity, steel);
+                    Sphere("Trolley caster", room, new Vector3(x, 0.10f, z), Vector3.one * 0.09f, metal);
+                }
+            }
+            Cube("Sterile tray liner", room, new Vector3(1.18f, 0.851f, 0.42f), new Vector3(0.64f, 0.012f, 0.40f), accent);
+        }
 
-            Cube("Linen hamper", room, new Vector3(2.85f, 0.38f, 0.85f), new Vector3(0.42f, 0.62f, 0.42f), teal);
-            Cube("Linen bag", room, new Vector3(2.85f, 0.62f, 0.85f), new Vector3(0.38f, 0.22f, 0.38f), linen);
+        private static void CreateAnesthesiaCart(
+            Transform room, Material crashRed, Material steel, Material rubber,
+            Material plastic, Material oxygen
+        )
+        {
+            Cube("Anesthesia cart body", room, new Vector3(-1.85f, 0.63f, 0.40f), new Vector3(0.62f, 1.08f, 0.58f), crashRed);
+            Cube("Anesthesia cart top", room, new Vector3(-1.85f, 1.19f, 0.40f), new Vector3(0.68f, 0.055f, 0.64f), steel);
+            for (var index = 0; index < 4; index++)
+            {
+                Cube("Cart drawer " + index, room, new Vector3(-1.52f, 0.94f - index * 0.21f, 0.40f), new Vector3(0.025f, 0.15f, 0.48f), plastic);
+                Cube("Cart handle " + index, room, new Vector3(-1.49f, 0.94f - index * 0.21f, 0.40f), new Vector3(0.018f, 0.035f, 0.22f), steel);
+            }
+            foreach (var z in new[] { 0.18f, 0.62f })
+            {
+                Sphere("Cart caster", room, new Vector3(-1.85f, 0.08f, z), Vector3.one * 0.10f, rubber);
+            }
+            Cube("Ventilator module", room, new Vector3(-1.85f, 1.34f, 0.42f), new Vector3(0.42f, 0.22f, 0.36f), plastic);
+            Sphere("Oxygen control", room, new Vector3(-1.64f, 1.34f, 0.31f), Vector3.one * 0.07f, oxygen);
+        }
 
-            Cube("Glove box blue", room, new Vector3(-3.82f, 1.22f, 0.55f), new Vector3(0.08f, 0.12f, 0.22f), gloveBlue);
-            Cube("Glove box yellow", room, new Vector3(-3.82f, 1.22f, 0.80f), new Vector3(0.08f, 0.12f, 0.22f), yellow);
-            Cube("Glove box white", room, new Vector3(-3.82f, 1.22f, 0.30f), new Vector3(0.08f, 0.12f, 0.22f), plastic);
+        private static void CreateRoomDetails(
+            Transform room, Material metal, Material steel, Material plastic,
+            Material scrubGreen, Material warmTrim, Material oxygen,
+            Material linen, Material gloveBlue, Material drape, Material exitGlow
+        )
+        {
+            Capsule("IV pole", room, new Vector3(-1.30f, 1.13f, 0.78f), new Vector3(0.025f, 1.04f, 0.025f), Quaternion.identity, steel);
+            Cube("IV pole base", room, new Vector3(-1.30f, 0.09f, 0.78f), new Vector3(0.42f, 0.025f, 0.18f), steel);
+            Cube("IV hook", room, new Vector3(-1.30f, 2.16f, 0.78f), new Vector3(0.26f, 0.02f, 0.02f), steel);
+            Cube("IV bag", room, new Vector3(-1.19f, 1.94f, 0.78f), new Vector3(0.10f, 0.25f, 0.04f), linen);
+            Cube("IV drip chamber", room, new Vector3(-1.19f, 1.77f, 0.78f), new Vector3(0.025f, 0.06f, 0.025f), oxygen);
 
-            Cube("Stool base", room, new Vector3(0.95f, 0.08f, -0.55f), new Vector3(0.32f, 0.04f, 0.32f), steel);
-            Capsule(
-                "Stool column", room, new Vector3(0.95f, 0.28f, -0.55f),
-                new Vector3(0.05f, 0.22f, 0.05f), Quaternion.identity, metal
-            );
-            Cube("Stool seat", room, new Vector3(0.95f, 0.50f, -0.55f), new Vector3(0.34f, 0.05f, 0.34f), teal);
+            Cube("Privacy rail", room, new Vector3(-2.75f, 2.52f, 0.25f), new Vector3(0.04f, 0.04f, 3.0f), metal);
+            var curtain = ClothPanel("Privacy curtain", room, new Vector3(-2.75f, 1.62f, 0.25f), new Vector2(2.75f, 1.72f), 0.035f, drape, 1.2f);
+            curtain.transform.localRotation = Quaternion.Euler(90f, 0f, 90f);
 
-            Cube("Extinguisher", room, new Vector3(3.78f, 0.72f, 2.6f), new Vector3(0.12f, 0.55f, 0.12f), crashRed);
-            Cube("Extinguisher band", room, new Vector3(3.78f, 0.92f, 2.6f), new Vector3(0.13f, 0.04f, 0.13f), yellow);
-            Cube("Extinguisher head", room, new Vector3(3.78f, 1.02f, 2.6f), new Vector3(0.08f, 0.08f, 0.08f), steel);
+            Cube("Glove dispenser", room, new Vector3(-3.91f, 1.45f, -0.55f), new Vector3(0.035f, 0.38f, 0.68f), plastic);
+            Cube("Glove box blue", room, new Vector3(-3.86f, 1.58f, -0.72f), new Vector3(0.06f, 0.14f, 0.25f), gloveBlue);
+            Cube("Glove box green", room, new Vector3(-3.86f, 1.58f, -0.40f), new Vector3(0.06f, 0.14f, 0.25f), scrubGreen);
+            Cube("Gas panel", room, new Vector3(-3.91f, 1.05f, 0.95f), new Vector3(0.035f, 0.28f, 0.72f), plastic);
+            Sphere("Oxygen outlet", room, new Vector3(-3.85f, 1.10f, 0.78f), Vector3.one * 0.07f, oxygen);
+            Sphere("Vacuum outlet", room, new Vector3(-3.85f, 1.10f, 1.02f), Vector3.one * 0.07f, warmTrim);
 
-            Cube("Exit sign", room, new Vector3(-0.1f, 2.62f, 3.88f), new Vector3(0.42f, 0.16f, 0.04f), exitGlow);
-            Cube("Chart board", room, new Vector3(3.88f, 1.55f, -0.4f), new Vector3(0.03f, 0.55f, 0.70f), plastic);
-            Cube("Chart stripe", room, new Vector3(3.86f, 1.78f, -0.4f), new Vector3(0.02f, 0.06f, 0.70f), teal);
-            Cube("Supply bin teal", room, new Vector3(2.55f, 1.02f, -3.22f), new Vector3(0.28f, 0.16f, 0.22f), teal);
-            Cube("Supply bin yellow", room, new Vector3(2.90f, 1.02f, -3.22f), new Vector3(0.28f, 0.16f, 0.22f), yellow);
-            Cube("Lamp disc A", room, new Vector3(0.35f, 2.48f, 0.22f), new Vector3(0.42f, 0.04f, 0.42f), steel);
-            Cube("Lamp disc B", room, new Vector3(-0.15f, 2.48f, 0.05f), new Vector3(0.34f, 0.04f, 0.34f), metal);
-            Cube("Cart accent", room, new Vector3(-1.35f, 1.18f, -0.4f), new Vector3(0.52f, 0.04f, 0.44f), teal);
+            Cube("Exit sign", room, new Vector3(0f, 2.66f, 3.88f), new Vector3(0.48f, 0.17f, 0.04f), exitGlow);
+            Cube("Wall clock", room, new Vector3(-3.90f, 2.12f, -1.60f), new Vector3(0.035f, 0.40f, 0.40f), plastic);
+            Cube("Stool base", room, new Vector3(0.92f, 0.09f, -0.62f), new Vector3(0.34f, 0.04f, 0.34f), steel);
+            Capsule("Stool column", room, new Vector3(0.92f, 0.29f, -0.62f), new Vector3(0.045f, 0.22f, 0.045f), Quaternion.identity, metal);
+            Cylinder("Stool seat", room, new Vector3(0.92f, 0.52f, -0.62f), new Vector3(0.34f, 0.055f, 0.34f), Quaternion.identity, scrubGreen);
         }
 
         private static void CreateModestyCover(Transform table, Material drape)
@@ -449,37 +498,39 @@ namespace SurgePrep.Editor
             var key = new GameObject("Surgical lamp A");
             var keyLight = key.AddComponent<Light>();
             keyLight.type = LightType.Spot;
-            keyLight.intensity = 1.42f;
+            keyLight.intensity = 1.82f;
             keyLight.range = 6f;
-            keyLight.spotAngle = 42f;
+            keyLight.spotAngle = 46f;
             keyLight.color = new Color(1f, 0.96f, 0.88f);
             keyLight.shadows = LightShadows.Soft;
-            key.transform.position = window.position + new Vector3(0.15f, 1.35f, 0.35f);
+            // Match the visible surgical-lamp lens so light never appears to
+            // come from an unsupported or floating source.
+            key.transform.position = new Vector3(-0.49f, 2.04f, -0.08f);
             key.transform.LookAt(window.position);
 
             var lampB = new GameObject("Surgical lamp B");
             var fill = lampB.AddComponent<Light>();
             fill.type = LightType.Spot;
-            fill.intensity = 0.88f;
+            fill.intensity = 1.10f;
             fill.range = 6f;
             fill.spotAngle = 48f;
             fill.color = new Color(0.90f, 0.95f, 1f);
             fill.shadows = LightShadows.Soft;
-            lampB.transform.position = window.position + new Vector3(-0.45f, 1.4f, 0.2f);
+            lampB.transform.position = new Vector3(1.45f, 2.72f, 0.80f);
             lampB.transform.LookAt(window.position);
 
             var ambient = new GameObject("OR ambient");
             var ambientLight = ambient.AddComponent<Light>();
             ambientLight.type = LightType.Directional;
-            ambientLight.intensity = 0.28f;
-            ambientLight.color = new Color(0.86f, 0.88f, 0.90f);
+            ambientLight.intensity = 0.42f;
+            ambientLight.color = new Color(0.91f, 0.92f, 0.93f);
 
             var wash = new GameObject("Bay wash");
             var washLight = wash.AddComponent<Light>();
             washLight.type = LightType.Point;
-            washLight.intensity = 0.55f;
+            washLight.intensity = 0.88f;
             washLight.range = 8f;
-            washLight.color = new Color(0.72f, 0.88f, 0.86f);
+            washLight.color = new Color(0.86f, 0.91f, 0.92f);
             washLight.shadows = LightShadows.None;
             wash.transform.position = new Vector3(0.4f, 2.4f, 1.2f);
             ambientLight.shadows = LightShadows.Soft;
@@ -656,6 +707,30 @@ namespace SurgePrep.Editor
                 UnityEngine.Object.DestroyImmediate(collider);
             }
             return capsule;
+        }
+
+        private static GameObject Cylinder(
+            string name,
+            Transform parent,
+            Vector3 position,
+            Vector3 scale,
+            Quaternion rotation,
+            Material material
+        )
+        {
+            var cylinder = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            cylinder.name = name;
+            cylinder.transform.SetParent(parent, false);
+            cylinder.transform.localPosition = position;
+            cylinder.transform.localRotation = rotation;
+            cylinder.transform.localScale = scale;
+            cylinder.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var collider = cylinder.GetComponent<Collider>();
+            if (collider != null)
+            {
+                UnityEngine.Object.DestroyImmediate(collider);
+            }
+            return cylinder;
         }
 
         private static GameObject Sphere(

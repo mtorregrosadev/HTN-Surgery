@@ -130,9 +130,12 @@ namespace SurgePrep
         public void SetRoomView(bool snap)
         {
             targetFocusPoint = roomFocus != null ? roomFocus.position : new Vector3(0f, 0.95f, 0f);
-            targetDistance = 3.4f;
-            targetYaw = 28f;
-            targetPitch = 28f;
+            // Look from the foot of the table toward the cabinet wall. This keeps
+            // the ceiling booms above the sightline instead of clipping through
+            // the camera and presents the room like a staffed teaching theatre.
+            targetDistance = 3.25f;
+            targetYaw = 154f;
+            targetPitch = 20f;
             if (snap) Snap();
         }
 

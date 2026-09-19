@@ -127,6 +127,7 @@ class TrainingService:
         consistency_score = max(0.0, 100.0 - force_consistency * 100.0)
         illustrative_score = (
             targeting_score * 0.5 + controlled_percent * 0.3 + consistency_score * 0.2
+            if forces else 0.0
         )
         return SessionMetrics(
             sample_count=len(samples),

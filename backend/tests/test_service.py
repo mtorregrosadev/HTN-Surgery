@@ -53,3 +53,24 @@ async def test_session_round_trip_and_metrics():
     assert result.metrics.controlled_contact_percent == 50.0
     assert result.metrics.illustrative_score_percent == pytest.approx(67.09430585)
     assert len(await service.replay(session.session_id)) == 3
+
+
+def test_no_contact_receives_no_illustrative_score():
+    sample = ToolSample.model_validate(
+        {
+            "sessionId": "session-1",
+            "toolId": "stylus-1",
+            "deviceId": "esp32-1",
+            "calibrationId": "cal-1",
+            "sequence": 0,
+            "timestampMs": 0,
+            "positionMm": {"x": 0, "y": 10, "z": 0},
+            "orientation": {"qx": 0, "qy": 0, "qz": 0, "qw": 1},
+            "forceN": 0,
+            "contact": False,
+        }
+    )
+
+    metrics = TrainingService.calculate_metrics([sample])
+
+    assert metrics.illustrative_score_percent == 0

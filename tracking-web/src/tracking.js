@@ -25,14 +25,26 @@ export function markerPose2d(marker, timestampMs) {
   const y = corners.reduce((sum, corner) => sum + corner.y, 0) / 4;
   const dx = corners[1].x - corners[0].x;
   const dy = corners[1].y - corners[0].y;
+  const edgeLengths = corners.map((corner, index) => {
+    const next = corners[(index + 1) % 4];
+    return Math.hypot(next.x - corner.x, next.y - corner.y);
+  });
   return {
     markerId: marker.id,
     x,
     y,
     angleDeg: Math.atan2(dy, dx) * 180 / Math.PI,
+    sizePx: edgeLengths.reduce((sum, length) => sum + length, 0) / 4,
     corners,
     timestampMs,
   };
+}
+
+export function estimatedDepthMm(reference, markerSizePx) {
+  if (!reference || !Number.isFinite(markerSizePx) || markerSizePx <= 0) return null;
+  const { distanceMm, sizePx } = reference;
+  if (!Number.isFinite(distanceMm) || distanceMm <= 0 || !Number.isFinite(sizePx) || sizePx <= 0) return null;
+  return distanceMm * sizePx / markerSizePx;
 }
 
 export function movementSpeed(previous, current) {

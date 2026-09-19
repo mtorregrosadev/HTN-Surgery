@@ -86,8 +86,10 @@ authoritative. See `backend/README.md` for setup and controller flow.
 
 `tracking-web/` contains a browser-only camera study that detects a printed
 ArUco marker on a blunt training tool and displays its 2D path, image position,
-screen angle, and approximate speed. It is separate from the integrated
-controller/API/SOFA loop and does not claim calibrated 3D tool pose. See
+screen angle, approximate speed, and reference-based Z distance estimate. It
+can also analyze a local video or run a synthetic marker demo when no camera is
+attached. It is separate from the integrated controller/API/SOFA loop and does
+not claim calibrated 3D tool pose. See
 `tracking-web/README.md` for setup, limitations, and the path to a controller-owned
 camera tracker and later AR anatomy alignment.
 

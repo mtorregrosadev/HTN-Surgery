@@ -17,7 +17,7 @@
       <main>
         <section class="intro">
           <div><p class="eyebrow">01 / MOTION STUDY</p><h1>Make every<br /><em>move visible.</em></h1><p class="lead">Attach an ArUco marker to a blunt training tool. Watch its path appear live through your camera.</p></div>
-          <div class="intro-note"><span class="note-icon">◎</span><p><strong>2D tracking today.</strong><br />3D position and AR alignment will follow camera and workspace calibration.</p></div>
+          <div class="intro-note"><span class="note-icon">◎</span><p><strong>2D motion + depth estimate.</strong><br />Full 3D pose and AR alignment will follow camera and workspace calibration.</p></div>
         </section>
 
         <section class="workspace" aria-label="Tracking workspace">
@@ -30,13 +30,14 @@
               <div class="camera-corner top-left"></div><div class="camera-corner top-right"></div><div class="camera-corner bottom-left"></div><div class="camera-corner bottom-right"></div>
               <span class="camera-label">LIVE / ARUCO MIP 36h12</span>
             </div>
-            <div class="camera-controls"><button id="camera-button" class="primary-button" type="button">Start camera <span>↗</span></button><button id="clear-button" class="secondary-button" type="button">Clear path</button><span id="camera-error" class="camera-error" role="alert"></span></div>
+            <div class="camera-controls"><button id="camera-button" class="primary-button" type="button">Start camera <span>↗</span></button><button id="video-button" class="secondary-button" type="button">Open video file</button><input id="video-file" type="file" accept="video/*" hidden /><button id="demo-button" class="secondary-button" type="button">Try synthetic demo</button><button id="clear-button" class="secondary-button" type="button">Clear path</button><span id="camera-error" class="camera-error" role="alert"></span></div>
           </div>
 
           <aside class="data-panel">
             <div class="panel-heading"><div><span class="section-number">02</span><h2>Live readout</h2></div><span class="live-dot"></span></div>
             <div class="signal-card"><span class="micro-label">MARKER STATUS</span><strong id="tracking-state">Waiting for camera</strong><span id="tracking-hint">No reading yet.</span></div>
-            <div class="metric-grid"><div class="metric"><span class="micro-label">POSITION X</span><strong id="position-x">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">POSITION Y</span><strong id="position-y">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">ORIENTATION</span><strong id="angle">—</strong><small>degrees on screen</small></div><div class="metric"><span class="micro-label">SPEED</span><strong id="speed">—</strong><small>px / second</small></div></div>
+            <div class="metric-grid"><div class="metric"><span class="micro-label">POSITION X</span><strong id="position-x">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">POSITION Y</span><strong id="position-y">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">Z DISTANCE</span><strong id="position-z">—</strong><small>approx. mm from camera</small></div><div class="metric"><span class="micro-label">MARKER SIZE</span><strong id="marker-size">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">ORIENTATION</span><strong id="angle">—</strong><small>degrees on screen</small></div><div class="metric"><span class="micro-label">SPEED</span><strong id="speed">—</strong><small>px / second</small></div></div>
+            <div class="depth-card"><label for="reference-distance">DEPTH REFERENCE</label><div class="depth-controls"><input id="reference-distance" type="number" min="50" max="5000" step="1" inputmode="numeric" placeholder="Distance in mm" /><button id="depth-button" type="button">Set reference</button></div><p id="depth-hint">Measure camera-to-marker distance, enter it here, then set the reference while marker #0 is visible. Keep its face toward the camera.</p></div>
             <div class="readout-footer"><span>MARKER <strong id="marker-id">—</strong></span><span>FRAMES <strong id="frame-count">0</strong></span></div>
             <div class="preview-card"><div><span class="micro-label">PATH</span><span id="path-count">0 points</span></div><canvas id="path-preview" width="320" height="110" aria-label="2D path"></canvas></div>
           </aside>

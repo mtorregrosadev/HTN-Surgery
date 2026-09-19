@@ -1,5 +1,5 @@
 import './style.css';
-import { appendPath, createDetector, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
+import { appendPath, createDetector, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('camera');
@@ -12,12 +12,17 @@ const previewContext = preview.getContext('2d');
 const detector = createDetector();
 
 let stream = null;
+let fileUrl = null;
+let source = null;
+let demoTimer = null;
 let animationFrame = 0;
 let lastProcessedMs = 0;
 let previousPose = null;
 let path = [];
 let frameCount = 0;
 let missingFrames = 0;
+let currentPose = null;
+let depthReference = null;
 
 function setStatus(label, kind = '') {
   $('status-pill').textContent = label;
@@ -30,7 +35,7 @@ function setTracking(message, hint) {
 }
 
 function clearMeasurements() {
-  for (const id of ['position-x', 'position-y', 'angle', 'speed', 'marker-id']) $(id).textContent = '—';
+  for (const id of ['position-x', 'position-y', 'position-z', 'marker-size', 'angle', 'speed', 'marker-id']) $(id).textContent = '—';
 }
 
 function drawPath(context, points, scaleX, scaleY) {
@@ -84,7 +89,7 @@ function drawOverlay(pose) {
 
 function processFrame(timestampMs) {
   animationFrame = requestAnimationFrame(processFrame);
-  if (!stream || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || timestampMs - lastProcessedMs < 66) return;
+  if (!source || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || timestampMs - lastProcessedMs < 66) return;
   lastProcessedMs = timestampMs;
   processingContext.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
   const pixels = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
@@ -93,6 +98,7 @@ function processFrame(timestampMs) {
   $('frame-count').textContent = String(frameCount);
 
   const pose = markerPose2d(marker, timestampMs);
+  currentPose = pose;
   if (pose) {
     missingFrames = 0;
     const speed = movementSpeed(previousPose, pose);
@@ -102,6 +108,9 @@ function processFrame(timestampMs) {
     setTracking('Motion detected', 'Marker #0 is visible to the camera.');
     $('position-x').textContent = Math.round(pose.x);
     $('position-y').textContent = Math.round(pose.y);
+    const zMm = estimatedDepthMm(depthReference, pose.sizePx);
+    $('position-z').textContent = zMm == null ? '—' : Math.round(zMm);
+    $('marker-size').textContent = Math.round(pose.sizePx);
     $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
     $('speed').textContent = speed == null ? '—' : Math.round(speed);
     $('marker-id').textContent = `#${pose.markerId}`;
@@ -118,20 +127,109 @@ function processFrame(timestampMs) {
   drawPreview();
 }
 
-function stopCamera() {
+function stopSource() {
   cancelAnimationFrame(animationFrame);
   animationFrame = 0;
   stream?.getTracks().forEach((track) => track.stop());
   stream = null;
+  if (demoTimer) clearInterval(demoTimer);
+  demoTimer = null;
+  video.pause();
   video.srcObject = null;
+  video.removeAttribute('src');
+  video.load();
+  if (fileUrl) URL.revokeObjectURL(fileUrl);
+  fileUrl = null;
+  source = null;
+  $('video-file').value = '';
   previousPose = null;
+  currentPose = null;
+  depthReference = null;
   missingFrames = 0;
   overlayContext.clearRect(0, 0, overlay.width, overlay.height);
   $('empty-state').hidden = false;
   $('camera-button').innerHTML = 'Start camera <span>↗</span>';
+  $('video-button').textContent = 'Open video file';
+  $('demo-button').textContent = 'Try synthetic demo';
+  $('depth-hint').textContent = 'Measure camera-to-marker distance, enter it here, then set the reference while marker #0 is visible. Keep its face toward the camera.';
   setStatus('CAMERA OFF');
   setTracking('Waiting for camera', 'No reading yet.');
   clearMeasurements();
+}
+
+async function startDemo() {
+  if (!HTMLCanvasElement.prototype.captureStream) {
+    $('camera-error').textContent = 'This browser cannot run the synthetic video demo.';
+    return;
+  }
+  stopSource();
+  $('camera-error').textContent = '';
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const context = canvas.getContext('2d');
+  const markerImage = new Image();
+  markerImage.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markerSvg())}`;
+  try {
+    await markerImage.decode();
+    let frame = 0;
+    const render = () => {
+      frame += 1;
+      context.fillStyle = '#dce8e3';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const x = 320 + Math.sin(frame / 24) * 130;
+      const y = 240 + Math.cos(frame / 37) * 75;
+      const side = 130 + Math.sin(frame / 31) * 32;
+      context.save();
+      context.translate(x, y);
+      context.rotate(Math.sin(frame / 39) * 0.2);
+      context.drawImage(markerImage, -side / 2, -side / 2, side, side);
+      context.restore();
+    };
+    render();
+    demoTimer = setInterval(render, 65);
+    stream = canvas.captureStream(15);
+    video.srcObject = stream;
+    await video.play();
+    startProcessing('demo');
+  } catch (error) {
+    stopSource();
+    $('camera-error').textContent = `Could not start the demo: ${error.message}`;
+  }
+}
+
+async function startVideo() {
+  const file = $('video-file').files?.[0];
+  if (!file) return;
+  stopSource();
+  $('camera-error').textContent = '';
+  fileUrl = URL.createObjectURL(file);
+  video.src = fileUrl;
+  video.loop = true;
+  try {
+    await video.play();
+    startProcessing('file');
+  } catch (error) {
+    stopSource();
+    $('camera-error').textContent = `Could not play the video: ${error.message}`;
+  }
+}
+
+function startProcessing(kind) {
+  source = kind;
+  processingCanvas.width = Math.min(video.videoWidth, 640);
+  processingCanvas.height = Math.round(processingCanvas.width * video.videoHeight / video.videoWidth);
+  overlay.width = processingCanvas.width;
+  overlay.height = processingCanvas.height;
+  $('camera-stage').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+  $('empty-state').hidden = true;
+  $('camera-button').innerHTML = kind === 'camera' ? 'Stop camera <span>■</span>' : 'Start camera <span>↗</span>';
+  $('video-button').textContent = kind === 'file' ? 'Stop video' : 'Open video file';
+  $('demo-button').textContent = kind === 'demo' ? 'Stop demo' : 'Try synthetic demo';
+  setStatus('LOOKING FOR MARKER', 'searching');
+  setTracking('Looking for marker', kind === 'file' ? 'Play a video that shows marker #0.' : kind === 'demo' ? 'Detecting a generated moving marker.' : 'Show marker #0 to the camera.');
+  lastProcessedMs = 0;
+  animationFrame = requestAnimationFrame(processFrame);
 }
 
 async function startCamera() {
@@ -141,28 +239,45 @@ async function startCamera() {
     return;
   }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment', width: { ideal: 960 }, height: { ideal: 720 } } });
+    stopSource();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment', width: { ideal: 960 }, height: { ideal: 720 } } });
+    } catch (error) {
+      if (error.name !== 'NotFoundError') throw error;
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+    }
     video.srcObject = stream;
     await video.play();
-    processingCanvas.width = Math.min(video.videoWidth, 640);
-    processingCanvas.height = Math.round(processingCanvas.width * video.videoHeight / video.videoWidth);
-    overlay.width = processingCanvas.width;
-    overlay.height = processingCanvas.height;
-    $('camera-stage').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
-    $('empty-state').hidden = true;
-    $('camera-button').innerHTML = 'Stop camera <span>■</span>';
-    setStatus('LOOKING FOR MARKER', 'searching');
-    setTracking('Looking for marker', 'Show marker #0 to the camera.');
-    lastProcessedMs = 0;
-    animationFrame = requestAnimationFrame(processFrame);
-    stream.getVideoTracks()[0].addEventListener('ended', stopCamera, { once: true });
+    startProcessing('camera');
+    stream.getVideoTracks()[0].addEventListener('ended', stopSource, { once: true });
   } catch (error) {
-    stopCamera();
-    $('camera-error').textContent = error.name === 'NotAllowedError' ? 'Allow camera access in your browser.' : `Could not open the camera: ${error.message}`;
+    stopSource();
+    $('camera-error').textContent = error.name === 'NotAllowedError'
+      ? 'Allow camera access in your browser.'
+      : error.name === 'NotFoundError'
+        ? 'No camera is available to this browser. Connect a webcam or open a recorded video.'
+        : `Could not open the camera: ${error.message}`;
+    setStatus(error.name === 'NotFoundError' ? 'NO CAMERA FOUND' : 'CAMERA ERROR');
+    setTracking(error.name === 'NotFoundError' ? 'No camera available' : 'Camera could not start', $('camera-error').textContent);
   }
 }
 
-$('camera-button').addEventListener('click', () => stream ? stopCamera() : startCamera());
+$('camera-button').addEventListener('click', () => source === 'camera' ? stopSource() : startCamera());
+$('video-button').addEventListener('click', () => source === 'file' ? stopSource() : $('video-file').click());
+$('video-file').addEventListener('change', startVideo);
+$('demo-button').addEventListener('click', () => source === 'demo' ? stopSource() : startDemo());
+$('depth-button').addEventListener('click', () => {
+  const distanceMm = Number($('reference-distance').value);
+  if (!currentPose) {
+    $('depth-hint').textContent = 'Show marker #0 in the camera or video before setting a depth reference.';
+  } else if (!Number.isFinite(distanceMm) || distanceMm < 50 || distanceMm > 5000) {
+    $('depth-hint').textContent = 'Enter a measured camera-to-marker distance between 50 and 5000 mm.';
+  } else {
+    depthReference = { distanceMm, sizePx: currentPose.sizePx };
+    $('depth-hint').textContent = `Reference set at ${distanceMm} mm. Z is an approximate camera distance; marker tilt changes the estimate.`;
+    $('position-z').textContent = Math.round(distanceMm);
+  }
+});
 $('clear-button').addEventListener('click', () => { path = []; drawPreview(); drawOverlay(null); });
 $('marker-button').addEventListener('click', () => {
   const blob = new Blob([markerSvg()], { type: 'image/svg+xml' });
@@ -173,5 +288,5 @@ $('marker-button').addEventListener('click', () => {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
-window.addEventListener('pagehide', stopCamera);
+window.addEventListener('pagehide', stopSource);
 drawPreview();

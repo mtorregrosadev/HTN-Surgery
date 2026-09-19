@@ -12,6 +12,8 @@ npm run dev
 
 Open `http://127.0.0.1:5173/`, download marker **#0**, print it without cropping its white margin, and attach it rigidly to a blunt tool. Start the camera and keep the entire marker in view. Camera access requires the browser's permission and a secure context; localhost works for local development. Do not use the setup on people or with a clinical instrument.
 
+If the browser reports **No camera found**, connect a webcam, open the page on a device with a camera, or choose **Open video file** to analyze a local recording. **Try synthetic demo** generates a moving marker in the browser so the tracker can be checked without hardware. Neither source is uploaded.
+
 The page uses the `ARUCO_MIP_36h12` dictionary from `js-aruco2`. The download button generates the exact marker the detector expects. Other dictionaries, including OpenCV's common `DICT_4X4_50`, are **not** interchangeable with this marker.
 
 ## What the page measures
@@ -19,9 +21,10 @@ The page uses the `ARUCO_MIP_36h12` dictionary from `js-aruco2`. The download bu
 - Marker center `x` and `y` in pixels of the processed camera image, origin at top left, +X right and +Y down.
 - Rotation of the marker's top edge in screen degrees, clockwise positive because image Y points down.
 - Approximate center speed in pixels per second and a recent 2D path.
+- Approximate Z distance in millimetres **only after** entering a measured camera-to-marker reference distance and clicking **Set reference** while the marker is visible. The estimate is `reference distance × reference marker size in pixels ÷ current marker size in pixels`.
 - Detection loss, shown visibly; stale positions and speed are cleared.
 
-Processing is limited to 640 pixels wide to keep the browser responsive. This experiment performs no camera calibration, metric pose estimation, tip-offset correction, force/contact sensing, or anatomy registration. Pixels are **not millimetres**. It does not record or transmit video frames. The detector runs locally in the browser.
+Processing is limited to 640 pixels wide to keep the browser responsive. The Z estimate assumes the marker keeps the same orientation toward the camera; tilt, lens distortion, and measurement error change the result. It is **not** calibrated 3D pose, and X/Y remain image pixels. This experiment performs no camera-intrinsic calibration, tip-offset correction, force/contact sensing, or anatomy registration. It does not record or transmit video frames. The detector runs locally in the browser.
 
 ## Integration path
 

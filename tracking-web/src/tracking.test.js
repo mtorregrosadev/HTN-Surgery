@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendPath, createDetector, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
+import { appendPath, createDetector, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
 
 test('generated marker #0 is detected by the configured dictionary', () => {
   const detector = createDetector();
@@ -30,8 +30,17 @@ test('pose and speed use image coordinates and elapsed time', () => {
   assert.equal(pose.x, 20);
   assert.equal(pose.y, 30);
   assert.equal(pose.angleDeg, 0);
+  assert.equal(pose.sizePx, 20);
   assert.equal(movementSpeed(pose, { ...pose, x: 30, timestampMs: 1100 }), 100);
   assert.equal(movementSpeed(pose, { ...pose, timestampMs: 2000 }), null);
   assert.equal(appendPath([], pose).length, 1);
   assert.equal(appendPath([{ x: 20, y: 30 }], pose).length, 1);
+});
+
+test('Z estimate uses a measured reference and rejects invalid measurements', () => {
+  const reference = { distanceMm: 300, sizePx: 120 };
+  assert.equal(estimatedDepthMm(reference, 120), 300);
+  assert.equal(estimatedDepthMm(reference, 60), 600);
+  assert.equal(estimatedDepthMm(null, 120), null);
+  assert.equal(estimatedDepthMm(reference, 0), null);
 });

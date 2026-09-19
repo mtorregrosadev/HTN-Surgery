@@ -105,6 +105,11 @@ not claim calibrated 3D tool pose. See
 `tracking-web/README.md` for setup, limitations, and the path to a controller-owned
 camera tracker and later AR anatomy alignment.
 
+The [ArUco workspace plan](docs/ARUCO_WORKSPACE_PLAN.md) records the current
+Unity data path, tracking limitations, and the proposed procedure for choosing
+a physical training area, calibrating a multi-face marker tool, and validating
+its tip against the virtual workspace.
+
 ### Physical setup
 
 - Blunt plastic training stylus or spatula

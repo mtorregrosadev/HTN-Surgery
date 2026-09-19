@@ -112,7 +112,9 @@ class IncisionState:
                 bordering = [index for index in (column - 1, column) if index in self.cut_cells]
                 local_depth = max((self.depths_mm.get(index, 0.0) for index in bordering), default=0.0)
                 if row in (3, 4) and bordering:
-                    opening = min(4.5, 0.5 + local_depth * 0.7)
+                    # Visually amplify the opening while preserving measured depth.
+                    # A literal sub-millimetre gap is unreadable on a laptop display.
+                    opening = min(6.0, 1.5 + local_depth * 0.8)
                     z = (-1 if row == 3 else 1) * opening
                 distance_squared = (
                     (x - sample.position_mm.x) ** 2 + (original_z - sample.position_mm.z) ** 2
@@ -151,7 +153,7 @@ class IncisionState:
             x0 = self.minimum_x_mm + cell * self.cell_width_mm
             x1 = x0 + self.cell_width_mm
             depth = self.depths_mm.get(cell, self.cut_threshold_mm)
-            half_width = min(4.2, 0.45 + depth * 0.65)
+            half_width = min(5.8, 1.35 + depth * 0.75)
             base = len(vertices)
             vertices.extend([
                 Vector3(x=x0, y=surface_y_mm - depth * 0.6 - 0.2, z=-half_width),

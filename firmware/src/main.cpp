@@ -15,7 +15,10 @@
 
 uint8_t activePressurePin = PIN_PRESSURE_ADC; // Default to GPIO 1 for analog FSR 400/402
 int adcZeroBaseline = 0;
-int adcContactThreshold = 80;
+int contactThresholdHigh = 120;
+int contactThresholdLow = 60;
+float smoothedRaw = 0.0f;
+bool cleanOutputMode = true; // Calm, clean, non-chaotic output
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -225,15 +228,19 @@ void applyPullMode() {
 
 void calibrateAdcZero() {
   if (!pressure.isAdc) return;
+  delay(120); // Allow voltage divider to settle completely
   long sum = 0;
-  for (int i = 0; i < 20; i++) {
+  const int samples = 30;
+  for (int i = 0; i < samples; i++) {
     sum += analogRead(activePressurePin);
-    delay(5);
+    delay(4);
   }
-  adcZeroBaseline = (int)(sum / 20);
-  adcContactThreshold = adcZeroBaseline + 80;
-  Serial.printf("[FSR-402] Baseline zeroed to raw=%d (Threshold: %d on Pin %d)\n",
-                adcZeroBaseline, adcContactThreshold, activePressurePin);
+  adcZeroBaseline = (int)(sum / samples);
+  contactThresholdHigh = adcZeroBaseline + 120;
+  contactThresholdLow = adcZeroBaseline + 60;
+  smoothedRaw = (float)adcZeroBaseline;
+  Serial.printf("\n[Calibrated] FSR-402 zero baseline: %d (Active above: %d)\n\n",
+                adcZeroBaseline, contactThresholdHigh);
 }
 
 void initPressureSensor() {
@@ -256,12 +263,22 @@ void initPressureSensor() {
 bool updatePressureSensor() {
   unsigned long now = millis();
   int raw = 0;
-  bool contact = false;
+  bool contact = pressure.isContact;
 
   if (pressure.isAdc) {
     raw = analogRead(activePressurePin);
-    int delta = max(0, raw - adcZeroBaseline);
-    contact = (delta > 80);
+    // Smooth reading with exponential moving average to filter electrical noise
+    smoothedRaw = 0.70f * smoothedRaw + 0.30f * (float)raw;
+    int currentRaw = (int)smoothedRaw;
+
+    // Hysteresis: prevent jittering near boundary
+    if (!pressure.isContact && (currentRaw > contactThresholdHigh)) {
+      contact = true;
+    } else if (pressure.isContact && (currentRaw < contactThresholdLow)) {
+      contact = false;
+    }
+
+    int delta = max(0, currentRaw - adcZeroBaseline);
     int span = max(100, 4095 - adcZeroBaseline);
     pressure.forceEstimateN = contact ? ((float)delta / (float)span * 10.0f) : 0.0f;
   } else {
@@ -274,30 +291,35 @@ bool updatePressureSensor() {
   pressure.sampleCount++;
   pressure.lastSampleMs = now;
 
-  // Debounced state transition (~15ms)
+  // Debounced state transition (~20ms)
   bool stateChanged = false;
-  if (contact != pressure.isContact && (now - pressure.lastChangeMs > 15)) {
+  if (contact != pressure.isContact && (now - pressure.lastChangeMs > 20)) {
     pressure.isContact = contact;
     pressure.lastChangeMs = now;
     stateChanged = true;
 
-    // Immediate terminal event
+    // Clean, readable event notification in terminal
     if (jsonTerminal) {
-      Serial.printf("{\"event\":\"pressure_event\",\"pin\":%d,\"isAdc\":%s,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"seq\":%lu,\"timestampMs\":%lu}\n",
+      Serial.printf("{\"event\":\"%s\",\"pin\":%d,\"forceN\":%.2f,\"raw\":%d,\"timestampMs\":%lu}\n",
+                    pressure.isContact ? "contact_start" : "contact_end",
                     activePressurePin,
-                    pressure.isAdc ? "true" : "false",
-                    pressure.isContact ? "true" : "false",
-                    pressure.rawValue,
                     pressure.forceEstimateN,
-                    pressure.sampleCount,
+                    pressure.rawValue,
                     now);
+    } else if (cleanOutputMode) {
+      if (pressure.isContact) {
+        Serial.printf("\n>>> [TOUCH] Engaged (Force: %.2f N | raw: %d)\n",
+                      pressure.forceEstimateN, pressure.rawValue);
+      } else {
+        Serial.printf("--- [RELEASE] Sensor idle (0.00 N)\n\n");
+      }
     } else {
       if (pressure.isContact) {
-        Serial.printf(">>> [PRESSURE EVENT] >>> CONTACT DETECTED on Pin %d! Raw=%d | Force=%.2f N | Seq=%lu | Time=%lu ms <<<\n",
-                      activePressurePin, pressure.rawValue, pressure.forceEstimateN, pressure.sampleCount, now);
+        Serial.printf(">>> [PRESSURE EVENT] >>> CONTACT DETECTED on Pin %d! Raw=%d | Force=%.2f N <<<\n",
+                      activePressurePin, pressure.rawValue, pressure.forceEstimateN);
       } else {
-        Serial.printf("--- [PRESSURE EVENT] --- Contact RELEASED on Pin %d. Raw=%d | Force=0.00 N | Seq=%lu | Time=%lu ms ---\n",
-                      activePressurePin, pressure.rawValue, pressure.sampleCount, now);
+        Serial.printf("--- [PRESSURE EVENT] --- Contact RELEASED on Pin %d. Raw=%d <<<\n",
+                      activePressurePin, pressure.rawValue);
       }
     }
   }
@@ -308,28 +330,51 @@ bool updatePressureSensor() {
 void streamPressureToTerminal() {
   if (!streamTerminal) return;
   unsigned long now = millis();
+
+  // Calm, clean stream mode: quiet when idle, sleek ASCII bar when pressing
+  if (cleanOutputMode && !jsonTerminal) {
+    if (pressure.isContact) {
+      if (now - lastStreamMs < 250) return; // 4Hz clean updates while pressing
+      lastStreamMs = now;
+
+      char bar[16];
+      int filled = constrain((int)((pressure.forceEstimateN / 8.0f) * 10), 0, 10);
+      bar[0] = '[';
+      for (int i = 0; i < 10; i++) bar[i + 1] = (i < filled) ? '=' : '-';
+      bar[11] = ']';
+      bar[12] = '\0';
+
+      Serial.printf("[FSR] %5.2f N  %s  (raw: %4d)\n",
+                    pressure.forceEstimateN, bar, pressure.rawValue);
+    } else {
+      // Unobtrusive heartbeat once every 3 seconds while idle
+      if (now - lastStreamMs < 3000) return;
+      lastStreamMs = now;
+      Serial.printf("[FSR] Idle (ready) | baseline: %d | Pin %d\n",
+                    adcZeroBaseline, activePressurePin);
+    }
+    return;
+  }
+
+  // Verbose stream mode
   if (now - lastStreamMs < streamIntervalMs) return;
   lastStreamMs = now;
 
   if (jsonTerminal) {
-    Serial.printf("{\"type\":\"pressure\",\"pin\":%d,\"isAdc\":%s,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"pull\":\"%s\",\"seq\":%lu,\"timestampMs\":%lu}\n",
+    Serial.printf("{\"type\":\"pressure\",\"pin\":%d,\"isAdc\":%s,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"timestampMs\":%lu}\n",
                   activePressurePin,
                   pressure.isAdc ? "true" : "false",
                   pressure.isContact ? "true" : "false",
                   pressure.rawValue,
                   pressure.forceEstimateN,
-                  getPullModeName(),
-                  pressure.sampleCount,
                   now);
   } else {
-    Serial.printf("[PRESSURE] pin=%d (%s) | state=%-7s | raw=%-4d | force=%.2fN | pull=%-9s | seq=%lu | t=%lums\n",
+    Serial.printf("[PRESSURE] pin=%d (%s) | state=%-7s | raw=%-4d | force=%.2fN | t=%lums\n",
                   activePressurePin,
                   pressure.isAdc ? "ADC1" : "DIG ",
                   pressure.isContact ? "CONTACT" : "IDLE",
                   pressure.rawValue,
                   pressure.forceEstimateN,
-                  getPullModeName(),
-                  pressure.sampleCount,
                   now);
   }
 }
@@ -476,6 +521,7 @@ void printHelp() {
   Serial.println("  'p' : Switch to Pressure Sensor screen");
   Serial.println("  'k' : Toggle pin (GPIO 1 [ADC1 Analog] <-> GPIO 10 [Digital])");
   Serial.println("  'c' : Auto-zero ADC baseline for unpressed FSR 400/402");
+  Serial.println("  'v' : Toggle calm/clean mode vs verbose output");
   Serial.println("  't' : Toggle terminal pressure streaming (ON/OFF)");
   Serial.println("  'j' : Toggle JSON telemetry output (ON/OFF)");
   Serial.println("  'r' : Instantaneous pressure reading & diagnostics");
@@ -529,6 +575,9 @@ void setup() {
     display.ssd1306_command(0xFF); // Maximum contrast
   }
 
+  // Allow FSR voltage divider to stabilize before calibration
+  delay(200);
+
   // Initialize Pressure Sensor (default to GPIO 1 for ADC)
   initPressureSensor();
 
@@ -573,6 +622,9 @@ void loop() {
       }
     } else if (ch == 'c') {
       calibrateAdcZero();
+    } else if (ch == 'v') {
+      cleanOutputMode = !cleanOutputMode;
+      Serial.printf("[Terminal] Clean output mode: %s\n", cleanOutputMode ? "ENABLED (Calm)" : "DISABLED (Verbose)");
     } else if (ch == ' ' || ch == 'n') {
       currentMode = (DisplayMode)((currentMode + 1) % MODE_COUNT);
       renderCurrentMode();

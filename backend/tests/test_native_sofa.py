@@ -74,14 +74,14 @@ async def test_native_sofa_owns_contact_force_deformation_and_topology() -> None
         carved = contact
         topology_changed = False
         sequence = 10
-        for y_mm in (5.0, 2.5, 1.8, 1.0, 0.0, -1.0):
+        for y_mm in (5.0, 2.5, 1.0, 0.0, -1.0, -2.0):
             carved = await simulator.step(sample(sequence, y_mm, -15.0))
             topology_changed = topology_changed or "topology-changed" in carved.events
             sequence += 1
-        # Carving is deliberately gated until the incision path has physically
-        # opened enough cells, so exercise the complete bounded corridor.
+        # Move the physical blade edge across the instructor target; SOFA,
+        # rather than a progress counter, decides which tetrahedra are removed.
         for x_mm in range(-15, 16):
-            carved = await simulator.step(sample(sequence, -1.0, float(x_mm)))
+            carved = await simulator.step(sample(sequence, -2.0, float(x_mm)))
             topology_changed = topology_changed or "topology-changed" in carved.events
             sequence += 1
         assert topology_changed
@@ -102,11 +102,11 @@ async def test_native_sofa_completes_layered_opening_from_physical_contact() -> 
     sequence = 1
     snapshot = None
     try:
-        for y_mm in (5.0, 2.5, 1.8, 1.0, 0.0, -1.0):
+        for y_mm in (5.0, 2.5, 1.0, 0.0, -1.0, -2.0):
             snapshot = await simulator.step(sample(sequence, y_mm, -15.0))
             sequence += 1
         for x_mm in range(-15, 16):
-            snapshot = await simulator.step(sample(sequence, -1.0, float(x_mm)))
+            snapshot = await simulator.step(sample(sequence, -2.0, float(x_mm)))
             sequence += 1
         assert snapshot is not None
         skin = next(
@@ -164,9 +164,9 @@ async def test_native_sofa_completes_layered_opening_from_physical_contact() -> 
             layer for layer in snapshot.tissue.layers if layer.layer_id == "pleura"
         )
         if not pleura.opened:
-            for x_mm in range(-15, 16):
+            for x_mm in range(-18, 19):
                 snapshot = await simulator.step(
-                    sample(sequence, -14.0, float(x_mm), "scalpel")
+                    sample(sequence, -15.0, float(x_mm), "scalpel")
                 )
                 sequence += 1
             pleura = next(

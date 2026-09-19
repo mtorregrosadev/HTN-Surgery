@@ -233,7 +233,7 @@ namespace SurgePrep
                     }
                     if (nearest != null)
                     {
-                        y += nearest.y * CoordinateFrame.MillimetresToMetres;
+                        y = nearest.y * CoordinateFrame.MillimetresToMetres;
                     }
                 }
                 incisionGuide.SetPosition(
@@ -249,12 +249,7 @@ namespace SurgePrep
 
         private static Vector3 RegisteredPosition(Vector3Dto source)
         {
-            var position = CoordinateFrame.Position(source);
-            if (source != null)
-            {
-                position.y += ChestSurfaceRegistration.OffsetMetres(source.x, source.z);
-            }
-            return position;
+            return CoordinateFrame.Position(source);
         }
 
         private MeshView GetOrCreateMesh(DeformableMeshDto state)

@@ -107,36 +107,51 @@ def smoke_test() -> None:
     # First verify stable constraint contact and solver-derived deformation.
     spec_ns["createScene"](root, carving_active=False)
     Sofa.Simulation.init(root)
-    rest = [list(point) for point in root.tissue.dofs.rest_position.value]
-    root.tool.dofs.position.value = [[0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 1.0]]
+    surface_y = spec_ns["chest_surface_y_mm"](0.0, 0.0)
+    rest = [list(point) for point in root.layers.skin.dofs.rest_position.value]
+    root.tool.dofs.position.value = [[0.0, surface_y + 5.0, 0.0, 0.0, 0.0, 0.0, 1.0]]
     for _ in range(3):
         Sofa.Simulation.animate(root, 0.01)
-    for y_mm in (2.5, 1.8, 1.0, 0.0):
+    maximum_reaction_n = 0.0
+    maximum_constraint_count = 0
+    for y_mm in (2.5, 1.0, 0.0, -1.0, -2.0):
         root.tool.dofs.position.value = [
-            [0.0, y_mm, 0.0, 0.0, 0.0, 0.0, 1.0]
+            [0.0, surface_y + y_mm, 0.0, 0.0, 0.0, 0.0, 1.0]
         ]
         for _ in range(4):
             Sofa.Simulation.animate(root, 0.01)
-    current = root.tissue.dofs.position.value
+        step_reaction = sum(
+            abs(sum(float(force[1]) for force in layer.dofs.getData("lambda").value))
+            for layer in (
+                root.layers.skin,
+                root.layers.subcutaneous,
+                root.layers.muscle,
+                root.layers.pleura,
+            )
+        )
+        maximum_reaction_n = max(maximum_reaction_n, step_reaction)
+        maximum_constraint_count = max(
+            maximum_constraint_count, len(root.contactSolver.constraintForces.value)
+        )
+    current = root.layers.skin.dofs.position.value
     deformation = max(
         sum((float(point[i]) - rest_point[i]) ** 2 for i in range(3)) ** 0.5
         for point, rest_point in zip(current, rest)
     )
-    reaction_n = abs(
-        sum(float(force[1]) for force in root.tissue.dofs.getData("lambda").value)
-    )
-    constraint_count = len(root.contactSolver.constraintForces.value)
+    reaction_n = maximum_reaction_n
+    constraint_count = maximum_constraint_count
 
     # Then verify that the exact mapped tetrahedral topology used by the API
     # can be carved without corrupting or crashing the graph.
-    before = len(root.tissue.topology.tetrahedra.value)
-    root.carvingManager.active.value = True
+    before = len(root.layers.skin.topology.tetrahedra.value)
+    root.carveSkin.active.value = True
     for x_mm in range(-10, 11, 2):
+        x_surface = spec_ns["chest_surface_y_mm"](float(x_mm), 0.0)
         root.tool.dofs.position.value = [
-            [float(x_mm), -1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+            [float(x_mm), x_surface - 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
         ]
         Sofa.Simulation.animate(root, 0.01)
-    after = len(root.tissue.topology.tetrahedra.value)
+    after = len(root.layers.skin.topology.tetrahedra.value)
     Sofa.Simulation.unload(root)
     if deformation < 0.5:
         fail(f"SOFA contact deformation was too small ({deformation:.3f} mm).")

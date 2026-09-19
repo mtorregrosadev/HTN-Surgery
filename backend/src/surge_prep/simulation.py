@@ -13,7 +13,6 @@ from typing import Any
 from .layered_chest import (
     LayeredChestState,
     exposed_surface_y_mm,
-    in_corridor,
     in_patch,
     pose_contact,
     tool_state_from_pose,
@@ -126,8 +125,8 @@ class SofaSessionState:
     root: Any
     tick: int
     previous_contact: bool
-    initial_tetrahedra: int
-    previous_tetrahedra: int
+    initial_tetrahedra: dict[str, int]
+    previous_tetrahedra: dict[str, int]
     applied_tool_pose: list[float]
     carving_layer: str | None
 
@@ -139,6 +138,18 @@ class SofaSimulator(Simulator):
     # Two 10 ms implicit steps let contact settle while keeping the local loop
     # interactive at showcase input rates.
     network_substeps = 3
+    layer_nodes = {
+        "skin": "skin",
+        "subcutaneous": "subcutaneous",
+        "intercostal-muscle": "muscle",
+        "pleura": "pleura",
+    }
+    carving_managers = {
+        "skin": "carveSkin",
+        "subcutaneous": "carveSubcutaneous",
+        "intercostal-muscle": "carveMuscle",
+        "pleura": "carvePleura",
+    }
 
     def __init__(self, scene_path: str, step_ms: int = 10) -> None:
         self.scene_path = Path(scene_path).resolve()
@@ -192,14 +203,18 @@ class SofaSimulator(Simulator):
             root = self._sofa.Core.Node(f"session_{session_id}")
             self._scene_module.createScene(root, carving_active=False)
             self._simulation.init(root)
-            tetrahedra = len(root.tissue.topology.tetrahedra.value)
+            tetrahedra = {
+                layer_id: len(self._layer(root, layer_id).topology.tetrahedra.value)
+                for layer_id in self.layer_nodes
+            }
+            initial_y = self._scene_module.chest_surface_y_mm(0.0, 0.0) + 18.0
             self._sessions[session_id] = SofaSessionState(
                 root=root,
                 tick=0,
                 previous_contact=False,
                 initial_tetrahedra=tetrahedra,
-                previous_tetrahedra=tetrahedra,
-                applied_tool_pose=[0.0, 18.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                previous_tetrahedra=tetrahedra.copy(),
+                applied_tool_pose=[0.0, initial_y, 0.0, 0.0, 0.0, 0.0, 1.0],
                 carving_layer=None,
             )
             self._chests[session_id] = LayeredChestState()
@@ -211,8 +226,11 @@ class SofaSimulator(Simulator):
                 raise RuntimeError("SOFA session has not been initialized")
             root = state.root
             chest = self._chests[sample.session_id]
+            surface_y = self._scene_module.chest_surface_y_mm(
+                sample.position_mm.x, sample.position_mm.z
+            )
             target_pose = [
-                sample.position_mm.x, sample.position_mm.y, sample.position_mm.z,
+                sample.position_mm.x, sample.position_mm.y + surface_y, sample.position_mm.z,
                 sample.orientation.qx, sample.orientation.qy,
                 sample.orientation.qz, sample.orientation.qw,
             ]
@@ -220,10 +238,13 @@ class SofaSimulator(Simulator):
             # tracked blade pose over fixed substeps rather than moving a
             # spherical proxy or silently clamping the user's instrument.
             previous_pose = state.applied_tool_pose
+            planar_travel_mm = math.hypot(
+                target_pose[0] - previous_pose[0], target_pose[2] - previous_pose[2]
+            )
             reactions: list[float] = []
             contacts: list[bool] = []
             deformations: list[float] = []
-            root.carvingManager.active.value = False
+            self._set_carving(root, None)
             for substep in range(self.network_substeps):
                 fraction = (substep + 1) / self.network_substeps
                 proxy_pose = [
@@ -238,7 +259,6 @@ class SofaSimulator(Simulator):
                 reactions.append(reaction_at_step)
                 contacts.append(contact_at_step)
                 deformations.append(self._maximum_deformation_mm(root))
-            root.carvingManager.active.value = False
             state.applied_tool_pose = target_pose
             reaction = max(reactions, default=0.0)
             if not math.isfinite(reaction):
@@ -247,7 +267,8 @@ class SofaSimulator(Simulator):
                 )
             contact = any(contacts)
             deformation = max(deformations, default=0.0)
-            contact_point = self._nearest_surface_point(root, sample)
+            active_layer = chest.current_layer()
+            contact_point = self._nearest_surface_point(root, sample, active_layer)
             penetration = max(0.0, -sample.position_mm.y) if contact else 0.0
             events: list[str] = []
             if contact and not state.previous_contact:
@@ -255,32 +276,36 @@ class SofaSimulator(Simulator):
                 events.append("contact-start")
             elif state.previous_contact and not contact:
                 events.append("contact-end")
-            active_layer = chest.current_layer()
-            mode, chest_events, blocked = chest.update(sample, contact, penetration, reaction)
+            mode, chest_events, blocked = chest.update(
+                sample, contact, penetration, reaction, advance_opening=False
+            )
             events.extend(chest_events)
             if blocked:
                 events.append("protected-anatomy")
             carving_step = 0
-            if active_layer == "skin" and self._should_carve(
-                sample, chest, contact, reaction, active_layer
+            if self._should_carve(
+                sample, chest, contact, reaction, planar_travel_mm, active_layer
             ):
                 state.carving_layer = active_layer
-                tetrahedra_before_carving = len(root.tissue.topology.tetrahedra.value)
-                root.carvingManager.active.value = True
-                carving_pose = target_pose.copy()
-                carving_pose[1] -= 0.35
-                self._apply_tool(root, sample, [carving_pose])
-                self._simulation.animate(root, 0.01)
-                root.carvingManager.active.value = False
-                carving_step = 1
-                if len(root.tissue.topology.tetrahedra.value) < tetrahedra_before_carving:
+                layer = self._layer(root, active_layer)
+                tetrahedra_before_carving = len(layer.topology.tetrahedra.value)
+                self._set_carving(root, active_layer)
+                for extra_depth_mm in (0.25, 0.5, 0.75):
+                    carving_pose = target_pose.copy()
+                    carving_pose[1] -= extra_depth_mm
+                    self._apply_tool(root, sample, [carving_pose])
+                    self._simulation.animate(root, 0.01)
+                self._set_carving(root, None)
+                carving_step = 3
+                if len(layer.topology.tetrahedra.value) < tetrahedra_before_carving:
                     events.extend(chest.record_sofa_cut(active_layer, sample, penetration))
                     mode = "cutting"
             state.tick += self.network_substeps + carving_step
-            tetrahedra = len(root.tissue.topology.tetrahedra.value)
-            if tetrahedra < state.previous_tetrahedra:
-                events.append("topology-changed")
-            state.previous_tetrahedra = tetrahedra
+            for layer_id in self.layer_nodes:
+                tetrahedra = len(self._layer(root, layer_id).topology.tetrahedra.value)
+                if tetrahedra < state.previous_tetrahedra[layer_id]:
+                    events.extend(["topology-changed", f"topology-changed:{layer_id}"])
+                state.previous_tetrahedra[layer_id] = tetrahedra
             state.previous_contact = contact
             proxy_sample = sample.model_copy(
                 update={
@@ -304,22 +329,35 @@ class SofaSimulator(Simulator):
 
     def _apply_tool(self, root: Any, sample: ToolSample, tool_pose: list) -> None:
         root.tool.dofs.position.value = tool_pose
+        scalpel = sample.tool_id == "scalpel"
+        blunt = sample.tool_id == "blunt-dissector"
+        tube = sample.tool_id == "chest-tube"
+        root.tool.blade.edge.active.value = scalpel
+        root.tool.blade.thickness.active.value = scalpel
+        root.tool.blunt.tips.active.value = blunt
+        root.tool.tube.tip.active.value = tube
+
+    @classmethod
+    def _layer(cls, root: Any, layer_id: str) -> Any:
+        return getattr(root.layers, cls.layer_nodes[layer_id])
+
+    @classmethod
+    def _set_carving(cls, root: Any, layer_id: str | None) -> None:
+        for candidate, manager_name in cls.carving_managers.items():
+            getattr(root, manager_name).active.value = candidate == layer_id
 
     @staticmethod
     def _reaction_force_n(root: Any) -> float:
-        nodal_contact = root.tissue.dofs.getData("lambda").value
-        components = [
-            sum(float(force[axis]) for force in nodal_contact)
-            for axis in range(3)
-        ]
+        components = [0.0, 0.0, 0.0]
+        for layer in SofaSimulator.layer_nodes:
+            nodal_contact = SofaSimulator._layer(root, layer).dofs.getData("lambda").value
+            for axis in range(3):
+                components[axis] += sum(float(force[axis]) for force in nodal_contact)
         return math.sqrt(sum(component * component for component in components))
 
     @staticmethod
     def _has_contact(root: Any, reaction_n: float) -> bool:
-        return (
-            reaction_n > 1e-4
-            and len(root.contactSolver.constraintForces.value) > 0
-        )
+        return len(root.contactSolver.constraintForces.value) > 0
 
     @staticmethod
     def _should_carve(
@@ -327,6 +365,7 @@ class SofaSimulator(Simulator):
         chest: LayeredChestState,
         contact: bool,
         reaction_n: float,
+        planar_travel_mm: float,
         layer_id: str | None = None,
     ) -> bool:
         return (
@@ -336,6 +375,7 @@ class SofaSimulator(Simulator):
             )
             and in_patch(sample.position_mm.x, sample.position_mm.z)
             and 0.001 <= reaction_n <= 3.0
+            and planar_travel_mm >= 0.2
         )
 
     @staticmethod
@@ -349,21 +389,38 @@ class SofaSimulator(Simulator):
 
     @staticmethod
     def _maximum_deformation_mm(root: Any) -> float:
-        current = root.tissue.dofs.position.value
-        resting = root.tissue.dofs.rest_position.value
         maximum_squared = 0.0
-        for point, rest in zip(current, resting):
-            squared = sum((float(point[index]) - float(rest[index])) ** 2 for index in range(3))
-            maximum_squared = max(maximum_squared, squared)
+        for layer_id in SofaSimulator.layer_nodes:
+            layer = SofaSimulator._layer(root, layer_id)
+            current = layer.dofs.position.value
+            resting = layer.dofs.rest_position.value
+            for point, rest in zip(current, resting):
+                squared = sum(
+                    (float(point[index]) - float(rest[index])) ** 2 for index in range(3)
+                )
+                maximum_squared = max(maximum_squared, squared)
         return maximum_squared ** 0.5
 
-    @staticmethod
-    def _nearest_surface_point(root: Any, sample: ToolSample) -> Vector3:
-        current = root.tissue.dofs.position.value
-        resting = root.tissue.dofs.rest_position.value
+    @classmethod
+    def _nearest_surface_point(
+        cls, root: Any, sample: ToolSample, layer_id: str
+    ) -> Vector3:
+        layer = cls._layer(root, layer_id)
+        current = layer.dofs.position.value
+        resting = layer.dofs.rest_position.value
+        top_offset = {
+            "skin": 0.0,
+            "subcutaneous": -3.0,
+            "intercostal-muscle": -8.0,
+            "pleura": -13.0,
+        }[layer_id]
         top_indices = [
             index for index, point in enumerate(resting)
-            if float(point[1]) > -0.01
+            if abs(
+                float(point[1])
+                - cls._scene_surface_y(root, float(point[0]), float(point[2]))
+                - top_offset
+            ) < 0.05
         ]
         nearest = min(
             top_indices,
@@ -380,44 +437,37 @@ class SofaSimulator(Simulator):
         return Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
 
     @staticmethod
-    def _deformable_meshes(state: SofaSessionState) -> list[DeformableMeshState]:
+    def _scene_surface_y(root: Any, x_mm: float, z_mm: float) -> float:
+        # The fitted surface function is stored on the scene module, not the
+        # graph. Importing it here would duplicate a second source of truth, so
+        # recover the top rest height from the skin nodes at the same x/z.
+        skin = root.layers.skin.dofs.rest_position.value
+        nearest = min(
+            skin,
+            key=lambda point: (float(point[0]) - x_mm) ** 2 + (float(point[2]) - z_mm) ** 2,
+        )
+        return max(
+            float(point[1])
+            for point in skin
+            if abs(float(point[0]) - float(nearest[0])) < 1e-4
+            and abs(float(point[2]) - float(nearest[2])) < 1e-4
+        )
+
+    @classmethod
+    def _deformable_meshes(cls, state: SofaSessionState) -> list[DeformableMeshState]:
         root = state.root
-        vertices = [
-            Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
-            for point in root.tissue.dofs.position.value
-        ]
-        layers: dict[str, list[int]] = {
-            "skin": [],
-            "subcutaneous": [],
-            "intercostal-muscle": [],
-            "pleura": [],
-        }
-        resting = root.tissue.dofs.rest_position.value
-        for triangle in root.tissue.surface.topology.triangles.value:
-            indices = [int(index) for index in triangle]
-            rest_points = [resting[index] for index in indices]
-            on_external_wall = any(
-                all(
-                    abs(abs(float(point[axis])) - 40.0) < 1e-4
-                    for point in rest_points
-                )
-                for axis in (0, 2)
-            ) or all(float(point[1]) < -15.9 for point in rest_points)
-            if on_external_wall:
-                continue
-            mean_y = sum(float(resting[index][1]) for index in indices) / 3.0
-            if mean_y >= -3.0:
-                layer = "skin"
-            elif mean_y >= -8.0:
-                layer = "subcutaneous"
-            elif mean_y >= -13.0:
-                layer = "intercostal-muscle"
-            else:
-                layer = "pleura"
-            layers[layer].extend(indices)
-        revision = 1 + state.initial_tetrahedra - state.previous_tetrahedra
         meshes: list[DeformableMeshState] = []
-        for layer, triangles in layers.items():
+        for layer_id in cls.layer_nodes:
+            layer = cls._layer(root, layer_id)
+            vertices = [
+                Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
+                for point in layer.dofs.position.value
+            ]
+            triangles = [
+                int(index)
+                for triangle in layer.surface.topology.triangles.value
+                for index in triangle
+            ]
             used_indices = sorted(set(triangles))
             remap = {
                 original: compact
@@ -425,8 +475,12 @@ class SofaSimulator(Simulator):
             }
             meshes.append(
                 DeformableMeshState(
-                    object_id=f"layer-{layer}",
-                    topology_revision=revision,
+                    object_id=f"layer-{layer_id}",
+                    topology_revision=(
+                        1
+                        + state.initial_tetrahedra[layer_id]
+                        - state.previous_tetrahedra[layer_id]
+                    ),
                     vertices_mm=[vertices[index] for index in used_indices],
                     triangle_indices=[remap[index] for index in triangles],
                 )

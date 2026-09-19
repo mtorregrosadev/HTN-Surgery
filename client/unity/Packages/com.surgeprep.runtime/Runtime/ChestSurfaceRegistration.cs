@@ -2,29 +2,36 @@ using UnityEngine;
 
 namespace SurgePrep
 {
+    /// <summary>
+    /// Smooth fit of the BodyParts3D lateral chest in the final supine frame.
+    /// SOFA owns this surface; Unity uses the same fit only before the first
+    /// authoritative mesh arrives to place the projected guidance line.
+    /// </summary>
     public static class ChestSurfaceRegistration
     {
-        private static readonly float[,] OffsetsMm =
+        public static float HeightMm(float x, float z)
         {
-            { 3f, -3f, -15f, -42f, -78f },
-            { 11f, 7f, -2f, -25f, -74f },
-            { 11f, 6f, 0f, -17f, -56f },
-            { 6f, -1f, -12f, -25f, -57f },
-            { -1f, -7f, -23f, -32f, -56f },
-        };
+            return
+                -0.15673469389450148f
+                - 0.15619047619088122f * z
+                - 0.6565476190475732f * x
+                - 0.019745748299286214f * z * z
+                + 0.007150000000007576f * x * z
+                - 0.010474914965967697f * x * x
+                + 5.8333333333272285e-05f * z * z * z
+                - 5.3571428570533765e-06f * x * z * z
+                + 0.00012857142857144923f * x * x * z
+                - 0.0001354166666667074f * x * x * x
+                + 5.104166666655587e-06f * z * z * z * z
+                - 1.9791666666683116e-06f * x * z * z * z
+                + 3.3801020408019367e-06f * x * x * z * z
+                + 1.0416666666368515e-07f * x * x * x * z
+                - 2.4479166666682357e-06f * x * x * x * x;
+        }
 
         public static float OffsetMetres(float xMm, float zMm)
         {
-            var gridX = Mathf.Clamp((xMm + 40f) / 20f, 0f, 4f);
-            var gridZ = Mathf.Clamp((zMm + 40f) / 20f, 0f, 4f);
-            var x0 = Mathf.Min(Mathf.FloorToInt(gridX), 3);
-            var z0 = Mathf.Min(Mathf.FloorToInt(gridZ), 3);
-            var xBlend = gridX - x0;
-            var zBlend = gridZ - z0;
-            var near = Mathf.Lerp(OffsetsMm[z0, x0], OffsetsMm[z0, x0 + 1], xBlend);
-            var far = Mathf.Lerp(OffsetsMm[z0 + 1, x0], OffsetsMm[z0 + 1, x0 + 1], xBlend);
-            return (Mathf.Lerp(near, far, zBlend) + 0.5f)
-                * CoordinateFrame.MillimetresToMetres;
+            return HeightMm(xMm, zMm) * CoordinateFrame.MillimetresToMetres;
         }
     }
 }

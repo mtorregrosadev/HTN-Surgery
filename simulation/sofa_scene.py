@@ -1,21 +1,45 @@
-"""Native SOFA scene for the localized chest-tube training region.
+"""Native layered SOFA scene registered to the lateral chest surface.
 
-The region uses one connected tetrahedral continuum so contact propagates
-through its full 16 mm depth. The mapped triangle boundary is simultaneously
-the collision surface and the topology updated by SofaCarving. Coordinates are
-millimetres; elastic modulus is N/mm² (MPa), and reported contact lambda is N.
+Coordinates are millimetres. Each tissue layer is an independent curved
+tetrahedral continuum with its own FEM, collision surface, and topology. The
+visible Unity meshes are exported directly from these mapped SOFA surfaces.
+Material values are illustrative training parameters, not clinical claims.
 """
 
-PATCH_HALF_MM = 40.0
-PATCH_DEPTH_MM = 16.0
-GRID_RESOLUTION = [13, 7, 13]
-TISSUE_YOUNG_MODULUS_MPA = 0.20
-TISSUE_POISSON_RATIO = 0.45
+FIELD_RADIUS_X_MM = 40.0
+FIELD_RADIUS_Z_MM = 36.0
+GRID_X = 17
+GRID_Z = 17
+GRID_Y = 2
 
-# The supplied CAD scalpel is registered to a tip-origin tool frame. This
-# polyline follows its physical lower blade edge in millimetres. It replaces
-# the old spherical proxy so collision, carving, replay, and the Unity visual
-# all refer to the same geometry.
+# Smooth fourth-order fit to registration samples taken from the BodyParts3D
+# skin in the final supine showcase transform. This replaces the old 5x5
+# client-side lookup table and keeps rendering and collision in one frame.
+CHEST_SURFACE_TERMS = [
+    ((0, 0), -0.15673469389450148),
+    ((0, 1), -0.15619047619088122),
+    ((1, 0), -0.6565476190475732),
+    ((0, 2), -0.019745748299286214),
+    ((1, 1), 0.007150000000007576),
+    ((2, 0), -0.010474914965967697),
+    ((0, 3), 5.8333333333272285e-05),
+    ((1, 2), -5.3571428570533765e-06),
+    ((2, 1), 0.00012857142857144923),
+    ((3, 0), -0.0001354166666667074),
+    ((0, 4), 5.104166666655587e-06),
+    ((1, 3), -1.9791666666683116e-06),
+    ((2, 2), 3.3801020408019367e-06),
+    ((3, 1), 1.0416666666368515e-07),
+    ((4, 0), -2.4479166666682357e-06),
+]
+
+LAYER_SPECS = {
+    "skin": {"top": 0.0, "bottom": -3.0, "young": 0.35},
+    "subcutaneous": {"top": -3.0, "bottom": -8.0, "young": 0.055},
+    "muscle": {"top": -8.0, "bottom": -13.0, "young": 0.18},
+    "pleura": {"top": -13.0, "bottom": -16.0, "young": 0.12},
+}
+
 SCALPEL_CUTTING_EDGE_MM = [
     [0.0, 0.0, 0.0],
     [0.0, 4.758, 0.809],
@@ -24,6 +48,204 @@ SCALPEL_CUTTING_EDGE_MM = [
     [0.0, 33.0, 2.65],
 ]
 SCALPEL_CUTTING_EDGE_SEGMENTS = [[index, index + 1] for index in range(4)]
+
+
+def chest_surface_y_mm(x_mm, z_mm):
+    return sum(
+        coefficient * (x_mm ** x_power) * (z_mm ** z_power)
+        for (x_power, z_power), coefficient in CHEST_SURFACE_TERMS
+    )
+
+
+def _linspace(minimum, maximum, count):
+    if count <= 1:
+        return [minimum]
+    return [minimum + (maximum - minimum) * index / (count - 1) for index in range(count)]
+
+
+def _layer_mesh(top_mm, bottom_mm):
+    xs = _linspace(-FIELD_RADIUS_X_MM, FIELD_RADIUS_X_MM, GRID_X)
+    zs = _linspace(-FIELD_RADIUS_Z_MM, FIELD_RADIUS_Z_MM, GRID_Z)
+    depths = _linspace(top_mm, bottom_mm, GRID_Y)
+    cells = []
+    for z_index in range(GRID_Z - 1):
+        for x_index in range(GRID_X - 1):
+            centre_x = 0.5 * (xs[x_index] + xs[x_index + 1])
+            centre_z = 0.5 * (zs[z_index] + zs[z_index + 1])
+            radial = (centre_x / FIELD_RADIUS_X_MM) ** 2 + (
+                centre_z / FIELD_RADIUS_Z_MM
+            ) ** 2
+            if radial <= 1.0:
+                cells.append((x_index, z_index))
+
+    point_indices = {}
+    points = []
+
+    def point(x_index, depth_index, z_index):
+        key = (x_index, depth_index, z_index)
+        if key not in point_indices:
+            x_mm = xs[x_index]
+            z_mm = zs[z_index]
+            y_mm = chest_surface_y_mm(x_mm, z_mm) + depths[depth_index]
+            point_indices[key] = len(points)
+            points.append([x_mm, y_mm, z_mm])
+        return point_indices[key]
+
+    tetrahedra = []
+    for x_index, z_index in cells:
+        for depth_index in range(GRID_Y - 1):
+            v000 = point(x_index, depth_index, z_index)
+            v100 = point(x_index + 1, depth_index, z_index)
+            v010 = point(x_index, depth_index + 1, z_index)
+            v110 = point(x_index + 1, depth_index + 1, z_index)
+            v001 = point(x_index, depth_index, z_index + 1)
+            v101 = point(x_index + 1, depth_index, z_index + 1)
+            v011 = point(x_index, depth_index + 1, z_index + 1)
+            v111 = point(x_index + 1, depth_index + 1, z_index + 1)
+            tetrahedra.extend(
+                [
+                    [v000, v100, v110, v111],
+                    [v000, v110, v010, v111],
+                    [v000, v010, v011, v111],
+                    [v000, v011, v001, v111],
+                    [v000, v001, v101, v111],
+                    [v000, v101, v100, v111],
+                ]
+            )
+
+    fixed = []
+    for (x_index, _depth_index, z_index), index in point_indices.items():
+        radial = (xs[x_index] / FIELD_RADIUS_X_MM) ** 2 + (
+            zs[z_index] / FIELD_RADIUS_Z_MM
+        ) ** 2
+        if radial >= 0.82:
+            fixed.append(index)
+    return points, tetrahedra, sorted(set(fixed))
+
+
+def _add_layer(layers, name, specification):
+    points, tetrahedra, fixed = _layer_mesh(
+        specification["top"], specification["bottom"]
+    )
+    tissue = layers.addChild(name)
+    tissue.addObject("EulerImplicitSolver", rayleighStiffness=0.12, rayleighMass=0.08)
+    tissue.addObject(
+        "SparseLDLSolver",
+        name="linearSolver",
+        template="CompressedRowSparseMatrixMat3x3d",
+    )
+    tissue.addObject("MechanicalObject", name="dofs", position=points)
+    tissue.addObject(
+        "TetrahedronSetTopologyContainer",
+        name="topology",
+        position=points,
+        tetrahedra=tetrahedra,
+    )
+    tissue.addObject("TetrahedronSetTopologyModifier", name="modifier")
+    tissue.addObject("TetrahedronSetGeometryAlgorithms", template="Vec3d")
+    tissue.addObject("DiagonalMass", massDensity=1e-6)
+    tissue.addObject("FixedProjectiveConstraint", indices=fixed)
+    tissue.addObject(
+        "TetrahedralCorotationalFEMForceField",
+        name="fem",
+        youngModulus=specification["young"],
+        poissonRatio=0.45,
+        method="large",
+    )
+    tissue.addObject("LinearSolverConstraintCorrection")
+
+    surface = tissue.addChild("surface")
+    surface.addObject("TriangleSetTopologyContainer", name="topology")
+    surface.addObject("TriangleSetTopologyModifier", name="modifier")
+    surface.addObject("TriangleSetGeometryAlgorithms", template="Vec3d")
+    surface.addObject(
+        "Tetra2TriangleTopologicalMapping", input="@../topology", output="@topology"
+    )
+    surface.addObject(
+        "TriangleCollisionModel",
+        name="triangles",
+        contactStiffness=0.8,
+        group=1,
+        tags="CarvingSurface",
+    )
+    surface.addObject(
+        "PointCollisionModel",
+        name="points",
+        contactStiffness=0.8,
+        group=1,
+        tags="CarvingSurface",
+    )
+    return tissue
+
+
+def _add_tool(root):
+    tool = root.addChild("tool")
+    tool.addObject(
+        "MechanicalObject",
+        template="Rigid3d",
+        name="dofs",
+        position=[[0.0, 18.0, 0.0, 0.0, 0.0, 0.0, 1.0]],
+    )
+
+    blade = tool.addChild("blade")
+    blade.addObject(
+        "MechanicalObject", template="Vec3d", name="dofs", position=SCALPEL_CUTTING_EDGE_MM
+    )
+    blade.addObject(
+        "EdgeSetTopologyContainer", name="topology", edges=SCALPEL_CUTTING_EDGE_SEGMENTS
+    )
+    blade.addObject(
+        "LineCollisionModel",
+        name="edge",
+        simulated=False,
+        moving=True,
+        group=2,
+        tags="CarvingTool",
+    )
+    blade.addObject(
+        "SphereCollisionModel",
+        name="thickness",
+        radius=0.28,
+        simulated=False,
+        moving=True,
+        group=2,
+    )
+    blade.addObject("RigidMapping", input="@../dofs", output="@dofs")
+
+    blunt = tool.addChild("blunt")
+    blunt.addObject(
+        "MechanicalObject",
+        template="Vec3d",
+        name="dofs",
+        position=[[-1.8, 0.0, 0.0], [1.8, 0.0, 0.0]],
+    )
+    blunt.addObject(
+        "SphereCollisionModel",
+        name="tips",
+        radius=2.2,
+        simulated=False,
+        moving=True,
+        active=False,
+        group=2,
+        tags="BluntTool",
+    )
+    blunt.addObject("RigidMapping", input="@../dofs", output="@dofs")
+
+    tube = tool.addChild("tube")
+    tube.addObject(
+        "MechanicalObject", template="Vec3d", name="dofs", position=[[0.0, 0.0, 0.0]]
+    )
+    tube.addObject(
+        "SphereCollisionModel",
+        name="tip",
+        radius=3.2,
+        simulated=False,
+        moving=True,
+        active=False,
+        group=2,
+    )
+    tube.addObject("RigidMapping", input="@../dofs", output="@dofs")
+    return tool
 
 
 def createScene(root, carving_active=False):
@@ -40,16 +262,13 @@ def createScene(root, carving_active=False):
             "Sofa.Component.Constraint.Lagrangian.Correction",
             "Sofa.Component.Constraint.Lagrangian.Solver",
             "Sofa.Component.Constraint.Projective",
-            "Sofa.Component.Engine.Select",
             "Sofa.Component.LinearSolver.Direct",
-            "Sofa.Component.LinearSolver.Iterative",
             "Sofa.Component.Mapping.Linear",
             "Sofa.Component.Mapping.NonLinear",
             "Sofa.Component.Mass",
             "Sofa.Component.ODESolver.Backward",
             "Sofa.Component.SolidMechanics.FEM.Elastic",
             "Sofa.Component.StateContainer",
-            "Sofa.Component.Topology.Container.Grid",
             "Sofa.Component.Topology.Container.Dynamic",
             "Sofa.Component.Topology.Mapping",
             "SofaCarving",
@@ -74,156 +293,48 @@ def createScene(root, carving_active=False):
         useSurfaceNormals=False,
     )
     root.addObject(
-        "CollisionResponse",
-        response="FrictionContactConstraint",
-        responseParams="mu=0.05",
+        "CollisionResponse", response="FrictionContactConstraint", responseParams="mu=0.08"
     )
 
-    # Generate a regular hexahedral lattice, then use SOFA's supported
-    # Hexa2Tetra mapping so dynamic tetra removal updates downstream topology.
-    source = root.addChild("topologySource")
-    source.addObject(
-        "RegularGridTopology",
-        name="hexaGrid",
-        n=GRID_RESOLUTION,
-        min=[-PATCH_HALF_MM, -PATCH_DEPTH_MM, -PATCH_HALF_MM],
-        max=[PATCH_HALF_MM, 0.0, PATCH_HALF_MM],
-    )
-    tetra_source = source.addChild("tetraSource")
-    tetra_source.addObject(
-        "TetrahedronSetTopologyContainer",
-        name="container",
-        position="@../hexaGrid.position",
-    )
-    tetra_source.addObject("TetrahedronSetTopologyModifier", name="modifier")
-    tetra_source.addObject(
-        "Hexa2TetraTopologicalMapping",
-        input="@../hexaGrid",
-        output="@container",
-        swapping=False,
-    )
-
-    tissue = root.addChild("tissue")
-    tissue.addObject(
-        "EulerImplicitSolver",
-        rayleighStiffness=0.15,
-        rayleighMass=0.1,
-    )
-    tissue.addObject(
-        "SparseLDLSolver",
-        name="linearSolver",
-        template="CompressedRowSparseMatrixMat3x3d",
-    )
-    tissue.addObject(
-        "MechanicalObject",
-        name="dofs",
-        position="@../topologySource/tetraSource/container.position",
-    )
-    tissue.addObject(
-        "TetrahedronSetTopologyContainer",
-        name="topology",
-        src="@../topologySource/tetraSource/container",
-    )
-    tissue.addObject("TetrahedronSetTopologyModifier", name="modifier")
-    tissue.addObject("TetrahedronSetGeometryAlgorithms", template="Vec3d")
-    tissue.addObject("DiagonalMass", massDensity=1e-6)
-    tissue.addObject(
-        "BoxROI",
-        name="fixedBottom",
-        box=[
-            -PATCH_HALF_MM - 1.0,
-            -PATCH_DEPTH_MM - 1.0,
-            -PATCH_HALF_MM - 1.0,
-            PATCH_HALF_MM + 1.0,
-            -PATCH_DEPTH_MM + 0.5,
-            PATCH_HALF_MM + 1.0,
-        ],
-    )
-    tissue.addObject(
-        "FixedProjectiveConstraint",
-        indices="@fixedBottom.indices",
-    )
-    tissue.addObject(
-        "TetrahedralCorotationalFEMForceField",
-        name="fem",
-        youngModulus=TISSUE_YOUNG_MODULUS_MPA,
-        poissonRatio=TISSUE_POISSON_RATIO,
-        method="large",
-    )
-    tissue.addObject("LinearSolverConstraintCorrection")
-
-    surface = tissue.addChild("surface")
-    surface.addObject("TriangleSetTopologyContainer", name="topology")
-    surface.addObject("TriangleSetTopologyModifier", name="modifier")
-    surface.addObject("TriangleSetGeometryAlgorithms", template="Vec3d")
-    surface.addObject(
-        "Tetra2TriangleTopologicalMapping",
-        input="@../topology",
-        output="@topology",
-    )
-    surface.addObject(
-        "TriangleCollisionModel",
-        name="triangles",
-        contactStiffness=0.8,
-        tags="CarvingSurface",
-    )
-    surface.addObject(
-        "PointCollisionModel",
-        name="points",
-        contactStiffness=0.8,
-        tags="CarvingSurface",
-    )
-
-    tool = root.addChild("tool")
-    tool.addObject(
-        "MechanicalObject",
-        template="Rigid3d",
-        name="dofs",
-        position=[[0.0, 18.0, 0.0, 0.0, 0.0, 0.0, 1.0]],
-    )
-    collision = tool.addChild("collision")
-    collision.addObject(
-        "MechanicalObject",
-        template="Vec3d",
-        name="bladeEdgeDofs",
-        position=SCALPEL_CUTTING_EDGE_MM,
-    )
-    collision.addObject(
-        "EdgeSetTopologyContainer",
-        name="bladeEdgeTopology",
-        edges=SCALPEL_CUTTING_EDGE_SEGMENTS,
-    )
-    collision.addObject(
-        "LineCollisionModel",
-        name="bladeEdge",
-        simulated=False,
-        moving=True,
-        tags="CarvingTool",
-    )
-    # The real blade is approximately 0.5 mm thick. A sub-millimetre sphere
-    # envelope on the measured edge gives the constraint solver a stable
-    # contact thickness without reverting to the old 3.2 mm-wide tip sphere.
-    collision.addObject(
-        "SphereCollisionModel",
-        name="bladeThickness",
-        radius=0.28,
-        simulated=False,
-        moving=True,
-    )
-    collision.addObject(
-        "PointCollisionModel",
-        name="bladePoints",
-        simulated=False,
-        moving=True,
-    )
-    collision.addObject("RigidMapping", input="@../dofs", output="@bladeEdgeDofs")
+    layers = root.addChild("layers")
+    for name, specification in LAYER_SPECS.items():
+        _add_layer(layers, name, specification)
+    _add_tool(root)
 
     root.addObject(
         "CarvingManager",
-        name="carvingManager",
+        name="carveSkin",
         active=carving_active,
-        carvingDistance=-0.05,
+        carvingDistance=0.25,
         narrowPhaseDetection="@narrowPhase",
-        toolModel="@tool/collision/bladeEdge",
+        toolModel="@tool/blade/edge",
+        surfaceModelPath="/layers/skin/surface/triangles",
+    )
+    root.addObject(
+        "CarvingManager",
+        name="carveSubcutaneous",
+        active=False,
+        carvingDistance=0.25,
+        narrowPhaseDetection="@narrowPhase",
+        toolModel="@tool/blunt/tips",
+        surfaceModelPath="/layers/subcutaneous/surface/triangles",
+    )
+    root.addObject(
+        "CarvingManager",
+        name="carveMuscle",
+        active=False,
+        carvingDistance=0.25,
+        narrowPhaseDetection="@narrowPhase",
+        toolModel="@tool/blunt/tips",
+        surfaceModelPath="/layers/muscle/surface/triangles",
+    )
+    root.addObject(
+        "CarvingManager",
+        name="carvePleura",
+        active=False,
+        carvingDistance=0.25,
+        narrowPhaseDetection="@narrowPhase",
+        toolModel="@tool/blade/edge",
+        surfaceModelPath="/layers/pleura/surface/triangles",
     )
     return root

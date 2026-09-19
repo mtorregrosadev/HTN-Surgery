@@ -13,7 +13,8 @@ from .models import (
 )
 
 SURFACE_Y_MM = 0.0
-PATCH_HALF_MM = 40.0
+PATCH_RADIUS_X_MM = 40.0
+PATCH_RADIUS_Z_MM = 36.0
 CORRIDOR_MIN_X_MM = -18.0
 CORRIDOR_MAX_X_MM = 18.0
 CELL_WIDTH_MM = 3.0
@@ -71,7 +72,11 @@ def corridor_cell(x_mm: float) -> int:
 
 
 def in_patch(x_mm: float, z_mm: float) -> bool:
-    return abs(x_mm) <= PATCH_HALF_MM and abs(z_mm) <= PATCH_HALF_MM
+    return (
+        (x_mm / PATCH_RADIUS_X_MM) ** 2
+        + (z_mm / PATCH_RADIUS_Z_MM) ** 2
+        <= 1.0
+    )
 
 
 def in_corridor(x_mm: float, z_mm: float) -> bool:
@@ -144,9 +149,10 @@ class LayerOpening:
 
     @property
     def opened(self) -> bool:
-        # Five 3 mm cells form a sufficient localized tract while preserving
-        # intact tissue at both corridor ends.
-        return self.progress >= 0.4
+        # Four adjacent scoring cells represent a continuous 12 mm tract in
+        # the current coarse native mesh. This is a prototype progression
+        # threshold, not a clinically validated incision prescription.
+        return len(self.cut_cells) >= 4
 
 
 @dataclass
@@ -186,7 +192,12 @@ class LayeredChestState:
         return "pleural-entry"
 
     def update(
-        self, sample: ToolSample, contact: bool, penetration_mm: float, reaction_n: float
+        self,
+        sample: ToolSample,
+        contact: bool,
+        penetration_mm: float,
+        reaction_n: float,
+        advance_opening: bool = True,
     ) -> tuple[str, list[str], bool]:
         events: list[str] = []
         blocked_by_rib = hits_protected_rib(
@@ -224,6 +235,9 @@ class LayeredChestState:
         if not self._predecessors_open(active):
             self.layer_violations += 1
             events.append("layer-violation")
+            return "contact", events, blocked_by_rib
+
+        if not advance_opening:
             return "contact", events, blocked_by_rib
 
         opening = self.layers[active]
@@ -267,11 +281,24 @@ class LayeredChestState:
             return ["outside-corridor-cut"]
         opening = self.layers[layer_id]
         previous = len(opening.cut_cells)
-        cell = corridor_cell(sample.position_mm.x)
-        opening.cut_cells.add(cell)
-        opening.depths_mm[cell] = max(
-            opening.depths_mm.get(cell, 0.0), penetration_mm
-        )
+        # The native tetrahedral field uses approximately 5 mm surface cells.
+        # Record every scoring cell overlapped by the actually removed SOFA
+        # element, instead of pretending each network sample made a cut.
+        affected_cells = [
+            cell
+            for cell in range(cell_count())
+            if abs(
+                CORRIDOR_MIN_X_MM + (cell + 0.5) * CELL_WIDTH_MM
+                - sample.position_mm.x
+            ) <= 4.0
+        ]
+        if not affected_cells:
+            affected_cells = [corridor_cell(sample.position_mm.x)]
+        for cell in affected_cells:
+            opening.cut_cells.add(cell)
+            opening.depths_mm[cell] = max(
+                opening.depths_mm.get(cell, 0.0), penetration_mm
+            )
         events = ["layer-opened" if previous == 0 else "incision-extended"]
         if opening.opened and previous / cell_count() < 0.4:
             events.append("stage-completed")

@@ -31,6 +31,7 @@ def sample(
     y_mm: float,
     x_mm: float = 0.0,
     tool_id: str = "scalpel",
+    z_mm: float = 0.0,
 ) -> ToolSample:
     return ToolSample(
         session_id="native-test",
@@ -39,7 +40,7 @@ def sample(
         calibration_id="test-calibration",
         sequence=sequence,
         timestamp_ms=sequence * 10,
-        position_mm=Vector3(x=x_mm, y=y_mm, z=0.0),
+        position_mm=Vector3(x=x_mm, y=y_mm, z=z_mm),
         orientation=Quaternion(qx=0.0, qy=0.0, qz=0.0, qw=1.0),
         force_n=0.0,
         contact=False,
@@ -88,6 +89,25 @@ async def test_native_sofa_owns_contact_force_deformation_and_topology() -> None
         assert max(
             mesh.topology_revision for mesh in carved.deformable_meshes
         ) > before_revision
+    finally:
+        await simulator.end_session("native-test")
+        await simulator.close()
+
+
+@pytest.mark.asyncio
+async def test_native_sofa_hard_stops_the_tool_at_protected_ribs() -> None:
+    configure_native_sofa()
+    simulator = SofaSimulator(str(REPOSITORY / "simulation" / "sofa_scene.py"))
+    await simulator.start()
+    await simulator.begin_session("native-test")
+    try:
+        snapshot = await simulator.step(
+            sample(1, -16.0, 0.0, "scalpel", z_mm=18.0)
+        )
+        surface_y = simulator._scene_module.chest_surface_y_mm(0.0, 18.0)
+        assert "protected-anatomy" in snapshot.events
+        assert snapshot.tool.position_mm.y == pytest.approx(surface_y - 10.0)
+        assert all(mesh.topology_revision == 1 for mesh in snapshot.deformable_meshes)
     finally:
         await simulator.end_session("native-test")
         await simulator.close()

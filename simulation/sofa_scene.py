@@ -48,6 +48,9 @@ SCALPEL_CUTTING_EDGE_MM = [
     [0.0, 33.0, 2.65],
 ]
 SCALPEL_CUTTING_EDGE_SEGMENTS = [[index, index + 1] for index in range(4)]
+RIB_CENTRES_Z_MM = (-18.0, 18.0)
+RIB_RADIUS_MM = 4.0
+RIB_TOP_DEPTH_MM = -10.0
 
 
 def chest_surface_y_mm(x_mm, z_mm):
@@ -248,6 +251,36 @@ def _add_tool(root):
     return tool
 
 
+def _add_protected_anatomy(root):
+    """Add non-carvable rib collision bands beneath the active field."""
+    ribs = root.addChild("protectedAnatomy")
+    positions = []
+    for z_mm in RIB_CENTRES_Z_MM:
+        for x_mm in _linspace(-35.0, 35.0, 9):
+            positions.append(
+                [
+                    x_mm,
+                    chest_surface_y_mm(x_mm, z_mm)
+                    + RIB_TOP_DEPTH_MM
+                    - RIB_RADIUS_MM,
+                    z_mm,
+                ]
+            )
+    ribs.addObject("MechanicalObject", template="Vec3d", name="dofs", position=positions)
+    ribs.addObject(
+        "SphereCollisionModel",
+        name="ribs",
+        radius=RIB_RADIUS_MM,
+        simulated=False,
+        moving=False,
+        # Share the tissue group so the fixed rib samples do not collide with
+        # the layers that surround them; the moving tool remains group 2.
+        group=1,
+        tags="ProtectedAnatomy",
+    )
+    return ribs
+
+
 def createScene(root, carving_active=False):
     root.dt = 0.01
     root.gravity = [0.0, 0.0, 0.0]
@@ -299,6 +332,7 @@ def createScene(root, carving_active=False):
     layers = root.addChild("layers")
     for name, specification in LAYER_SPECS.items():
         _add_layer(layers, name, specification)
+    _add_protected_anatomy(root)
     _add_tool(root)
 
     root.addObject(

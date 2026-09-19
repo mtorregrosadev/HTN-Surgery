@@ -130,8 +130,10 @@ namespace SurgePrep
             {
                 xMm += api.x;
                 zMm += api.z;
-                xMm = Mathf.Clamp(xMm, -36f, 36f);
-                zMm = Mathf.Clamp(zMm, -36f, 36f);
+                // Keyboard testing can traverse the registered torso. Only
+                // the subtle surgical field is carvable.
+                xMm = Mathf.Clamp(xMm, -150f, 150f);
+                zMm = Mathf.Clamp(zMm, -260f, 260f);
                 yMm += raise * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
                 // The localized FEM volume ends at -16 mm. Keep the collision
                 // tool above its fixed boundary to prevent invalid inversion.

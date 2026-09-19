@@ -12,7 +12,9 @@ from typing import Any
 
 from .layered_chest import (
     LayeredChestState,
+    RIB_TOP_Y_MM,
     exposed_surface_y_mm,
+    hits_protected_rib,
     in_patch,
     pose_contact,
     tool_state_from_pose,
@@ -229,8 +231,16 @@ class SofaSimulator(Simulator):
             surface_y = self._scene_module.chest_surface_y_mm(
                 sample.position_mm.x, sample.position_mm.z
             )
+            blocked_by_rib = hits_protected_rib(
+                sample.position_mm.x, sample.position_mm.y, sample.position_mm.z
+            )
+            effective_y_mm = (
+                max(sample.position_mm.y, RIB_TOP_Y_MM)
+                if blocked_by_rib
+                else sample.position_mm.y
+            )
             target_pose = [
-                sample.position_mm.x, sample.position_mm.y + surface_y, sample.position_mm.z,
+                sample.position_mm.x, effective_y_mm + surface_y, sample.position_mm.z,
                 sample.orientation.qx, sample.orientation.qy,
                 sample.orientation.qz, sample.orientation.qw,
             ]
@@ -269,7 +279,7 @@ class SofaSimulator(Simulator):
             deformation = max(deformations, default=0.0)
             active_layer = chest.current_layer()
             contact_point = self._nearest_surface_point(root, sample, active_layer)
-            penetration = max(0.0, -sample.position_mm.y) if contact else 0.0
+            penetration = max(0.0, -effective_y_mm) if contact else 0.0
             events: list[str] = []
             if contact and not state.previous_contact:
                 events.append("first-contact")
@@ -285,7 +295,7 @@ class SofaSimulator(Simulator):
             carving_step = 0
             if self._should_carve(
                 sample, chest, contact, reaction, planar_travel_mm, active_layer
-            ):
+            ) and not blocked:
                 state.carving_layer = active_layer
                 layer = self._layer(root, active_layer)
                 tetrahedra_before_carving = len(layer.topology.tetrahedra.value)

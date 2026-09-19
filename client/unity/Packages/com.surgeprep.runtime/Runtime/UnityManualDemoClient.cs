@@ -93,17 +93,27 @@ namespace SurgePrep
         {
             var horizontal = 0f;
             var vertical = 0f;
+            var horizontalNudge = 0f;
+            var verticalNudge = 0f;
             if (ShowcaseInput.Held(KeyCode.A) || ShowcaseInput.Held(KeyCode.LeftArrow)) horizontal -= 1f;
             if (ShowcaseInput.Held(KeyCode.D) || ShowcaseInput.Held(KeyCode.RightArrow)) horizontal += 1f;
             if (ShowcaseInput.Held(KeyCode.S) || ShowcaseInput.Held(KeyCode.DownArrow)) vertical -= 1f;
             if (ShowcaseInput.Held(KeyCode.W) || ShowcaseInput.Held(KeyCode.UpArrow)) vertical += 1f;
+            if (ShowcaseInput.Pressed(KeyCode.A) || ShowcaseInput.Pressed(KeyCode.LeftArrow)) horizontalNudge -= 1f;
+            if (ShowcaseInput.Pressed(KeyCode.D) || ShowcaseInput.Pressed(KeyCode.RightArrow)) horizontalNudge += 1f;
+            if (ShowcaseInput.Pressed(KeyCode.S) || ShowcaseInput.Pressed(KeyCode.DownArrow)) verticalNudge -= 1f;
+            if (ShowcaseInput.Pressed(KeyCode.W) || ShowcaseInput.Pressed(KeyCode.UpArrow)) verticalNudge += 1f;
 
             // The front-facing anatomy camera mirrors the simulation X axis on screen.
-            if (invertHorizontalForFrontCamera) horizontal *= -1f;
+            if (invertHorizontalForFrontCamera)
+            {
+                horizontal *= -1f;
+                horizontalNudge *= -1f;
+            }
             lock (stateLock)
             {
-                xMm += horizontal * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
-                zMm += vertical * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
+                xMm += horizontal * movementSpeedMmPerSecond * Time.unscaledDeltaTime + horizontalNudge;
+                zMm += vertical * movementSpeedMmPerSecond * Time.unscaledDeltaTime + verticalNudge;
                 if (ShowcaseInput.Pressed(KeyCode.Space))
                 {
                     contactEngaged = !contactEngaged;

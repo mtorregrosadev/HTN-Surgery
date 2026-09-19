@@ -1,20 +1,41 @@
 import arucoPackage from 'js-aruco2';
+import 'js-aruco2/src/dictionaries/aruco_4x4_1000.js';
 
 const { AR } = arucoPackage;
 
-export const DICTIONARY = 'ARUCO_MIP_36h12';
+export const DICTIONARIES = {
+  SURGE_PREP: 'ARUCO_MIP_36h12',
+  OPENCV_4X4_50: 'OPENCV_4X4_50',
+};
+export const DEFAULT_DICTIONARY = DICTIONARIES.SURGE_PREP;
 export const TARGET_MARKER_ID = 0;
 export const MAX_PATH_POINTS = 180;
 
-export function createDetector() {
-  return new AR.Detector({ dictionaryName: DICTIONARY });
+AR.DICTIONARIES[DICTIONARIES.OPENCV_4X4_50] = {
+  ...AR.DICTIONARIES.ARUCO_4X4_1000,
+  codeList: AR.DICTIONARIES.ARUCO_4X4_1000.codeList.slice(0, 50),
+};
+
+export function createDetector(dictionaryName = DEFAULT_DICTIONARY) {
+  if (!Object.values(DICTIONARIES).includes(dictionaryName)) throw new Error('Unsupported marker dictionary');
+  return new AR.Detector({ dictionaryName });
 }
 
-export function markerSvg() {
-  return new AR.Dictionary(DICTIONARY).generateSVG(TARGET_MARKER_ID);
+export function markerSvg(dictionaryName = DEFAULT_DICTIONARY) {
+  if (!Object.values(DICTIONARIES).includes(dictionaryName)) throw new Error('Unsupported marker dictionary');
+  return new AR.Dictionary(dictionaryName).generateSVG(TARGET_MARKER_ID);
 }
 
-export function selectMarker(markers) {
+export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY) {
+  if (dictionaryName === DICTIONARIES.OPENCV_4X4_50) {
+    return markers.reduce((largest, marker) => {
+      const size = marker.corners.reduce((sum, corner, index) => {
+        const next = marker.corners[(index + 1) % 4];
+        return sum + Math.hypot(next.x - corner.x, next.y - corner.y);
+      }, 0);
+      return !largest || size > largest.size ? { marker, size } : largest;
+    }, null)?.marker ?? null;
+  }
   return markers.find((marker) => marker.id === TARGET_MARKER_ID) ?? null;
 }
 

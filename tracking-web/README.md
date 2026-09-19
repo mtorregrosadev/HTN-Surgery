@@ -10,11 +10,13 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173/`, download marker **#0**, print it without cropping its white margin, and attach it rigidly to a blunt tool. Start the camera and keep the entire marker in view. Camera access requires the browser's permission and a secure context; localhost works for local development. Do not use the setup on people or with a clinical instrument.
+Open `http://127.0.0.1:5173/`, choose a marker family, and use **Show matching marker #0** to display or download the exact image the detector expects. Print it or show it on another device with the **entire white margin** visible. Keep the phone display free of dark full-screen backgrounds around the marker, reflections, and UI overlays. Attach the printed marker rigidly to a blunt tool. Start the camera and keep the full marker in view. Camera access requires the browser's permission and a secure context; localhost works for local development. Do not use the setup on people or with a clinical instrument.
 
 If the browser reports **No camera found**, connect a webcam, open the page on a device with a camera, or choose **Open video file** to analyze a local recording. **Try synthetic demo** generates a moving marker in the browser so the tracker can be checked without hardware. Neither source is uploaded.
 
-The page uses the `ARUCO_MIP_36h12` dictionary from `js-aruco2`. The download button generates the exact marker the detector expects. Other dictionaries, including OpenCV's common `DICT_4X4_50`, are **not** interchangeable with this marker.
+The default marker family is `ARUCO_MIP_36h12` from `js-aruco2`. The page also supports OpenCV's common `DICT_4X4_50` family, selectable above the camera. The OpenCV option recognizes IDs 0–49, while the default Surge Prep option tracks ID 0. The generated preview and downloads always match the selected family. A similarly shaped marker from another generator can have different bits or a different ID; select its exact family or use the image from this page.
+
+When tracking fails, the page distinguishes a visible square with a code mismatch from a frame with no clean square candidate. A dark phone interface touching the black marker border can hide that border from the detector. The generated PNG includes a wide white margin to separate it from the surrounding screen.
 
 ## What the page measures
 

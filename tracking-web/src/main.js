@@ -1,5 +1,5 @@
 import './style.css';
-import { appendPath, createDetector, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
+import { appendPath, createDetector, DEFAULT_DICTIONARY, DICTIONARIES, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('camera');
@@ -9,7 +9,8 @@ const processingCanvas = document.createElement('canvas');
 const processingContext = processingCanvas.getContext('2d', { willReadFrequently: true });
 const preview = $('path-preview');
 const previewContext = preview.getContext('2d');
-const detector = createDetector();
+let dictionaryName = DEFAULT_DICTIONARY;
+let detector = createDetector(dictionaryName);
 
 let stream = null;
 let fileUrl = null;
@@ -23,6 +24,10 @@ let frameCount = 0;
 let missingFrames = 0;
 let currentPose = null;
 let depthReference = null;
+
+function markerDescription() {
+  return dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'an OpenCV 4×4 marker (IDs 0–49)' : 'marker #0';
+}
 
 function setStatus(label, kind = '') {
   $('status-pill').textContent = label;
@@ -93,7 +98,8 @@ function processFrame(timestampMs) {
   lastProcessedMs = timestampMs;
   processingContext.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
   const pixels = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
-  const marker = selectMarker(detector.detect(pixels));
+  const markers = detector.detect(pixels);
+  const marker = selectMarker(markers, dictionaryName);
   frameCount += 1;
   $('frame-count').textContent = String(frameCount);
 
@@ -105,7 +111,7 @@ function processFrame(timestampMs) {
     previousPose = pose;
     path = appendPath(path, pose);
     setStatus('MARKER FOUND', 'detected');
-    setTracking('Motion detected', 'Marker #0 is visible to the camera.');
+    setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
     $('position-x').textContent = Math.round(pose.x);
     $('position-y').textContent = Math.round(pose.y);
     const zMm = estimatedDepthMm(depthReference, pose.sizePx);
@@ -119,7 +125,12 @@ function processFrame(timestampMs) {
     if (missingFrames >= 3) {
       previousPose = null;
       setStatus('MARKER LOST', 'searching');
-      setTracking('Looking for marker', 'Show the full marker #0, well lit and in focus.');
+      const hint = markers.length
+        ? 'A marker was decoded, but its ID does not match #0. Show the matching marker from this page.'
+        : detector.candidates.length
+          ? 'A square is visible, but its code does not match. Check the marker family above.'
+          : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
+      setTracking('Looking for marker', hint);
       clearMeasurements();
     }
   }
@@ -151,7 +162,7 @@ function stopSource() {
   $('camera-button').innerHTML = 'Start camera <span>↗</span>';
   $('video-button').textContent = 'Open video file';
   $('demo-button').textContent = 'Try synthetic demo';
-  $('depth-hint').textContent = 'Measure camera-to-marker distance, enter it here, then set the reference while marker #0 is visible. Keep its face toward the camera.';
+  $('depth-hint').textContent = `Measure camera-to-marker distance, enter it here, then set the reference while ${markerDescription()} is visible. Keep its face toward the camera.`;
   setStatus('CAMERA OFF');
   setTracking('Waiting for camera', 'No reading yet.');
   clearMeasurements();
@@ -169,7 +180,7 @@ async function startDemo() {
   canvas.height = 480;
   const context = canvas.getContext('2d');
   const markerImage = new Image();
-  markerImage.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markerSvg())}`;
+  markerImage.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markerSvg(dictionaryName))}`;
   try {
     await markerImage.decode();
     let frame = 0;
@@ -227,7 +238,7 @@ function startProcessing(kind) {
   $('video-button').textContent = kind === 'file' ? 'Stop video' : 'Open video file';
   $('demo-button').textContent = kind === 'demo' ? 'Stop demo' : 'Try synthetic demo';
   setStatus('LOOKING FOR MARKER', 'searching');
-  setTracking('Looking for marker', kind === 'file' ? 'Play a video that shows marker #0.' : kind === 'demo' ? 'Detecting a generated moving marker.' : 'Show marker #0 to the camera.');
+  setTracking('Looking for marker', kind === 'file' ? `Play a video that shows ${markerDescription()}.` : kind === 'demo' ? 'Detecting a generated moving marker.' : `Show ${markerDescription()} to the camera.`);
   lastProcessedMs = 0;
   animationFrame = requestAnimationFrame(processFrame);
 }
@@ -269,7 +280,7 @@ $('demo-button').addEventListener('click', () => source === 'demo' ? stopSource(
 $('depth-button').addEventListener('click', () => {
   const distanceMm = Number($('reference-distance').value);
   if (!currentPose) {
-    $('depth-hint').textContent = 'Show marker #0 in the camera or video before setting a depth reference.';
+    $('depth-hint').textContent = `Show ${markerDescription()} in the camera or video before setting a depth reference.`;
   } else if (!Number.isFinite(distanceMm) || distanceMm < 50 || distanceMm > 5000) {
     $('depth-hint').textContent = 'Enter a measured camera-to-marker distance between 50 and 5000 mm.';
   } else {
@@ -279,14 +290,55 @@ $('depth-button').addEventListener('click', () => {
   }
 });
 $('clear-button').addEventListener('click', () => { path = []; drawPreview(); drawOverlay(null); });
-$('marker-button').addEventListener('click', () => {
-  const blob = new Blob([markerSvg()], { type: 'image/svg+xml' });
+$('dictionary').addEventListener('change', () => {
+  dictionaryName = $('dictionary').value;
+  detector = createDetector(dictionaryName);
+  previousPose = null;
+  currentPose = null;
+  depthReference = null;
+  path = [];
+  drawPreview();
+  clearMeasurements();
+  $('camera-label').textContent = dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'LIVE / OPENCV 4×4 50' : 'LIVE / ARUCO MIP 36h12';
+  $('depth-hint').textContent = 'Set a new depth reference after changing the marker family.';
+  if (source === 'demo') startDemo();
+});
+
+function markerDataUrl() {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markerSvg(dictionaryName))}`;
+}
+
+function showMarker() {
+  $('marker-preview').src = markerDataUrl();
+  $('marker-family-label').textContent = dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'OpenCV · 4×4 50' : 'Surge Prep · MIP 36h12';
+  $('marker-dialog').showModal();
+}
+
+function downloadBlob(blob, extension) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `surge-prep-aruco-mip-36h12-${TARGET_MARKER_ID}.svg`;
+  const family = dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'opencv-4x4-50' : 'mip-36h12';
+  link.download = `surge-prep-${family}-${TARGET_MARKER_ID}.${extension}`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+$('marker-button').addEventListener('click', showMarker);
+$('show-marker-button').addEventListener('click', showMarker);
+$('close-marker-button').addEventListener('click', () => $('marker-dialog').close());
+$('download-svg-button').addEventListener('click', () => downloadBlob(new Blob([markerSvg(dictionaryName)], { type: 'image/svg+xml' }), 'svg'));
+$('download-png-button').addEventListener('click', async () => {
+  const markerImage = new Image();
+  markerImage.src = markerDataUrl();
+  await markerImage.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1200;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, 1200, 1200);
+  context.drawImage(markerImage, 100, 100, 1000, 1000);
+  canvas.toBlob((blob) => { if (blob) downloadBlob(blob, 'png'); }, 'image/png');
 });
 window.addEventListener('pagehide', stopSource);
 drawPreview();

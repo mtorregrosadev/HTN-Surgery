@@ -23,12 +23,13 @@
         <section class="workspace" aria-label="Tracking workspace">
           <div class="camera-panel">
             <div class="panel-heading"><div><span class="section-number">01</span><h2>Camera view</h2></div><span id="status-pill" class="status-pill">CAMERA OFF</span></div>
+            <div class="marker-toolbar"><label for="dictionary">MARKER FAMILY <select id="dictionary"><option value="ARUCO_MIP_36h12">Surge Prep · MIP 36h12</option><option value="OPENCV_4X4_50">OpenCV · 4×4 50</option></select></label><button id="show-marker-button" type="button">Show matching marker #0 ↗</button><span>Use the same family as the marker in view.</span></div>
             <div id="camera-stage" class="camera-stage">
               <video id="camera" autoplay muted playsinline></video>
               <canvas id="overlay" aria-label="Marker outline and path"></canvas>
               <div id="empty-state" class="empty-state"><div class="reticle">⌗</div><strong>Ready to track</strong><span>Turn on the camera and show the marker to the lens.</span></div>
               <div class="camera-corner top-left"></div><div class="camera-corner top-right"></div><div class="camera-corner bottom-left"></div><div class="camera-corner bottom-right"></div>
-              <span class="camera-label">LIVE / ARUCO MIP 36h12</span>
+              <span id="camera-label" class="camera-label">LIVE / ARUCO MIP 36h12</span>
             </div>
             <div class="camera-controls"><button id="camera-button" class="primary-button" type="button">Start camera <span>↗</span></button><button id="video-button" class="secondary-button" type="button">Open video file</button><input id="video-file" type="file" accept="video/*" hidden /><button id="demo-button" class="secondary-button" type="button">Try synthetic demo</button><button id="clear-button" class="secondary-button" type="button">Clear path</button><span id="camera-error" class="camera-error" role="alert"></span></div>
           </div>
@@ -43,10 +44,11 @@
           </aside>
         </section>
 
-        <section class="setup"><div><span class="section-number">03</span><h2>Set up the test</h2></div><ol><li><span>01</span><p><strong>Print the marker</strong><br /><button id="marker-button" class="text-button" type="button">Download marker #0 ↗</button> at a fixed size, keeping the white margin intact.</p></li><li><span>02</span><p><strong>Attach it to a training tool</strong><br />Use a rigid mount and a blunt tool. Keep the full square visible.</p></li><li><span>03</span><p><strong>Start the camera</strong><br />Move the tool in front of the camera and follow the green outline and trail.</p></li></ol></section>
+        <section class="setup"><div><span class="section-number">03</span><h2>Set up the test</h2></div><ol><li><span>01</span><p><strong>Use a matching marker</strong><br /><button id="marker-button" class="text-button" type="button">Show and download marker #0 ↗</button> with its white border. A marker from another generator may use a different family.</p></li><li><span>02</span><p><strong>Attach it to a training tool</strong><br />Use a rigid mount and a blunt tool. Keep the full square visible.</p></li><li><span>03</span><p><strong>Start the camera</strong><br />Move the tool in front of the camera and follow the green outline and trail.</p></li></ol></section>
         <p class="footnote">Local computer vision test · Video is not stored or sent to the API · Do not use on people.</p>
       </main>
     </div>
+    <dialog id="marker-dialog" class="marker-dialog" aria-labelledby="marker-dialog-title"><div class="marker-dialog-head"><div><span class="micro-label">MATCHING MARKER</span><h2 id="marker-dialog-title">Marker #0</h2><p id="marker-family-label">Surge Prep · MIP 36h12</p></div><button id="close-marker-button" class="marker-close" type="button" aria-label="Close marker preview">×</button></div><div class="marker-sheet"><img id="marker-preview" alt="ArUco marker #0 with a wide white margin" /></div><p class="marker-dialog-tip">Display this image on another device or download it. Keep the entire white margin visible, avoid glare, and select the same marker family on the tracker.</p><div class="marker-dialog-actions"><button id="download-png-button" class="primary-button" type="button">Download PNG <span>↓</span></button><button id="download-svg-button" class="secondary-button" type="button">Download SVG</button></div></dialog>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

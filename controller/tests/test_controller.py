@@ -23,6 +23,7 @@ class FakeUpstream:
                 "simulationTimeMs": 10,
                 "tool": {
                     "positionMm": body["positionMm"],
+                    "orientation": {"qx": 0, "qy": 0, "qz": 0, "qw": 1},
                     "forceN": body["forceN"],
                     "contact": body["contact"],
                 },
@@ -49,4 +50,3 @@ def test_hardware_snapshot_reaches_vr_client():
                 snapshot = vr.receive_json()
                 assert snapshot["sessionId"] == "demo"
                 assert snapshot["events"] == ["contact-start"]
-

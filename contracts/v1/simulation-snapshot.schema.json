@@ -12,9 +12,10 @@
     "simulationTimeMs": { "type": "integer", "minimum": 0 },
     "tool": {
       "type": "object", "additionalProperties": false,
-      "required": ["positionMm", "forceN", "contact"],
+      "required": ["positionMm", "orientation", "forceN", "contact"],
       "properties": {
         "positionMm": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
+        "orientation": { "$ref": "tool-sample.schema.json#/$defs/quaternion" },
         "forceN": { "type": "number", "minimum": 0 },
         "contact": { "type": "boolean" }
       }

@@ -92,6 +92,7 @@ class ToolSample(ApiModel):
 
 class ToolState(ApiModel):
     position_mm: Vector3
+    orientation: Quaternion
     force_n: float = Field(ge=0)
     contact: bool
 

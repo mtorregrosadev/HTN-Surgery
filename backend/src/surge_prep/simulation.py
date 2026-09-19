@@ -68,6 +68,7 @@ class MemorySimulator(Simulator):
             simulation_time_ms=tick * self.step_ms,
             tool=ToolState(
                 position_mm=sample.position_mm,
+                orientation=sample.orientation,
                 force_n=sample.force_n,
                 contact=sample.contact,
             ),
@@ -192,6 +193,7 @@ class SofaSimulator(Simulator):
                 simulation_time_ms=tick * self.step_ms,
                 tool=ToolState(
                     position_mm=sample.position_mm,
+                    orientation=sample.orientation,
                     force_n=sample.force_n,
                     contact=sample.contact,
                 ),

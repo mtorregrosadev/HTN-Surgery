@@ -49,7 +49,7 @@ namespace SurgePrep
                 return;
             }
             var snapshot = JsonUtility.FromJson<SimulationSnapshotDto>(latest);
-            if (snapshot != null && snapshot.contractVersion == "1.0")
+            if (snapshot != null && ContractCompatibility.Accepts(snapshot.contractVersion))
             {
                 sceneRenderer.SetTarget(snapshot);
             }

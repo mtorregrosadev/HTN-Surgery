@@ -29,7 +29,6 @@ namespace SurgePrep
         private float targetPitch;
         private float introRemaining;
         private bool cutaway;
-        private float presetBlend;
 
         private void Awake()
         {

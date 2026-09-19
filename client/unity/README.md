@@ -25,6 +25,12 @@ rectangle on the table as the physical workspace preview. Validation currently
 checks only the minimum configured size; camera, board, and tool-tip calibration
 remain the next setup step. `Tab` hides or shows the setup panel.
 
+The generated workstation also starts a Unity camera preview automatically and
+shows its permission/device status. Press `V` to hide or show the preview. This
+is only the physical camera image; it does not yet detect ArUco markers or move
+the tool. ArUco pose detection must be added to the Scalpel controller, then
+the normalized pose will travel through the API/SOFA loop to Unity.
+
 Pose-only tool control (hardware later):
 
 - `W/A/S/D` screen-relative movement

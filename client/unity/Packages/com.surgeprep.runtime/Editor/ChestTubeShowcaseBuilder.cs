@@ -215,6 +215,7 @@ namespace SurgePrep.Editor
             window.transform.localRotation = Quaternion.Euler(0f, 90f, -90f);
             var workspaceSetup = window.AddComponent<WorkspaceConfigurationPanel>();
             SetObject(workspaceSetup, "workspaceAnchor", window.transform);
+            window.AddComponent<UnityCameraPreview>();
 
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
             simulation.transform.SetParent(window.transform, false);

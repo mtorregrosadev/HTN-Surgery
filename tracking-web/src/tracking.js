@@ -359,16 +359,18 @@ export function detectPurpleScalpel(imageData, options = {}) {
 
         while (queue.length > 0) {
           const curr = queue.pop();
-          // Search up to 2 cells away (Chebyshev dist <= 2) to bridge finger occlusion gaps (~32px)
-          for (let dr = -2; dr <= 2; dr += 1) {
-            for (let dc = -2; dc <= 2; dc += 1) {
+          // Build only directly connected components here. A wider flood fill
+          // would join nearby, off-axis purple objects before the component
+          // axis check can reject them. The secondary pass below handles the
+          // intentional, collinear finger-gap merge.
+          for (let dr = -1; dr <= 1; dr += 1) {
+            for (let dc = -1; dc <= 1; dc += 1) {
               if (dr === 0 && dc === 0) continue;
               const nr = curr.r + dr;
               const nc = curr.c + dc;
               if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
                 const nIdx = nr * cols + nc;
-                const req = Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 2 : 3;
-                if (grid[nIdx] >= req && labels[nIdx] === 0) {
+                if (grid[nIdx] >= 2 && labels[nIdx] === 0) {
                   labels[nIdx] = currentLabel;
                   queue.push({ r: nr, c: nc });
                   count += grid[nIdx];
@@ -556,7 +558,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
       isEndATip = distA < distB;
     } else {
       const deltaY = endA.y - endB.y;
-      isEndATip = Math.abs(deltaY) >= 12 ? deltaY > 0 : thickA <= thickB;
+      isEndATip = Math.abs(deltaY) >= 12 ? deltaY > 0 : thickA < thickB;
     }
   } else {
     // Initial detection: Tabletop surgical tool blade points downwards towards the surface
@@ -564,12 +566,20 @@ export function detectPurpleScalpel(imageData, options = {}) {
     if (Math.abs(deltaY) >= 14) {
       isEndATip = deltaY > 0;
     } else {
-      isEndATip = thickA <= thickB;
+      // Keep the endpoint ordering deterministic for a symmetric horizontal
+      // tool. Choosing B on an exact thickness tie preserves the historical
+      // zero-degree image-axis convention.
+      isEndATip = thickA < thickB;
     }
   }
 
   const tip = isEndATip ? endA : endB;
   const base = isEndATip ? endB : endA;
+  // PCA describes an undirected line and therefore jumps between equivalent
+  // +/-90-degree representations at vertical. Once the working tip is
+  // selected, the base-to-tip vector provides the directed, continuous angle
+  // that downstream pose/quaternion code expects (image Y points downward).
+  const angleDeg = Math.atan2(tip.y - base.y, tip.x - base.x) * 180 / Math.PI;
 
   return {
     x: tip.x,
@@ -580,7 +590,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
     baseY: base.y,
     centroidX: cx,
     centroidY: cy,
-    angleDeg: (theta * 180) / Math.PI,
+    angleDeg,
     length: projRange,
     tipThickness: Math.min(thickA, thickB),
     pixelCount: compPts.length * step * step,

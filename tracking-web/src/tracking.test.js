@@ -86,6 +86,29 @@ function squareCorners(centerX, centerY, sidePx, angleDeg = 0) {
   }));
 }
 
+function rotatedPurpleImage(width, height, centerX, centerY, length, thickness, angleDeg) {
+  const data = new Uint8ClampedArray(width * height * 4);
+  data.fill(220);
+  const angle = angleDeg * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const axial = dx * cos + dy * sin;
+      const perpendicular = -dx * sin + dy * cos;
+      if (Math.abs(axial) > length / 2 || Math.abs(perpendicular) > thickness / 2) continue;
+      const index = (y * width + x) * 4;
+      data[index] = 170;
+      data[index + 1] = 45;
+      data[index + 2] = 205;
+      data[index + 3] = 255;
+    }
+  }
+  return { width, height, data };
+}
+
 function angleDifference(actual, expected) {
   return Math.abs(((actual - expected + 180) % 360 + 360) % 360 - 180);
 }
@@ -289,6 +312,37 @@ test('detectPurpleScalpel locates centroid, bounding box, tip, and angle', () =>
   assert.ok(Math.abs(scalpel.angleDeg) < 5); // horizontal
 });
 
+test('detectPurpleScalpel keeps an off-axis purple block out of the tool component', () => {
+  const width = 240;
+  const height = 220;
+  const data = new Uint8ClampedArray(width * height * 4);
+  data.fill(220);
+
+  // Main horizontal tool body.
+  for (let y = 90; y <= 110; y += 1) {
+    for (let x = 60; x <= 180; x += 1) {
+      const index = (y * width + x) * 4;
+      data[index] = 170; data[index + 1] = 45; data[index + 2] = 205; data[index + 3] = 255;
+    }
+  }
+
+  // This block is close enough to expose the old two-cell flood-fill bridge,
+  // but is well below the tool axis and must remain a separate component.
+  for (let y = 134; y <= 150; y += 1) {
+    for (let x = 120; x <= 150; x += 1) {
+      const index = (y * width + x) * 4;
+      data[index] = 170; data[index + 1] = 45; data[index + 2] = 205; data[index + 3] = 255;
+    }
+  }
+
+  const scalpel = detectPurpleScalpel({ width, height, data }, { step: 2, minPixels: 10 });
+  assert.ok(scalpel);
+  assert.equal(scalpel.minY, 90);
+  assert.equal(scalpel.maxY, 110);
+  assert.ok(Math.abs(scalpel.centroidY - 100) < 1);
+  assert.ok(Math.abs(scalpel.angleDeg) < 5);
+});
+
 test('SignalSmoother suppresses noise, responds to fast motion, and clamps wild jumps', () => {
   const smoother = new SignalSmoother({ minAlpha: 0.35, maxAlpha: 0.85, speedThreshold: 80, maxJumpPx: 50 });
 
@@ -354,7 +408,7 @@ test('detectPurpleScalpel prioritizes downward cutting tip and respects previous
   assert.ok(scalpelLockedTop.tipY <= 60, `Expected tipY <= 60 with top anchor, got ${scalpelLockedTop.tipY}`);
 });
 
-test('detectPurpleScalpel bridges finger grip gap and detects the blade tip below fingers', () => {
+test('detectPurpleScalpel merges a separated collinear grip and blade across the finger gap', () => {
   const width = 200;
   const height = 300;
   const data = new Uint8ClampedArray(width * height * 4);
@@ -385,4 +439,18 @@ test('detectPurpleScalpel bridges finger grip gap and detects the blade tip belo
   assert.ok(scalpel.baseY <= 55, `Expected baseY <= 55, got ${scalpel.baseY}`);
 });
 
+test('detectPurpleScalpel keeps the directed angle continuous across vertical', () => {
+  const readings = [89, 91].map((angleDeg) => detectPurpleScalpel(
+    rotatedPurpleImage(300, 300, 150, 150, 220, 2, angleDeg),
+    { step: 1, minPixels: 10 },
+  ));
 
+  assert.ok(readings[0]);
+  assert.ok(readings[1]);
+  assert.ok(Math.abs(readings[0].angleDeg - 89) < 3, `Expected ~89°, got ${readings[0].angleDeg}`);
+  assert.ok(Math.abs(readings[1].angleDeg - 91) < 3, `Expected ~91°, got ${readings[1].angleDeg}`);
+  assert.ok(
+    Math.abs(readings[1].angleDeg - readings[0].angleDeg) < 6,
+    `Expected a continuous crossing, got ${readings[0].angleDeg}° -> ${readings[1].angleDeg}°`,
+  );
+});

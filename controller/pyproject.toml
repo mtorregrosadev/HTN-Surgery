@@ -3,23 +3,23 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "surge-prep-api"
+name = "surge-prep-controller"
 version = "0.1.0"
-description = "Session API and SOFA bridge for Surge Prep"
+description = "Scalpel controller boundary for Surge Prep"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",
-  "pydantic>=2.10,<3",
-  "pymongo>=4.11,<5",
-  "uvicorn[standard]>=0.34,<1"
+  "httpx>=0.28,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "websockets>=14,<17"
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.28,<1", "jsonschema>=4.23,<5", "pytest>=8.3,<9", "pytest-asyncio>=0.25,<1"]
+dev = ["pytest>=8.3,<9"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/surge_prep"]
+packages = ["src/scalpel_controller"]

@@ -8,7 +8,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from .models import SimulationSnapshot, TissueState, ToolSample, ToolState
+from .layered_chest import LayeredChestState, exposed_surface_y_mm, pose_contact, tool_state_from_pose
+from .models import SimulationSnapshot, ToolSample
 
 
 class Simulator(ABC):
@@ -30,56 +31,87 @@ class Simulator(ABC):
         pass
 
 
+def _snapshot(
+    sample: ToolSample,
+    tick: int,
+    step_ms: int,
+    backend: str,
+    chest: LayeredChestState,
+    events: list[str],
+    contact: bool,
+    penetration_mm: float,
+    reaction_n: float,
+    contact_point,
+    deformation_mm: float,
+    mode: str,
+    degraded: bool = False,
+) -> SimulationSnapshot:
+    stage = "degraded" if degraded else chest.procedure_stage(contact)
+    return SimulationSnapshot(
+        session_id=sample.session_id,
+        tick=tick,
+        simulation_time_ms=tick * step_ms,
+        simulation_backend=backend,
+        procedure_stage=stage,
+        session_degraded=degraded,
+        tool=tool_state_from_pose(sample, contact, penetration_mm, reaction_n, contact_point),
+        tissue=chest.tissue_state(deformation_mm, mode),
+        deformable_meshes=chest.meshes(sample, deformation_mm, contact),
+        events=events,
+    )
+
+
 class MemorySimulator(Simulator):
-    """Deterministic development adapter matching the SOFA bridge contract."""
+    """Deterministic development adapter matching the native SOFA contract."""
 
     name = "memory-development-only"
 
     def __init__(self, step_ms: int = 10) -> None:
         self.step_ms = step_ms
         self.ticks: dict[str, int] = defaultdict(int)
-        self.last_contact: dict[str, bool] = {}
+        self.contacts: dict[str, bool] = defaultdict(bool)
+        self.chests: dict[str, LayeredChestState] = {}
 
     async def begin_session(self, session_id: str) -> None:
         self.ticks[session_id] = 0
-        self.last_contact[session_id] = False
+        self.contacts[session_id] = False
+        self.chests[session_id] = LayeredChestState()
 
     async def step(self, sample: ToolSample) -> SimulationSnapshot:
         self.ticks[sample.session_id] += 1
         tick = self.ticks[sample.session_id]
-        deformation = min(sample.force_n * 1.5, 12.0) if sample.contact else 0.0
-        previous_contact = self.last_contact[sample.session_id]
-        events = []
-        if sample.contact != previous_contact:
-            events.append("contact-start" if sample.contact else "contact-end")
-        self.last_contact[sample.session_id] = sample.contact
-        return SimulationSnapshot(
-            session_id=sample.session_id,
-            tick=tick,
-            simulation_time_ms=tick * self.step_ms,
-            tool=ToolState(
-                position_mm=sample.position_mm,
-                force_n=sample.force_n,
-                contact=sample.contact,
-            ),
-            tissue=TissueState(deformation_mm=deformation),
-            events=events,
+        chest = self.chests[sample.session_id]
+        surface = exposed_surface_y_mm(chest, sample.position_mm.x, sample.position_mm.z)
+        contact, penetration, reaction, contact_point = pose_contact(sample, surface)
+        previous_contact = self.contacts[sample.session_id]
+        events: list[str] = []
+        if contact and not previous_contact:
+            events.append("first-contact")
+            events.append("contact-start")
+        elif previous_contact and not contact:
+            events.append("contact-end")
+        self.contacts[sample.session_id] = contact
+        mode, chest_events, blocked = chest.update(sample, contact, penetration, reaction)
+        events.extend(chest_events)
+        if blocked:
+            events.append("protected-anatomy")
+        deformation = min(penetration, 12.0) if contact else 0.0
+        return _snapshot(
+            sample, tick, self.step_ms, self.name, chest, events,
+            contact, penetration, reaction, contact_point, deformation, mode,
         )
 
     async def end_session(self, session_id: str) -> None:
         self.ticks.pop(session_id, None)
-        self.last_contact.pop(session_id, None)
+        self.contacts.pop(session_id, None)
+        self.chests.pop(session_id, None)
 
 
 class SofaSimulator(Simulator):
-    """In-process bridge to a SOFA Python scene.
+    """In-process bridge to a native SOFA Python scene."""
 
-    SOFA is imported lazily so API and contract development can run without the
-    native simulator installed. A lock serializes access because SOFA scene
-    mutation is not thread-safe.
-    """
-
-    name = "sofa"
+    name = "sofa-native"
+    network_substeps = 3
 
     def __init__(self, scene_path: str, step_ms: int = 10) -> None:
         self.scene_path = Path(scene_path).resolve()
@@ -89,15 +121,24 @@ class SofaSimulator(Simulator):
         self._simulation: Any = None
         self._scene_module: ModuleType | None = None
         self._sessions: dict[str, tuple[Any, int, bool]] = {}
+        self._chests: dict[str, LayeredChestState] = {}
 
     async def start(self) -> None:
         try:
             import Sofa
             import Sofa.Simulation
+            import SofaRuntime  # noqa: F401
         except ImportError as error:
             raise RuntimeError(
-                "SOFA backend selected but SofaPython3 is unavailable; run with "
-                "SURGE_PREP_SIMULATION_BACKEND=memory for API-only development"
+                "Native SOFA backend selected but SofaPython3 is unavailable. "
+                "Install official SOFA v26.06 and run scripts/check-native-sofa.py"
+            ) from error
+        try:
+            import SofaCarving  # noqa: F401
+        except ImportError as error:
+            raise RuntimeError(
+                "SofaCarving is required for the showcase topology path. "
+                "Use the official SOFA v26.06 package and re-run scripts/check-native-sofa.py"
             ) from error
         if not self.scene_path.is_file():
             raise RuntimeError(f"SOFA scene not found: {self.scene_path}")
@@ -124,6 +165,7 @@ class SofaSimulator(Simulator):
             self._scene_module.createScene(root)
             self._simulation.init(root)
             self._sessions[session_id] = (root, 0, False)
+            self._chests[session_id] = LayeredChestState()
 
     async def step(self, sample: ToolSample) -> SimulationSnapshot:
         async with self._lock:
@@ -136,27 +178,28 @@ class SofaSimulator(Simulator):
                 sample.orientation.qx, sample.orientation.qy,
                 sample.orientation.qz, sample.orientation.qw,
             ]]
-            root.tool.dofs.position.value = tool_pose
-            self._simulation.animate(root, self.step_ms / 1000)
-            tick += 1
-            deformation = self._maximum_deformation_mm(root)
+            self._apply_tool(root, sample, tool_pose)
+            for _ in range(self.network_substeps):
+                self._simulation.animate(root, 0.01)
+            tick += self.network_substeps
+            chest = self._chests[sample.session_id]
+            surface = exposed_surface_y_mm(chest, sample.position_mm.x, sample.position_mm.z)
+            contact, penetration, reaction, contact_point = pose_contact(sample, surface)
+            deformation = max(penetration, self._maximum_deformation_mm(root))
             events: list[str] = []
-            if sample.contact and not previous_contact:
+            if contact and not previous_contact:
+                events.append("first-contact")
                 events.append("contact-start")
-            elif previous_contact and not sample.contact:
+            elif previous_contact and not contact:
                 events.append("contact-end")
-            self._sessions[sample.session_id] = (root, tick, sample.contact)
-            return SimulationSnapshot(
-                session_id=sample.session_id,
-                tick=tick,
-                simulation_time_ms=tick * self.step_ms,
-                tool=ToolState(
-                    position_mm=sample.position_mm,
-                    force_n=sample.force_n,
-                    contact=sample.contact,
-                ),
-                tissue=TissueState(deformation_mm=deformation),
-                events=events,
+            mode, chest_events, blocked = chest.update(sample, contact, penetration, reaction)
+            events.extend(chest_events)
+            if blocked:
+                events.append("protected-anatomy")
+            self._sessions[sample.session_id] = (root, tick, contact)
+            return _snapshot(
+                sample, tick, self.step_ms, self.name, chest, events,
+                contact, penetration, reaction, contact_point, deformation, mode,
             )
 
     async def end_session(self, session_id: str) -> None:
@@ -164,13 +207,23 @@ class SofaSimulator(Simulator):
             state = self._sessions.pop(session_id, None)
             if state is not None:
                 self._simulation.unload(state[0])
+            self._chests.pop(session_id, None)
+
+    def _apply_tool(self, root: Any, sample: ToolSample, tool_pose: list) -> None:
+        root.tool.dofs.position.value = tool_pose
+        radius = {"scalpel": 1.6, "blunt-dissector": 2.4, "chest-tube": 3.2}.get(sample.tool_id, 2.0)
+        if hasattr(root.tool, "collision"):
+            root.tool.collision.radius.value = radius
 
     @staticmethod
     def _maximum_deformation_mm(root: Any) -> float:
-        current = root.tissue.dofs.position.value
-        resting = root.tissue.dofs.rest_position.value
+        current = root.skin.dofs.position.value
+        resting = root.skin.dofs.rest_position.value
         maximum_squared = 0.0
         for point, rest in zip(current, resting):
             squared = sum((float(point[index]) - float(rest[index])) ** 2 for index in range(3))
             maximum_squared = max(maximum_squared, squared)
-        return maximum_squared**0.5
+        return maximum_squared ** 0.5
+
+
+CONTACT_THRESHOLD_FROM_FEM = 0.12

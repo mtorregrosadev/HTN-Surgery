@@ -74,8 +74,11 @@ class Session(SessionCreate):
     last_timestamp_ms: int | None = None
 
 
+SHOWCASE_TOOL_IDS = ("scalpel", "blunt-dissector", "chest-tube")
+
+
 class ToolSample(ApiModel):
-    contract_version: str = Field(default="1.0", pattern=r"^1\.0$")
+    contract_version: str = Field(default="1.1", pattern=r"^1\.(0|1)$")
     session_id: str = Field(min_length=1)
     tool_id: str = Field(min_length=1)
     device_id: str = Field(min_length=1)
@@ -89,25 +92,66 @@ class ToolSample(ApiModel):
     contact: bool
     quality: float = Field(default=1.0, ge=0, le=1)
     source_healthy: bool = True
+    input_mode: str = Field(default="pose-only", pattern=r"^(pose-only|calibrated-hardware)$")
+    force_measurement_valid: bool = False
 
 
 class ToolState(ApiModel):
     position_mm: Vector3
+    orientation: Quaternion
     force_n: float = Field(ge=0)
     contact: bool
+    contact_point_mm: Vector3 | None = None
+    contact_normal: Vector3 | None = None
+    reaction_force_n: float = Field(default=0, ge=0)
+    penetration_depth_mm: float = Field(default=0, ge=0)
+
+
+class TissueLayerState(ApiModel):
+    layer_id: str
+    opened: bool = False
+    opening_progress: float = Field(default=0, ge=0, le=1)
+    deformation_mm: float = Field(default=0, ge=0)
 
 
 class TissueState(ApiModel):
     deformation_mm: float = Field(ge=0)
+    incision_progress: float = Field(default=0, ge=0, le=1)
+    incision_length_mm: float = Field(default=0, ge=0)
+    incision_depth_mm: float = Field(default=0, ge=0)
+    interaction_mode: str = "approach"
+    active_layer: str = "none"
+    layers: list[TissueLayerState] = Field(default_factory=list)
+
+
+class DeformableMeshState(ApiModel):
+    object_id: str = Field(min_length=1)
+    topology_revision: int = Field(ge=1)
+    vertices_mm: list[Vector3]
+    triangle_indices: list[int]
+
+    @model_validator(mode="after")
+    def triangles_reference_existing_vertices(self) -> "DeformableMeshState":
+        if len(self.triangle_indices) % 3:
+            raise ValueError("triangleIndices must contain complete triangles")
+        if self.triangle_indices and max(self.triangle_indices) >= len(self.vertices_mm):
+            raise ValueError("triangleIndices references a missing vertex")
+        if self.triangle_indices and min(self.triangle_indices) < 0:
+            raise ValueError("triangleIndices cannot be negative")
+        return self
 
 
 class SimulationSnapshot(ApiModel):
-    contract_version: str = "1.0"
+    contract_version: str = Field(default="1.1", pattern=r"^1\.(0|1)$")
     session_id: str
     tick: int = Field(ge=0)
     simulation_time_ms: int = Field(ge=0)
+    simulation_backend: str = "memory-development-only"
+    procedure_stage: str = "approach"
+    session_degraded: bool = False
     tool: ToolState
     tissue: TissueState
+    deformable_meshes: list[DeformableMeshState] = Field(default_factory=list)
     events: list[str] = Field(default_factory=list)
 
 
@@ -117,6 +161,19 @@ class SessionMetrics(ApiModel):
     contact_time_ms: int
     peak_force_n: float
     mean_contact_force_n: float
+    mean_target_offset_mm: float
+    peak_target_offset_mm: float
+    force_consistency_n: float
+    controlled_contact_percent: float
+    illustrative_score_percent: float
+    incision_length_mm: float = 0
+    max_incision_depth_mm: float = 0
+    incision_progress_percent: float = 0
+    mean_instrument_angle_deg: float = 0
+    mean_reaction_force_n: float = 0
+    outside_corridor_contacts: int = 0
+    layer_violations: int = 0
+    tube_placement_complete: bool = False
 
 
 class SessionResult(ApiModel):

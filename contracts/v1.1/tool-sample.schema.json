@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://surge-prep.dev/contracts/v1.1/tool-sample.schema.json",
+  "title": "Normalized tool sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion", "sessionId", "toolId", "deviceId", "calibrationId",
+    "sequence", "timestampMs", "positionMm", "orientation", "forceN", "contact"
+  ],
+  "properties": {
+    "contractVersion": { "enum": ["1.0", "1.1"] },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "toolId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Showcase instruments are scalpel, blunt-dissector, and chest-tube. Other IDs remain valid for stored 1.0 sessions."
+    },
+    "deviceId": { "type": "string", "minLength": 1 },
+    "calibrationId": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "timestampMs": { "type": "integer", "minimum": 0 },
+    "receivedAtMs": { "type": "integer", "minimum": 0 },
+    "positionMm": { "$ref": "#/$defs/vector3" },
+    "orientation": { "$ref": "#/$defs/quaternion" },
+    "forceN": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Measured force when forceMeasurementValid is true. Pose-only input must not use this field to trigger cutting."
+    },
+    "contact": {
+      "type": "boolean",
+      "description": "Measured contact flag. Pose-only input cannot trigger cutting by itself; SOFA contact is authoritative."
+    },
+    "quality": { "type": "number", "minimum": 0, "maximum": 1 },
+    "sourceHealthy": { "type": "boolean" },
+    "inputMode": { "enum": ["pose-only", "calibrated-hardware"] },
+    "forceMeasurementValid": { "type": "boolean" }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }
+    },
+    "quaternion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["qx", "qy", "qz", "qw"],
+      "properties": {
+        "qx": { "type": "number" }, "qy": { "type": "number" },
+        "qz": { "type": "number" }, "qw": { "type": "number" }
+      }
+    }
+  }
+}

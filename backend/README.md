@@ -9,13 +9,20 @@ and must not connect directly to this service, MongoDB, or SOFA.
 From the repository root:
 
 ```bash
-docker compose up --build
+docker compose --profile memory-dev up --build
 ```
 
 OpenAPI documentation is then available at `http://localhost:8000/docs`.
 The container defaults to the deterministic memory simulator so teammates can
 integrate without a native SOFA installation; MongoDB remains real and stores
-calibrations, sessions, normalized samples, and simulation snapshots.
+calibrations, sessions, normalized samples, and simulation snapshots. Do not
+present that memory path as SOFA physics. The showcase uses host SOFA:
+
+```bash
+docker compose up -d mongodb
+scripts/check-native-sofa.py
+scripts/start-showcase.sh
+```
 
 ## Run locally without infrastructure
 
@@ -39,10 +46,9 @@ export SURGE_PREP_SOFA_SCENE=../simulation/sofa_scene.py
 uvicorn surge_prep.app:app
 ```
 
-The bundled scene uses a small hexahedral training pad for responsive physics.
-It deliberately does not use the high-resolution anatomy surfaces as an FEM
-mesh. Replace the pad with a procedure-specific volumetric mesh later while
-keeping the API contracts unchanged.
+The showcase scene uses a localized ~80 × 80 mm layered chest region. Visual
+BodyParts3D meshes are never used as the FEM volume. Native SOFA v26.06 on the
+host Mac is required for the demo; see `docs/SHOWCASE_IMPLEMENTATION_HANDOFF.md`.
 
 ## Controller flow
 
@@ -63,3 +69,21 @@ should surface that reason and reconnect only after the source is valid. The
 development simulator emits `contact-start` and `contact-end` when contact
 changes, including after initial hover. It is only a contract-compatible
 fallback, not an authoritative SOFA physics demo.
+
+
+Snapshots include the authoritative tool pose plus deformable surface vertices
+and triangle topology for immersive rendering. The controller broadcasts these
+snapshots to Unity; clients must not open this API WebSocket directly.
+
+The chest-tube scene uses a localized, predefined incision corridor. Tool contact
+produces deformation; controlled force plus travel progressively changes the
+returned surface topology and wound-channel mesh. Incision length, depth, and
+completion are stored with simulation snapshots and returned in completed-session
+metrics. This is a prototype interaction model, not validated tissue or
+medical-device accuracy.
+
+Completing a session returns deterministic force, contact-time, target-offset,
+and force-consistency metrics plus an illustrative composite score. The draft
+weights and force range are recorded in
+`../models/exercises/chest-tube-access-demo.json`; they require qualified
+instructor review and are not clinical thresholds.

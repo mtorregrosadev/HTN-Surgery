@@ -16,7 +16,7 @@ Build one convincing end-to-end exercise:
 6. Save the attempt, calculate objective metrics, and replay it.
 7. Generate an AI-assisted explanation grounded in an instructor-approved rubric.
 
-The demo should optimize for a complete, reliable loop rather than broad anatomical coverage or high-fidelity tissue cutting.
+The demo should optimize for a complete, reliable loop. Layered tissue opening is bounded to one instructor-defined chest-tube corridor; it is not general-purpose anatomical cutting.
 
 ## Canonical architecture
 
@@ -74,9 +74,21 @@ An illustrative normalized sample (the exact contract is still to be finalized):
 The runnable Python service under `backend/` exposes the controller-facing
 versioned REST and WebSocket API, owns session validation and deterministic
 metrics, persists through a MongoDB adapter, and drives SOFA through an isolated
-simulation adapter. Shared payload schemas live under `contracts/v1/`; embedded,
-controller, and VR work should generate or validate DTOs against those contracts
-instead of copying backend-internal models.
+simulation adapter. Shared payload schemas live under `contracts/v1/` (stored
+1.0 sessions) and `contracts/v1.1/` (showcase). Embedded, controller, and VR
+work should generate or validate DTOs against those contracts instead of
+copying backend-internal models. See `docs/SHOWCASE_IMPLEMENTATION_HANDOFF.md`.
+
+The runnable Scalpel relay under `controller/` separates hardware ingestion
+from client subscriptions. The embedded Unity package under `client/unity/`
+consumes those subscriptions, interpolates the authoritative tool pose and
+deformable simulation surface, and is ready to host inside an OpenXR/XREAL
+project. Its `Surge Prep > Build Chest-Tube Showcase` editor command creates a
+computer- and XR-ready layered chest scene from the curated anatomy source set,
+with a live target/force HUD and blunt-tool rehearsal flow. The localized interaction region is an ~80 × 80 mm layered chest patch. Native
+SOFA owns collision, deformation, reaction force, and bounded topology change.
+The memory adapter is for tests and teammates without SOFA and must be labelled
+SOFA OFFLINE in the showcase.
 
 For API-only development, the default in-memory simulator preserves the same
 request/response shape. The demo must switch to the `sofa` backend so SOFA is

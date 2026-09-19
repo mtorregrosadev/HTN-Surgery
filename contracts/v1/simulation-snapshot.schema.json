@@ -4,7 +4,7 @@
   "title": "SOFA simulation snapshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contractVersion", "sessionId", "tick", "simulationTimeMs", "tool", "tissue", "events"],
+  "required": ["contractVersion", "sessionId", "tick", "simulationTimeMs", "tool", "tissue", "deformableMeshes", "events"],
   "properties": {
     "contractVersion": { "const": "1.0" },
     "sessionId": { "type": "string", "minLength": 1 },
@@ -12,19 +12,47 @@
     "simulationTimeMs": { "type": "integer", "minimum": 0 },
     "tool": {
       "type": "object", "additionalProperties": false,
-      "required": ["positionMm", "forceN", "contact"],
+      "required": ["positionMm", "orientation", "forceN", "contact"],
       "properties": {
         "positionMm": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
+        "orientation": { "$ref": "tool-sample.schema.json#/$defs/quaternion" },
         "forceN": { "type": "number", "minimum": 0 },
         "contact": { "type": "boolean" }
       }
     },
     "tissue": {
       "type": "object", "additionalProperties": false,
-      "required": ["deformationMm"],
-      "properties": { "deformationMm": { "type": "number", "minimum": 0 } }
+      "required": ["deformationMm", "incisionProgress", "incisionLengthMm", "incisionDepthMm", "interactionMode"],
+      "properties": {
+        "deformationMm": { "type": "number", "minimum": 0 },
+        "incisionProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "incisionLengthMm": { "type": "number", "minimum": 0 },
+        "incisionDepthMm": { "type": "number", "minimum": 0 },
+        "interactionMode": {
+          "enum": ["approach", "contact", "cutting", "low-force", "excessive-force", "outside-target"]
+        }
+      }
+    },
+    "deformableMeshes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "topologyRevision", "verticesMm", "triangleIndices"],
+        "properties": {
+          "objectId": { "type": "string", "minLength": 1 },
+          "topologyRevision": { "type": "integer", "minimum": 1 },
+          "verticesMm": {
+            "type": "array",
+            "items": { "$ref": "tool-sample.schema.json#/$defs/vector3" }
+          },
+          "triangleIndices": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
     },
     "events": { "type": "array", "items": { "type": "string" } }
   }
 }
-

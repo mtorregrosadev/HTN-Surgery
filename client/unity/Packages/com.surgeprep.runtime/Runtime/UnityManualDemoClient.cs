@@ -221,7 +221,7 @@ namespace SurgePrep
                 sequence = sequence++,
                 timestampMs = clock.ElapsedMilliseconds,
                 positionMm = new Vector3Dto { x = sampleX, y = 16f - sampleForce * 2f, z = sampleZ },
-                orientation = new QuaternionDto { qx = 0.173648f, qy = 0f, qz = 0f, qw = 0.984808f },
+                orientation = new QuaternionDto { qx = 0.461749f, qy = 0f, qz = 0f, qw = 0.887011f },
                 forceN = sampleForce,
                 contact = sampleForce > 0.08f,
                 quality = 1f,

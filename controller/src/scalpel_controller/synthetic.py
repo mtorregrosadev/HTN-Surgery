@@ -151,10 +151,10 @@ async def run(controller_url: str, sample_limit: int, manual: bool = False) -> N
                             "z": z_mm,
                         },
                         "orientation": {
-                            "qx": 0.173648,
+                            "qx": 0.461749,
                             "qy": 0,
                             "qz": 0,
-                            "qw": 0.984808,
+                            "qw": 0.887011,
                         },
                         "forceN": force_n,
                         "contact": force_n > 0.08,

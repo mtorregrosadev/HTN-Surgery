@@ -148,7 +148,7 @@ namespace SurgePrep.Editor
             var skin = TransparentMaterial("Skin", new Color(0.46f, 0.18f, 0.13f, 0.18f));
             var target = Material("Target", new Color(0.05f, 0.95f, 0.78f), 0.0f, 0.65f);
             var tissue = TransparentMaterial(
-                "InteractiveTissue", new Color(0.3f, 0.025f, 0.04f, 0.58f)
+                "InteractiveTissue", new Color(0.42f, 0.025f, 0.045f, 0.82f)
             );
             var incision = EmissiveMaterial(
                 "IncisionChannel", new Color(0.7f, 0.015f, 0.025f)
@@ -364,7 +364,7 @@ namespace SurgePrep.Editor
         {
             var guide = new GameObject("Illustrative target region - instructor review required");
             guide.transform.SetParent(parent, false);
-            guide.transform.localPosition = new Vector3(0f, 0.002f, 0f);
+            guide.transform.localPosition = new Vector3(0f, 0.0145f, 0f);
             var line = guide.AddComponent<LineRenderer>();
             line.useWorldSpace = false;
             line.loop = true;

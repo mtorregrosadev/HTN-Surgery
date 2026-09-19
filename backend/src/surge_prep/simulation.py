@@ -99,7 +99,9 @@ class IncisionState:
             events.append("incision-start" if previous_cut_cells == 0 else "incision-extended")
         return ("cutting" if self.cut_cells else "contact"), events
 
-    def surface_mesh(self, sample: ToolSample, deformation_mm: float) -> DeformableMeshState:
+    def surface_mesh(
+        self, sample: ToolSample, deformation_mm: float, surface_y_mm: float = 14.0
+    ) -> DeformableMeshState:
         x_columns = self.cell_count + 1
         z_rows = [-18.0, -12.0, -6.0, -0.15, 0.15, 6.0, 12.0, 18.0]
         vertices: list[Vector3] = []
@@ -119,7 +121,9 @@ class IncisionState:
                     -deformation_mm * math.exp(-distance_squared / 80.0) if sample.contact else 0.0
                 )
                 seam_drop = -local_depth * 0.55 if row in (3, 4) else 0.0
-                vertices.append(Vector3(x=x, y=contact_deformation + seam_drop, z=z))
+                vertices.append(
+                    Vector3(x=x, y=surface_y_mm + contact_deformation + seam_drop, z=z)
+                )
 
         triangles: list[int] = []
         for row in range(len(z_rows) - 1):
@@ -237,7 +241,7 @@ class MemorySimulator(Simulator):
             tissue=incision.tissue_state(deformation, mode),
             deformable_meshes=[
                 incision.surface_mesh(sample, deformation),
-                incision.wound_mesh(),
+                incision.wound_mesh(surface_y_mm=13.8),
             ],
             events=events,
         )

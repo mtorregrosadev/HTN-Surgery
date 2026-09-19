@@ -48,10 +48,10 @@ namespace SurgePrep
                 toolTransform = tip.transform;
 
                 var shaft = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                shaft.name = "Blunt Training Tool";
+                shaft.name = "Training blade handle";
                 shaft.transform.SetParent(tip.transform, false);
-                shaft.transform.localPosition = new Vector3(0f, 0.035f, 0f);
-                shaft.transform.localScale = new Vector3(0.004f, 0.035f, 0.004f);
+                shaft.transform.localPosition = new Vector3(0f, 0.065f, 0f);
+                shaft.transform.localScale = new Vector3(0.007f, 0.05f, 0.007f);
                 var collider = shaft.GetComponent<Collider>();
                 if (collider != null)
                 {
@@ -60,6 +60,36 @@ namespace SurgePrep
                 if (toolMaterial != null)
                 {
                     shaft.GetComponent<MeshRenderer>().sharedMaterial = toolMaterial;
+                }
+
+                var blade = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                blade.name = "Visible blunt training blade";
+                blade.transform.SetParent(tip.transform, false);
+                blade.transform.localPosition = new Vector3(0f, 0.013f, 0f);
+                blade.transform.localScale = new Vector3(0.011f, 0.026f, 0.002f);
+                var bladeCollider = blade.GetComponent<Collider>();
+                if (bladeCollider != null)
+                {
+                    Destroy(bladeCollider);
+                }
+                if (toolMaterial != null)
+                {
+                    blade.GetComponent<MeshRenderer>().sharedMaterial = toolMaterial;
+                }
+
+                var guard = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                guard.name = "Training blade guard";
+                guard.transform.SetParent(tip.transform, false);
+                guard.transform.localPosition = new Vector3(0f, 0.029f, 0f);
+                guard.transform.localScale = new Vector3(0.022f, 0.004f, 0.011f);
+                var guardCollider = guard.GetComponent<Collider>();
+                if (guardCollider != null)
+                {
+                    Destroy(guardCollider);
+                }
+                if (toolMaterial != null)
+                {
+                    guard.GetComponent<MeshRenderer>().sharedMaterial = toolMaterial;
                 }
 
                 var indicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);

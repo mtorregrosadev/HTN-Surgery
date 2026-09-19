@@ -44,7 +44,8 @@ async def test_session_round_trip_and_metrics():
     assert snapshot.tick == 3
     assert snapshot.tissue.deformation_mm == 3.0
     assert snapshot.deformable_meshes[0].object_id == "training-membrane"
-    assert min(vertex.y for vertex in snapshot.deformable_meshes[0].vertices_mm) < -2.5
+    assert min(vertex.y for vertex in snapshot.deformable_meshes[0].vertices_mm) < 11.5
+    assert max(vertex.y for vertex in snapshot.deformable_meshes[0].vertices_mm) <= 14.0
     assert snapshot.events == ["excessive-force"]
     result = await service.complete_session(session.session_id)
     assert result.metrics.sample_count == 3

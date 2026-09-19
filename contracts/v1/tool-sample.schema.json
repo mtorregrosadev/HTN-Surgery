@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://surge-prep.dev/contracts/v1/tool-sample.schema.json",
+  "title": "Normalized tool sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion", "sessionId", "toolId", "deviceId", "calibrationId",
+    "sequence", "timestampMs", "positionMm", "orientation", "forceN", "contact"
+  ],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "toolId": { "type": "string", "minLength": 1 },
+    "deviceId": { "type": "string", "minLength": 1 },
+    "calibrationId": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "timestampMs": { "type": "integer", "minimum": 0 },
+    "receivedAtMs": { "type": "integer", "minimum": 0 },
+    "positionMm": { "$ref": "#/$defs/vector3" },
+    "orientation": { "$ref": "#/$defs/quaternion" },
+    "forceN": { "type": "number", "minimum": 0 },
+    "contact": { "type": "boolean" },
+    "quality": { "type": "number", "minimum": 0, "maximum": 1 },
+    "sourceHealthy": { "type": "boolean" }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }
+    },
+    "quaternion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["qx", "qy", "qz", "qw"],
+      "properties": {
+        "qx": { "type": "number" }, "qy": { "type": "number" },
+        "qz": { "type": "number" }, "qw": { "type": "number" }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://surge-prep.dev/contracts/v1/simulation-snapshot.schema.json",
+  "title": "SOFA simulation snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "sessionId", "tick", "simulationTimeMs", "tool", "tissue", "events"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "tick": { "type": "integer", "minimum": 0 },
+    "simulationTimeMs": { "type": "integer", "minimum": 0 },
+    "tool": {
+      "type": "object", "additionalProperties": false,
+      "required": ["positionMm", "forceN", "contact"],
+      "properties": {
+        "positionMm": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
+        "forceN": { "type": "number", "minimum": 0 },
+        "contact": { "type": "boolean" }
+      }
+    },
+    "tissue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["deformationMm"],
+      "properties": { "deformationMm": { "type": "number", "minimum": 0 } }
+    },
+    "events": { "type": "array", "items": { "type": "string" } }
+  }
+}
+

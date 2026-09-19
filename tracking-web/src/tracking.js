@@ -1,7 +1,6 @@
 import arucoPackage from 'js-aruco2';
 import 'js-aruco2/src/dictionaries/aruco_4x4_1000.js';
 import 'js-aruco2/src/dictionaries/aruco_5x5_1000.js';
-import 'js-aruco2/src/dictionaries/apriltag_36h11.js';
 
 const { AR } = arucoPackage;
 
@@ -9,12 +8,11 @@ export const DICTIONARIES = {
   SURGE_PREP: 'ARUCO_MIP_36h12',
   OPENCV_4X4_50: 'OPENCV_4X4_50',
   OPENCV_5X5_250: 'OPENCV_5X5_250',
-  APRILTAG_36H11: 'APRILTAG_36h11',
 };
-export const DEFAULT_DICTIONARY = DICTIONARIES.APRILTAG_36H11;
+export const DEFAULT_DICTIONARY = DICTIONARIES.OPENCV_5X5_250;
 export const TARGET_MARKER_ID = 0;
 export const MAX_PATH_POINTS = 180;
-export const CALIBRATION_FRAMES = 5;
+export const CALIBRATION_FRAMES = 8;
 
 AR.DICTIONARIES[DICTIONARIES.OPENCV_4X4_50] = {
   ...AR.DICTIONARIES.ARUCO_4X4_1000,
@@ -29,7 +27,6 @@ const MAX_CORRECTION_BITS = {
   [DICTIONARIES.SURGE_PREP]: 5,
   [DICTIONARIES.OPENCV_4X4_50]: 1,
   [DICTIONARIES.OPENCV_5X5_250]: 2,
-  [DICTIONARIES.APRILTAG_36H11]: 5,
 };
 
 const GEOMETRY_EPSILON = 1e-8;
@@ -42,40 +39,6 @@ export function createDetector(dictionaryName = DEFAULT_DICTIONARY) {
 export function markerSvg(dictionaryName = DEFAULT_DICTIONARY) {
   if (!Object.values(DICTIONARIES).includes(dictionaryName)) throw new Error('Unsupported marker dictionary');
   return new AR.Dictionary(dictionaryName).generateSVG(TARGET_MARKER_ID);
-}
-
-/**
- * Stretch the luminance range of an ImageData in-place so that js-aruco2's
- * fixed 5×5 adaptive threshold (offset=7) has adequate contrast to work on
- * dimly lit or low-contrast camera frames.
- *
- * Only activates when the image is under-exposed (max<200) or lacks a dark
- * baseline (min>60). Skips for well-lit scenes to keep the fast path free.
- *
- * The function is intentionally simple (linear per-channel rescale) so it adds
- * less than 1 ms at 640×480 on a modern device.
- */
-export function contrastStretch(imageData) {
-  const { data } = imageData;
-  let lo = 255;
-  let hi = 0;
-  // Sample every 4th pixel to find the luminance range quickly.
-  for (let i = 0; i < data.length; i += 16) {
-    const lum = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
-    if (lum < lo) lo = lum;
-    if (lum > hi) hi = lum;
-  }
-  // Only stretch if the range is compressed (dark scene or washed-out background).
-  const range = hi - lo;
-  if (range < 1 || (lo < 10 && hi > 220)) return imageData; // already full-range
-  const scale = 255 / range;
-  for (let i = 0; i < data.length; i += 4) {
-    data[i] = Math.min(255, Math.max(0, (data[i] - lo) * scale + 0.5) | 0);
-    data[i + 1] = Math.min(255, Math.max(0, (data[i + 1] - lo) * scale + 0.5) | 0);
-    data[i + 2] = Math.min(255, Math.max(0, (data[i + 2] - lo) * scale + 0.5) | 0);
-    // alpha unchanged
-  }
-  return imageData;
 }
 
 function cross(ax, ay, bx, by) {
@@ -183,16 +146,6 @@ export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY, locke
   }, null)?.marker ?? null;
 }
 
-// Retain the selected ID through brief occlusion. A different tag can take over
-// only after the old one has been absent long enough to avoid frame-to-frame
-// jumps between multiple visible tags.
-export function selectMarkerAfterLoss(markers, dictionaryName, lockedMarkerId, lastSeenMs, timestampMs, switchAfterMs = 1000) {
-  const selected = selectMarker(markers, dictionaryName, lockedMarkerId);
-  if (selected || lockedMarkerId === null || lockedMarkerId === undefined) return selected;
-  if (!Number.isFinite(lastSeenMs) || !Number.isFinite(timestampMs) || timestampMs - lastSeenMs < switchAfterMs) return null;
-  return selectMarker(markers, dictionaryName);
-}
-
 export function markerPose2d(marker, timestampMs) {
   if (!marker || !Array.isArray(marker.corners) || marker.corners.length !== 4) return null;
   const { corners } = marker;
@@ -234,7 +187,7 @@ export function advanceDepthCalibration(samples, pose) {
   const first = samples[0];
   if (first && (
     pose.markerId !== first.markerId ||
-    Math.hypot(pose.x - first.x, pose.y - first.y) > 20 ||
+    Math.hypot(pose.x - first.x, pose.y - first.y) > 12 ||
     Math.abs(pose.sizePx - first.sizePx) > first.sizePx * 0.05
   )) {
     samples = [];
@@ -406,18 +359,16 @@ export function detectPurpleScalpel(imageData, options = {}) {
 
         while (queue.length > 0) {
           const curr = queue.pop();
-          // Build only directly connected components here. A wider flood fill
-          // would join nearby, off-axis purple objects before the component
-          // axis check can reject them. The secondary pass below handles the
-          // intentional, collinear finger-gap merge.
-          for (let dr = -1; dr <= 1; dr += 1) {
-            for (let dc = -1; dc <= 1; dc += 1) {
+          // Search up to 2 cells away (Chebyshev dist <= 2) to bridge finger occlusion gaps (~32px)
+          for (let dr = -2; dr <= 2; dr += 1) {
+            for (let dc = -2; dc <= 2; dc += 1) {
               if (dr === 0 && dc === 0) continue;
               const nr = curr.r + dr;
               const nc = curr.c + dc;
               if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
                 const nIdx = nr * cols + nc;
-                if (grid[nIdx] >= 2 && labels[nIdx] === 0) {
+                const req = Math.max(Math.abs(dr), Math.abs(dc)) === 1 ? 2 : 3;
+                if (grid[nIdx] >= req && labels[nIdx] === 0) {
                   labels[nIdx] = currentLabel;
                   queue.push({ r: nr, c: nc });
                   count += grid[nIdx];
@@ -605,7 +556,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
       isEndATip = distA < distB;
     } else {
       const deltaY = endA.y - endB.y;
-      isEndATip = Math.abs(deltaY) >= 12 ? deltaY > 0 : thickA < thickB;
+      isEndATip = Math.abs(deltaY) >= 12 ? deltaY > 0 : thickA <= thickB;
     }
   } else {
     // Initial detection: Tabletop surgical tool blade points downwards towards the surface
@@ -613,20 +564,12 @@ export function detectPurpleScalpel(imageData, options = {}) {
     if (Math.abs(deltaY) >= 14) {
       isEndATip = deltaY > 0;
     } else {
-      // Keep the endpoint ordering deterministic for a symmetric horizontal
-      // tool. Choosing B on an exact thickness tie preserves the historical
-      // zero-degree image-axis convention.
-      isEndATip = thickA < thickB;
+      isEndATip = thickA <= thickB;
     }
   }
 
   const tip = isEndATip ? endA : endB;
   const base = isEndATip ? endB : endA;
-  // PCA describes an undirected line and therefore jumps between equivalent
-  // +/-90-degree representations at vertical. Once the working tip is
-  // selected, the base-to-tip vector provides the directed, continuous angle
-  // that downstream pose/quaternion code expects (image Y points downward).
-  const angleDeg = Math.atan2(tip.y - base.y, tip.x - base.x) * 180 / Math.PI;
 
   return {
     x: tip.x,
@@ -637,7 +580,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
     baseY: base.y,
     centroidX: cx,
     centroidY: cy,
-    angleDeg,
+    angleDeg: (theta * 180) / Math.PI,
     length: projRange,
     tipThickness: Math.min(thickA, thickB),
     pixelCount: compPts.length * step * step,

@@ -173,6 +173,39 @@ To verify that live transport and physics are still working:
 .venv-sofa/bin/python scripts/check-live-physics.py
 ```
 
+To measure the native solver without MongoDB, HTTP, or Unity in the result:
+
+```bash
+.venv-sofa/bin/python scripts/benchmark-sofa-pipeline.py
+```
+
+The benchmark prints the tetrahedral element count, median and p95 solve plus
+mesh-export time, authoritative snapshot rate, payload size, deformation,
+reaction force, and topology changes. Record its output whenever changing mesh
+density, collision, solver, or carving settings; visual smoothness alone is not
+evidence that the physical model improved.
+
+### Current physics fidelity boundary
+
+Native mode uses SOFA for contact constraints, reaction force, deformation, and
+tetrahedral topology removal. Unity no longer receives the old procedural
+`wound-channel` mesh in native mode: a visible opening must be present in the
+boundary topology exported by SOFA. The active field currently contains 2,856
+vertices and 7,584 tetrahedra across four material layers and uses SOFA's fast
+corotational tetrahedral force field. These are illustrative training material
+parameters, not validated human-tissue properties.
+
+This is not yet equivalent to InfinyTech3D's liver-resection showcase. That
+showcase uses its dedicated native C++ SofaUnity integration, and its fine
+incision/refinement path depends on a separate `MeshRefinement` plugin. The
+official macOS SOFA 26.06 package includes InfinyToolkit but does not include
+that dependency, and the linked upstream repository is not publicly available.
+Do not claim sub-element incision accuracy from basic SofaCarving, which removes
+whole intersected tetrahedra. Reaching the reference quality requires either a
+licensed/supported refinement stack or a separately engineered, tested adaptive
+remeshing implementation. The controller integration does not need to change
+for either route.
+
 ### 7. Stop cleanly
 
 Exit Unity Play Mode and run:

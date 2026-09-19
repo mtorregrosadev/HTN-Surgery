@@ -90,10 +90,10 @@ namespace SurgePrep
         {
             var horizontal = 0f;
             var vertical = 0f;
-            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) horizontal -= 1f;
-            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) horizontal += 1f;
-            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) vertical -= 1f;
-            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) vertical += 1f;
+            if (ShowcaseInput.Held(KeyCode.A) || ShowcaseInput.Held(KeyCode.LeftArrow)) horizontal -= 1f;
+            if (ShowcaseInput.Held(KeyCode.D) || ShowcaseInput.Held(KeyCode.RightArrow)) horizontal += 1f;
+            if (ShowcaseInput.Held(KeyCode.S) || ShowcaseInput.Held(KeyCode.DownArrow)) vertical -= 1f;
+            if (ShowcaseInput.Held(KeyCode.W) || ShowcaseInput.Held(KeyCode.UpArrow)) vertical += 1f;
 
             // The front-facing anatomy camera mirrors the simulation X axis on screen.
             if (invertHorizontalForFrontCamera) horizontal *= -1f;
@@ -101,13 +101,13 @@ namespace SurgePrep
             {
                 xMm += horizontal * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
                 zMm += vertical * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
-                if (Input.GetKeyDown(KeyCode.Space))
+                if (ShowcaseInput.Pressed(KeyCode.Space))
                 {
                     forceN = forceN > 0f ? 0f : 0.75f;
                 }
-                if (Input.GetKeyDown(KeyCode.LeftBracket)) forceN = Mathf.Max(0f, forceN - 0.1f);
-                if (Input.GetKeyDown(KeyCode.RightBracket)) forceN = Mathf.Min(1.5f, forceN + 0.1f);
-                if (Input.GetKeyDown(KeyCode.R))
+                if (ShowcaseInput.Pressed(KeyCode.LeftBracket)) forceN = Mathf.Max(0f, forceN - 0.1f);
+                if (ShowcaseInput.Pressed(KeyCode.RightBracket)) forceN = Mathf.Min(1.5f, forceN + 0.1f);
+                if (ShowcaseInput.Pressed(KeyCode.R))
                 {
                     xMm = 0f;
                     zMm = 0f;

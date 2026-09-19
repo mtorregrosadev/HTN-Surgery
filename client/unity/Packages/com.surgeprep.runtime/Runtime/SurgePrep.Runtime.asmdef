@@ -1,7 +1,7 @@
 {
   "name": "SurgePrep.Runtime",
   "rootNamespace": "SurgePrep",
-  "references": [],
+  "references": ["Unity.InputSystem"],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
@@ -12,4 +12,3 @@
   "versionDefines": [],
   "noEngineReferences": false
 }
-

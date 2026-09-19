@@ -31,7 +31,7 @@ namespace SurgePrep
 
         private void Update()
         {
-            if (sceneCamera != null && Input.GetKeyDown(KeyCode.V))
+            if (sceneCamera != null && ShowcaseInput.Pressed(KeyCode.V))
             {
                 SetSideBySide(rightEye == null);
             }

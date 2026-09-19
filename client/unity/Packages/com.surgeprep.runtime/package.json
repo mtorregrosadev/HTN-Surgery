@@ -4,7 +4,9 @@
   "displayName": "Surge Prep Runtime",
   "description": "Scalpel controller transport and SOFA scene rendering for Unity XR clients.",
   "unity": "2021.3",
+  "dependencies": {
+    "com.unity.inputsystem": "1.7.0"
+  },
   "keywords": ["xr", "medical-training", "websocket"],
   "author": { "name": "Surge Prep" }
 }
-

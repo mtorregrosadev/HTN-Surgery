@@ -18,7 +18,7 @@ namespace SurgePrep
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.Tab))
+            if (ShowcaseInput.Pressed(KeyCode.Tab))
             {
                 visible = !visible;
             }

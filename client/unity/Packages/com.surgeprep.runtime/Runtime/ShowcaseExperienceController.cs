@@ -38,21 +38,22 @@ namespace SurgePrep
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.C)) SetChestView();
-            if (Input.GetKeyDown(KeyCode.O)) SetRoomView();
-            if (Input.GetKeyDown(KeyCode.Alpha1)) Toggle(skinLayer);
-            if (Input.GetKeyDown(KeyCode.Alpha2)) Toggle(muscleLayer);
-            if (Input.GetKeyDown(KeyCode.Alpha3)) Toggle(boneLayer);
+            if (ShowcaseInput.Pressed(KeyCode.C)) SetChestView();
+            if (ShowcaseInput.Pressed(KeyCode.O)) SetRoomView();
+            if (ShowcaseInput.Pressed(KeyCode.Alpha1)) Toggle(skinLayer);
+            if (ShowcaseInput.Pressed(KeyCode.Alpha2)) Toggle(muscleLayer);
+            if (ShowcaseInput.Pressed(KeyCode.Alpha3)) Toggle(boneLayer);
 
-            var scroll = Input.mouseScrollDelta.y;
+            var scroll = ShowcaseInput.MouseScroll();
             if (Mathf.Abs(scroll) > 0.001f)
             {
                 distance = Mathf.Clamp(distance - scroll * zoomSensitivity, 0.38f, 2.4f);
             }
-            if (Input.GetMouseButton(1))
+            if (ShowcaseInput.RightMouseHeld())
             {
-                yaw += Input.GetAxis("Mouse X") * orbitSensitivity;
-                pitch -= Input.GetAxis("Mouse Y") * orbitSensitivity;
+                var delta = ShowcaseInput.MouseDelta();
+                yaw += delta.x * orbitSensitivity;
+                pitch -= delta.y * orbitSensitivity;
                 yaw = Mathf.Clamp(yaw, -78f, 78f);
                 pitch = Mathf.Clamp(pitch, -42f, 42f);
             }

@@ -212,3 +212,100 @@ export function appendPath(path, pose, isContinuous = true) {
   if (last && isContinuous && Math.hypot(pose.x - last.x, pose.y - last.y) < 2) return path;
   return [...path, { x: pose.x, y: pose.y, continuous: isContinuous }].slice(-MAX_PATH_POINTS);
 }
+
+export function isPurpleColor(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (max < 38 || delta < 22) return false;
+  if (delta / max < 0.20) return false;
+  if (g > r * 0.90 || g > b * 0.90) return false;
+  let h = 0;
+  if (max === r) h = ((g - b) / delta) % 6;
+  else if (max === g) return false;
+  else h = (r - g) / delta + 4;
+  h = Math.round(h * 60);
+  if (h < 0) h += 360;
+  return h >= 245 && h <= 345;
+}
+
+export function detectPurpleScalpel(imageData, options = {}) {
+  if (!imageData || !imageData.data) return null;
+  const { width, height, data } = imageData;
+  const step = options.step ?? 2;
+  const minPixels = options.minPixels ?? 15;
+
+  let count = 0;
+  let sumX = 0;
+  let sumY = 0;
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+
+  for (let y = 0; y < height; y += step) {
+    const rowOffset = y * width * 4;
+    for (let x = 0; x < width; x += step) {
+      const idx = rowOffset + x * 4;
+      if (isPurpleColor(data[idx], data[idx + 1], data[idx + 2])) {
+        count += 1;
+        sumX += x;
+        sumY += y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (count < minPixels) return null;
+
+  const cx = sumX / count;
+  const cy = sumY / count;
+  let mu20 = 0;
+  let mu02 = 0;
+  let mu11 = 0;
+  let maxDistSq = 0;
+  let tipX = cx;
+  let tipY = cy;
+
+  for (let y = minY; y <= maxY; y += step) {
+    const rowOffset = y * width * 4;
+    for (let x = minX; x <= maxX; x += step) {
+      const idx = rowOffset + x * 4;
+      if (isPurpleColor(data[idx], data[idx + 1], data[idx + 2])) {
+        const dx = x - cx;
+        const dy = y - cy;
+        mu20 += dx * dx;
+        mu02 += dy * dy;
+        mu11 += dx * dy;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > maxDistSq) {
+          maxDistSq = distSq;
+          tipX = x;
+          tipY = y;
+        }
+      }
+    }
+  }
+
+  const angleRad = 0.5 * Math.atan2(2 * mu11, mu20 - mu02);
+  const angleDeg = (angleRad * 180) / Math.PI;
+
+  return {
+    x: cx,
+    y: cy,
+    tipX,
+    tipY,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+    pixelCount: count * step * step,
+    angleDeg,
+    confidence: Math.min(1, count / 60),
+  };
+}

@@ -1,5 +1,5 @@
 import './style.css';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, demoMarkerState, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, demoMarkerState, detectPurpleScalpel, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('camera');
@@ -31,6 +31,10 @@ let frameCount = 0;
 let selectedMarkerId = null;
 let depthReference = null;
 let calibrationSamples = [];
+let lastDetectionMs = 0;
+let missingFrames = 0;
+let scalpelOffset = null;
+const TRACKING_HOLD_MS = 450;
 
 function markerDescription() {
   return familyDetails[dictionaryName].description;
@@ -155,25 +159,85 @@ function drawPreview() {
   $('path-count').textContent = `${path.length} points`;
 }
 
-function drawOverlay(pose) {
+function drawOverlay(pose, scalpel) {
   overlayContext.clearRect(0, 0, overlay.width, overlay.height);
   drawPath(overlayContext, path, 1, 1);
-  if (!pose) return;
-  const corners = pose.corners;
-  overlayContext.beginPath();
-  overlayContext.moveTo(corners[0].x, corners[0].y);
-  for (const corner of corners.slice(1)) overlayContext.lineTo(corner.x, corner.y);
-  overlayContext.closePath();
-  overlayContext.strokeStyle = '#c4ffbd';
-  overlayContext.lineWidth = 3;
-  overlayContext.stroke();
-  overlayContext.fillStyle = '#c4ffbd';
-  overlayContext.beginPath(); overlayContext.arc(pose.x, pose.y, 5, 0, Math.PI * 2); overlayContext.fill();
-  overlayContext.fillStyle = '#101b24';
-  overlayContext.fillRect(pose.x + 10, pose.y - 24, 52, 23);
-  overlayContext.fillStyle = '#c4ffbd';
-  overlayContext.font = 'bold 14px monospace';
-  overlayContext.fillText(`#${pose.markerId}`, pose.x + 17, pose.y - 8);
+
+  // 1. Draw Purple Scalpel if detected
+  if (scalpel) {
+    overlayContext.save();
+    const pad = 6;
+    const bx = Math.max(0, scalpel.minX - pad);
+    const by = Math.max(0, scalpel.minY - pad);
+    const bw = Math.min(overlay.width - bx, scalpel.width + pad * 2);
+    const bh = Math.min(overlay.height - by, scalpel.height + pad * 2);
+
+    // Glowing purple bounding box
+    overlayContext.strokeStyle = '#d966ff';
+    overlayContext.lineWidth = 2;
+    overlayContext.strokeRect(bx, by, bw, bh);
+
+    // Scalpel Centroid
+    overlayContext.fillStyle = '#d966ff';
+    overlayContext.beginPath();
+    overlayContext.arc(scalpel.x, scalpel.y, 4, 0, Math.PI * 2);
+    overlayContext.fill();
+
+    // Scalpel Tip
+    overlayContext.strokeStyle = '#ffffff';
+    overlayContext.lineWidth = 2;
+    overlayContext.beginPath();
+    overlayContext.arc(scalpel.tipX, scalpel.tipY, 6, 0, Math.PI * 2);
+    overlayContext.stroke();
+    overlayContext.fillStyle = '#f0b3ff';
+    overlayContext.beginPath();
+    overlayContext.arc(scalpel.tipX, scalpel.tipY, 3, 0, Math.PI * 2);
+    overlayContext.fill();
+
+    // Label badge
+    const badgeY = by > 24 ? by - 24 : by + bh + 4;
+    overlayContext.fillStyle = '#220b33';
+    overlayContext.fillRect(bx, badgeY, 130, 20);
+    overlayContext.strokeStyle = '#d966ff';
+    overlayContext.lineWidth = 1;
+    overlayContext.strokeRect(bx, badgeY, 130, 20);
+    overlayContext.fillStyle = '#f0b3ff';
+    overlayContext.font = 'bold 11px monospace';
+    overlayContext.fillText('✂ SCALPEL · LILA', bx + 8, badgeY + 14);
+    overlayContext.restore();
+  }
+
+  // 2. Draw Marker if detected
+  if (pose) {
+    const corners = pose.corners;
+    overlayContext.beginPath();
+    overlayContext.moveTo(corners[0].x, corners[0].y);
+    for (const corner of corners.slice(1)) overlayContext.lineTo(corner.x, corner.y);
+    overlayContext.closePath();
+    overlayContext.strokeStyle = '#c4ffbd';
+    overlayContext.lineWidth = 3;
+    overlayContext.stroke();
+    overlayContext.fillStyle = '#c4ffbd';
+    overlayContext.beginPath(); overlayContext.arc(pose.x, pose.y, 5, 0, Math.PI * 2); overlayContext.fill();
+    overlayContext.fillStyle = '#101b24';
+    overlayContext.fillRect(pose.x + 10, pose.y - 24, 52, 23);
+    overlayContext.fillStyle = '#c4ffbd';
+    overlayContext.font = 'bold 14px monospace';
+    overlayContext.fillText(`#${pose.markerId}`, pose.x + 17, pose.y - 8);
+  }
+
+  // 3. Connect Marker and Scalpel if both are visible
+  if (pose && scalpel) {
+    overlayContext.save();
+    overlayContext.setLineDash([4, 4]);
+    overlayContext.strokeStyle = 'rgba(217, 102, 255, 0.75)';
+    overlayContext.lineWidth = 1.5;
+    overlayContext.beginPath();
+    overlayContext.moveTo(pose.x, pose.y);
+    overlayContext.lineTo(scalpel.x, scalpel.y);
+    overlayContext.stroke();
+    overlayContext.restore();
+  }
 }
 
 function processFrame(timestampMs) {
@@ -191,7 +255,10 @@ function processFrame(timestampMs) {
     $('frame-count').textContent = String(frameCount);
 
     const pose = markerPose2d(marker, timestampMs);
+    const scalpel = detectPurpleScalpel(pixels, { step: 2, minPixels: 14 });
+
     if (pose) {
+      lastDetectionMs = timestampMs;
       if (selectedMarkerId === null) selectedMarkerId = pose.markerId;
       if (!depthReference) {
         const result = advanceDepthCalibration(calibrationSamples, pose);
@@ -207,12 +274,56 @@ function processFrame(timestampMs) {
       } else {
         setCalibrationStatus('Z READY', true);
       }
-      const hadPreviousPose = previousPose !== null;
+
       const speed = movementSpeed(previousPose, pose);
-      path = appendPath(path, pose, hadPreviousPose && speed !== null);
+
+      // Autocomplete motion gaps across brief frame drops
+      let isContinuous = true;
+      if (previousPose) {
+        const dt = timestampMs - previousPose.timestampMs;
+        const dist = Math.hypot(pose.x - previousPose.x, pose.y - previousPose.y);
+        if (missingFrames > 0) {
+          if (dt <= TRACKING_HOLD_MS && dist <= 200) {
+            const steps = Math.min(4, Math.max(1, Math.floor(dist / 20)));
+            for (let s = 1; s < steps; s += 1) {
+              const t = s / steps;
+              path = appendPath(path, {
+                x: previousPose.x + (pose.x - previousPose.x) * t,
+                y: previousPose.y + (pose.y - previousPose.y) * t,
+              }, true);
+            }
+            isContinuous = true;
+          } else {
+            isContinuous = false;
+          }
+        }
+      } else {
+        isContinuous = false;
+      }
+
+      path = appendPath(path, pose, isContinuous);
       previousPose = pose;
-      setStatus('MARKER FOUND', 'detected');
-      setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
+      missingFrames = 0;
+
+      if (scalpel) {
+        scalpelOffset = { dx: scalpel.x - pose.x, dy: scalpel.y - pose.y };
+        setStatus('DUAL: QR + SCALPEL', 'dual');
+        setTracking('Dual tracking active', `Marker #${pose.markerId} and purple scalpel tracked simultaneously.`);
+        $('marker-substatus').textContent = `#${pose.markerId}`;
+        $('marker-substatus').className = 'marker-active';
+        $('scalpel-substatus').textContent = 'DETECTED';
+        $('scalpel-substatus').className = 'scalpel-active';
+        $('scalpel-status').textContent = 'TRACKED';
+      } else {
+        setStatus('MARKER FOUND', 'detected');
+        setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
+        $('marker-substatus').textContent = `#${pose.markerId}`;
+        $('marker-substatus').className = 'marker-active';
+        $('scalpel-substatus').textContent = 'SEARCHING';
+        $('scalpel-substatus').className = '';
+        $('scalpel-status').textContent = '—';
+      }
+
       $('position-x').textContent = Math.round(pose.x);
       $('position-y').textContent = Math.round(pose.y);
       const zPercent = depthReference?.markerId === pose.markerId
@@ -223,32 +334,87 @@ function processFrame(timestampMs) {
       $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
       $('speed').textContent = speed == null ? '—' : Math.round(speed);
       $('marker-id').textContent = `#${pose.markerId}`;
-    } else {
-      // A lost or malformed detection is a real gap. Clear stale readouts and
-      // drop the speed baseline immediately; the next valid pose starts a new
-      // path segment and is never fabricated across this gap.
-      previousPose = null;
-      if (!depthReference) {
-        calibrationSamples = [];
-        setCalibrationStatus('SHOW MARKER');
-        $('depth-hint').textContent = 'Keep the full marker visible and hold it still to set the starting position.';
+    } else if (scalpel) {
+      // Scalpel tracked without QR marker! Keep tracking alive
+      lastDetectionMs = timestampMs;
+      const effectiveX = scalpelOffset ? scalpel.x - scalpelOffset.dx : scalpel.tipX;
+      const effectiveY = scalpelOffset ? scalpel.y - scalpelOffset.dy : scalpel.tipY;
+      const scalpelPose = {
+        x: effectiveX,
+        y: effectiveY,
+        timestampMs,
+        angleDeg: scalpel.angleDeg,
+      };
+
+      const speed = movementSpeed(previousPose, scalpelPose);
+
+      let isContinuous = true;
+      if (previousPose) {
+        const dt = timestampMs - previousPose.timestampMs;
+        const dist = Math.hypot(scalpelPose.x - previousPose.x, scalpelPose.y - previousPose.y);
+        if (dt <= TRACKING_HOLD_MS && dist <= 200) {
+          isContinuous = true;
+        } else {
+          isContinuous = false;
+        }
       } else {
-        setCalibrationStatus('Z PAUSED');
+        isContinuous = false;
       }
-      setStatus('MARKER LOST', 'searching');
-      const hint = selectedMarkerId !== null
-        ? `Marker #${selectedMarkerId} is not visible. Keep it in view; another marker will not be selected automatically.`
-        : markers.length
-          ? dictionaryName === DICTIONARIES.SURGE_PREP
-            ? 'This marker does not match Surge Prep #0. Select the family shown by your marker generator, or use the marker from this page.'
-            : 'The square is not a reliable match. Check the exact marker family in your generator, then keep its white margin visible.'
-          : detector.candidates.length
-            ? 'A square is visible, but its code does not match. Check the marker family above.'
-            : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
-      setTracking('Looking for marker', hint);
-      clearMeasurements();
+
+      path = appendPath(path, scalpelPose, isContinuous);
+      previousPose = scalpelPose;
+      missingFrames = 0;
+
+      setStatus('SCALPEL TRACKING', 'scalpel');
+      setTracking('Tracking Purple Scalpel', 'QR marker occluded; maintaining tool position via purple scalpel.');
+      $('marker-substatus').textContent = 'OCCLUDED';
+      $('marker-substatus').className = '';
+      $('scalpel-substatus').textContent = 'ACTIVE';
+      $('scalpel-substatus').className = 'scalpel-active';
+      $('scalpel-status').textContent = 'TRACKED';
+
+      $('position-x').textContent = Math.round(scalpelPose.x);
+      $('position-y').textContent = Math.round(scalpelPose.y);
+      $('angle').textContent = `${Math.round(scalpel.angleDeg)}°`;
+      $('speed').textContent = speed == null ? '—' : Math.round(speed);
+      if (depthReference) setCalibrationStatus('Z READY', true);
+    } else {
+      // Neither detected
+      missingFrames += 1;
+      const dt = timestampMs - lastDetectionMs;
+
+      if (previousPose && dt <= TRACKING_HOLD_MS) {
+        // Holding window: retain state so it doesn't flicker or look broken
+        setStatus('TRACKING (HOLD)', 'hold');
+        setTracking('Holding tool trajectory', 'Brief motion pause or glare; preserving position.');
+        $('marker-substatus').textContent = 'HOLD';
+        $('marker-substatus').className = '';
+        $('scalpel-substatus').textContent = 'HOLD';
+        $('scalpel-substatus').className = '';
+      } else {
+        // Truly lost after grace period
+        previousPose = null;
+        if (!depthReference) {
+          calibrationSamples = [];
+          setCalibrationStatus('SHOW MARKER');
+          $('depth-hint').textContent = 'Keep the marker or purple scalpel visible to set the starting position.';
+        } else {
+          setCalibrationStatus('Z PAUSED');
+        }
+        setStatus('LOOKING FOR TOOL', 'searching');
+        const hint = selectedMarkerId !== null
+          ? `Marker #${selectedMarkerId} and purple scalpel are not visible. Keep either in view.`
+          : 'Keep the marker or purple scalpel clearly visible to the camera.';
+        setTracking('Looking for tool', hint);
+        clearMeasurements();
+        $('marker-substatus').textContent = '—';
+        $('marker-substatus').className = '';
+        $('scalpel-substatus').textContent = '—';
+        $('scalpel-substatus').className = '';
+        $('scalpel-status').textContent = '—';
+      }
     }
-    drawOverlay(pose);
+    drawOverlay(pose, scalpel);
     drawPreview();
   } finally {
     isProcessing = false;
@@ -291,6 +457,14 @@ function stopSource() {
   $('video-file').value = '';
   resetMarkerSelection();
   previousPose = null;
+  missingFrames = 0;
+  lastDetectionMs = 0;
+  scalpelOffset = null;
+  $('marker-substatus').textContent = '—';
+  $('marker-substatus').className = '';
+  $('scalpel-substatus').textContent = '—';
+  $('scalpel-substatus').className = '';
+  $('scalpel-status').textContent = '—';
   resetDepthCalibration('Start the camera or demo, then show the marker.');
   path = [];
   frameCount = 0;
@@ -330,6 +504,23 @@ async function startDemo() {
       context.save();
       context.translate(x, y);
       context.rotate(angleRad);
+
+      // Render purple scalpel attached to the marker in demo mode
+      context.fillStyle = '#9b30d9';
+      context.beginPath();
+      if (context.roundRect) context.roundRect(sidePx / 2 - 4, -9, 70, 18, 4);
+      else context.rect(sidePx / 2 - 4, -9, 70, 18);
+      context.fill();
+
+      // Scalpel tip
+      context.fillStyle = '#bf4bf6';
+      context.beginPath();
+      context.moveTo(sidePx / 2 + 66, -9);
+      context.lineTo(sidePx / 2 + 96, 0);
+      context.lineTo(sidePx / 2 + 66, 9);
+      context.closePath();
+      context.fill();
+
       context.drawImage(markerImage, -sidePx / 2, -sidePx / 2, sidePx, sidePx);
       context.restore();
     };

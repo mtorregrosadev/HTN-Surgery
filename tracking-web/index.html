@@ -37,9 +37,17 @@
 
           <aside class="data-panel">
             <div class="panel-heading"><div><span class="section-number">02</span><h2>Live readout</h2></div><span class="live-dot"></span></div>
-            <div class="signal-card"><span class="micro-label">MARKER STATUS</span><strong id="tracking-state">Waiting for camera</strong><span id="tracking-hint">No reading yet.</span></div>
+            <div class="signal-card">
+              <span class="micro-label">TRACKING STATUS</span>
+              <strong id="tracking-state">Waiting for camera</strong>
+              <span id="tracking-hint">No reading yet.</span>
+              <div class="dual-signal-row">
+                <span>QR / ARUCO: <b id="marker-substatus">—</b></span>
+                <span>SCALPEL LILA: <b id="scalpel-substatus">—</b></span>
+              </div>
+            </div>
             <div class="metric-grid"><div class="metric"><span class="micro-label">POSITION X</span><strong id="position-x">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">POSITION Y</span><strong id="position-y">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">RELATIVE Z</span><strong id="position-z">—</strong><small>% of starting distance; + away</small></div><div class="metric"><span class="micro-label">MARKER SIZE</span><strong id="marker-size">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">ORIENTATION</span><strong id="angle">—</strong><small>degrees on screen</small></div><div class="metric"><span class="micro-label">SPEED</span><strong id="speed">—</strong><small>px / second</small></div></div>
-            <div class="readout-footer"><span>MARKER <strong id="marker-id">—</strong></span><span>FRAMES <strong id="frame-count">0</strong></span></div>
+            <div class="readout-footer"><span>MARKER <strong id="marker-id">—</strong></span><span>SCALPEL <strong id="scalpel-status" class="scalpel-text">—</strong></span><span>FRAMES <strong id="frame-count">0</strong></span></div>
             <div class="preview-card"><div><span class="micro-label">PATH</span><span id="path-count">0 points</span></div><canvas id="path-preview" width="320" height="110" aria-label="2D path"></canvas></div>
           </aside>
         </section>

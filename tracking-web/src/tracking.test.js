@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, DICTIONARIES, projectiveMarkerCenter, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, detectPurpleScalpel, DICTIONARIES, isPurpleColor, projectiveMarkerCenter, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
 
 function makeMarkerImage(detector, markerId) {
   const size = 320;
@@ -243,3 +243,46 @@ test('synthetic demo holds the calibration size then moves in both Z directions'
   assert.ok(relativeDepthPercent({ sizePx: startingSize }, demoMarkerState(25).sidePx) > 20);
   assert.ok(relativeDepthPercent({ sizePx: startingSize }, demoMarkerState(125).sidePx) < -20);
 });
+
+test('isPurpleColor distinguishes purple hues from other colors and neutrals', () => {
+  // Purples
+  assert.equal(isPurpleColor(160, 50, 200), true);
+  assert.equal(isPurpleColor(120, 30, 170), true);
+  assert.equal(isPurpleColor(200, 100, 220), true);
+  assert.equal(isPurpleColor(80, 20, 95), true);
+  // Non-purples
+  assert.equal(isPurpleColor(30, 80, 220), false); // Blue
+  assert.equal(isPurpleColor(220, 50, 40), false); // Red
+  assert.equal(isPurpleColor(50, 190, 60), false); // Green
+  assert.equal(isPurpleColor(210, 160, 130), false); // Skin
+  assert.equal(isPurpleColor(240, 240, 240), false); // White
+  assert.equal(isPurpleColor(20, 20, 20), false); // Black
+});
+
+test('detectPurpleScalpel locates centroid, bounding box, tip, and angle', () => {
+  const width = 200;
+  const height = 150;
+  const data = new Uint8ClampedArray(width * height * 4);
+  data.fill(220); // light background
+  // Draw a purple horizontal scalpel at x: 60..140, y: 40..60
+  for (let y = 40; y <= 60; y += 1) {
+    for (let x = 60; x <= 140; x += 1) {
+      const idx = (y * width + x) * 4;
+      data[idx] = 160;     // R
+      data[idx + 1] = 40;  // G
+      data[idx + 2] = 190; // B
+      data[idx + 3] = 255;
+    }
+  }
+  const scalpel = detectPurpleScalpel({ width, height, data }, { step: 2, minPixels: 10 });
+  assert.ok(scalpel);
+  assert.equal(Math.round(scalpel.x), 100);
+  assert.equal(Math.round(scalpel.y), 50);
+  assert.equal(scalpel.minX, 60);
+  assert.equal(scalpel.maxX, 140);
+  assert.equal(scalpel.minY, 40);
+  assert.equal(scalpel.maxY, 60);
+  assert.ok(scalpel.pixelCount > 0);
+  assert.ok(Math.abs(scalpel.angleDeg) < 5); // horizontal
+});
+

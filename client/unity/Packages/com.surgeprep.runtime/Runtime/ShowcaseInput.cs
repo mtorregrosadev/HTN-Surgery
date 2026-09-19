@@ -42,6 +42,17 @@ namespace SurgePrep
 #endif
         }
 
+        public static bool RightMouseHeld()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null && Mouse.current.rightButton.isPressed;
+#elif ENABLE_LEGACY_INPUT_MANAGER
+            return Input.GetMouseButton(1);
+#else
+            return false;
+#endif
+        }
+
         public static Vector2 MouseDelta()
         {
 #if ENABLE_INPUT_SYSTEM

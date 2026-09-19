@@ -11,9 +11,7 @@ using UnityEngine;
 namespace SurgePrep
 {
     /// <summary>
-    /// Development-only input source. It keeps keyboard input in the Unity Game view,
-    /// while still routing samples through Scalpel, the API, and the simulation adapter.
-    /// Disable this component when the physical hardware stream is connected.
+    /// Pose-only keyboard input. Samples still travel Unity -> controller -> API -> SOFA.
     /// </summary>
     public sealed class UnityManualDemoClient : MonoBehaviour
     {
@@ -28,7 +26,7 @@ namespace SurgePrep
         [SerializeField] private string controllerUrl = "http://localhost:8100";
         [SerializeField] private SimulationSceneRenderer sceneRenderer;
         [SerializeField, Min(1f)] private float movementSpeedMmPerSecond = 24f;
-        [SerializeField] private bool invertHorizontalForFrontCamera = true;
+        [SerializeField] private Camera sceneCamera;
 
         private readonly ConcurrentQueue<string> received = new ConcurrentQueue<string>();
         private readonly object stateLock = new object();
@@ -36,19 +34,22 @@ namespace SurgePrep
         private ClientWebSocket socket;
         private HttpClient http;
         private float xMm;
+        private float yMm = 12f;
         private float zMm;
-        private float selectedForceN = 0.75f;
-        private bool contactEngaged;
+        private string toolId = "scalpel";
         private long sequence;
         private string calibrationId;
         private string sessionId;
         private Stopwatch clock;
+        private float resetArmedUntil;
+        private bool frozen;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
         public string SessionId => sessionId;
         public string Status { get; private set; } = "Starting controller session…";
-        public float SelectedForceN => selectedForceN;
-        public bool ContactEngaged => contactEngaged;
+        public string SimulationBackend { get; private set; } = "unknown";
+        public string ToolId => toolId;
+        public bool SofaNative => SimulationBackend == "sofa-native";
 
         private async void OnEnable()
         {
@@ -56,16 +57,18 @@ namespace SurgePrep
             http = new HttpClient { BaseAddress = new Uri(controllerUrl.TrimEnd('/') + "/") };
             try
             {
+                await ReadHealth(cancellation.Token);
                 await CreateSession(cancellation.Token);
                 await StreamSamples(cancellation.Token);
             }
             catch (OperationCanceledException)
             {
-                // Expected when Play Mode stops.
             }
             catch (Exception error)
             {
-                Status = "Controller unavailable — start Docker";
+                Status = SimulationBackend == "sofa-native"
+                    ? "Controller unavailable"
+                    : "SOFA OFFLINE — start scripts/start-showcase.sh";
                 UnityEngine.Debug.LogError($"Unity manual demo failed: {error.Message}");
             }
         }
@@ -83,58 +86,105 @@ namespace SurgePrep
                 return;
             }
             var snapshot = JsonUtility.FromJson<SimulationSnapshotDto>(latest);
-            if (snapshot != null && snapshot.contractVersion == "1.0")
+            if (snapshot != null && ContractCompatibility.Accepts(snapshot.contractVersion))
             {
+                if (!string.IsNullOrEmpty(snapshot.simulationBackend))
+                {
+                    SimulationBackend = snapshot.simulationBackend;
+                    if (SimulationBackend != "sofa-native")
+                    {
+                        Status = "SOFA OFFLINE";
+                    }
+                }
+                if (snapshot.sessionDegraded)
+                {
+                    frozen = true;
+                    Status = "SOFA session degraded";
+                }
                 sceneRenderer.SetTarget(snapshot);
             }
         }
 
         private void UpdateKeyboardState()
         {
+            var camera = sceneCamera != null ? sceneCamera : Camera.main;
             var horizontal = 0f;
             var vertical = 0f;
-            var horizontalNudge = 0f;
-            var verticalNudge = 0f;
             if (ShowcaseInput.Held(KeyCode.A) || ShowcaseInput.Held(KeyCode.LeftArrow)) horizontal -= 1f;
             if (ShowcaseInput.Held(KeyCode.D) || ShowcaseInput.Held(KeyCode.RightArrow)) horizontal += 1f;
             if (ShowcaseInput.Held(KeyCode.S) || ShowcaseInput.Held(KeyCode.DownArrow)) vertical -= 1f;
             if (ShowcaseInput.Held(KeyCode.W) || ShowcaseInput.Held(KeyCode.UpArrow)) vertical += 1f;
-            if (ShowcaseInput.Pressed(KeyCode.A) || ShowcaseInput.Pressed(KeyCode.LeftArrow)) horizontalNudge -= 1f;
-            if (ShowcaseInput.Pressed(KeyCode.D) || ShowcaseInput.Pressed(KeyCode.RightArrow)) horizontalNudge += 1f;
-            if (ShowcaseInput.Pressed(KeyCode.S) || ShowcaseInput.Pressed(KeyCode.DownArrow)) verticalNudge -= 1f;
-            if (ShowcaseInput.Pressed(KeyCode.W) || ShowcaseInput.Pressed(KeyCode.UpArrow)) verticalNudge += 1f;
+            var raise = 0f;
+            if (ShowcaseInput.Held(KeyCode.Q)) raise += 1f;
+            if (ShowcaseInput.Held(KeyCode.E)) raise -= 1f;
 
-            // The front-facing anatomy camera mirrors the simulation X axis on screen.
-            if (invertHorizontalForFrontCamera)
+            var world = Vector3.zero;
+            if (camera != null)
             {
-                horizontal *= -1f;
-                horizontalNudge *= -1f;
+                var right = Vector3.ProjectOnPlane(camera.transform.right, Vector3.up).normalized;
+                var forward = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up).normalized;
+                if (right.sqrMagnitude < 0.01f) right = Vector3.right;
+                if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
+                world = (right * horizontal + forward * vertical) * (movementSpeedMmPerSecond * 0.001f) * Time.unscaledDeltaTime;
             }
+            var api = CoordinateFrame.InverseDeltaMetres(world);
             lock (stateLock)
             {
-                xMm += horizontal * movementSpeedMmPerSecond * Time.unscaledDeltaTime + horizontalNudge;
-                zMm += vertical * movementSpeedMmPerSecond * Time.unscaledDeltaTime + verticalNudge;
-                if (ShowcaseInput.Pressed(KeyCode.Space))
-                {
-                    contactEngaged = !contactEngaged;
-                }
-                if (ShowcaseInput.Pressed(KeyCode.LeftBracket))
-                    selectedForceN = Mathf.Max(0.1f, selectedForceN - 0.1f);
-                if (ShowcaseInput.Pressed(KeyCode.RightBracket))
-                    selectedForceN = Mathf.Min(1.5f, selectedForceN + 0.1f);
+                xMm += api.x;
+                zMm += api.z;
+                yMm += raise * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
+                yMm = Mathf.Clamp(yMm, -16f, 28f);
+                if (ShowcaseInput.Pressed(KeyCode.Alpha1)) toolId = "scalpel";
+                if (ShowcaseInput.Pressed(KeyCode.Alpha2)) toolId = "blunt-dissector";
+                if (ShowcaseInput.Pressed(KeyCode.Alpha3)) toolId = "chest-tube";
                 if (ShowcaseInput.Pressed(KeyCode.R))
                 {
-                    xMm = 0f;
-                    zMm = 0f;
-                    selectedForceN = 0.75f;
-                    contactEngaged = false;
+                    if (Time.unscaledTime <= resetArmedUntil)
+                    {
+                        xMm = 0f;
+                        yMm = 12f;
+                        zMm = 0f;
+                        toolId = "scalpel";
+                        frozen = false;
+                        resetArmedUntil = 0f;
+                        Status = "Attempt reset";
+                    }
+                    else
+                    {
+                        resetArmedUntil = Time.unscaledTime + 2f;
+                        Status = "Press R again to reset";
+                    }
                 }
+            }
+        }
+
+        private async Task ReadHealth(CancellationToken token)
+        {
+            try
+            {
+                using (var response = await http.GetAsync("health", token))
+                {
+                    var payload = await response.Content.ReadAsStringAsync();
+                    var health = JsonUtility.FromJson<HealthDto>(payload);
+                    if (health != null && health.api != null && !string.IsNullOrEmpty(health.api.simulation))
+                    {
+                        SimulationBackend = health.api.simulation;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                SimulationBackend = "sofa-offline";
+            }
+            if (SimulationBackend != "sofa-native")
+            {
+                Status = "SOFA OFFLINE";
             }
         }
 
         private async Task CreateSession(CancellationToken token)
         {
-            Status = "Validating demo calibration…";
+            Status = SofaNative ? "Validating demo calibration…" : "SOFA OFFLINE";
             var calibration = await Post<CalibrationCreateDto, CalibrationDto>(
                 "v1/calibrations",
                 new CalibrationCreateDto
@@ -152,14 +202,14 @@ namespace SurgePrep
                 {
                     exerciseId = "chest-tube-access-demo",
                     calibrationId = calibrationId,
-                    toolId = "blunt-stylus-1",
+                    toolId = "scalpel",
                     deviceId = "unity-manual-demo"
                 },
                 token
             );
             sessionId = session.sessionId;
             clock = Stopwatch.StartNew();
-            Status = "Connecting to authoritative simulation…";
+            Status = SofaNative ? "Connecting to native SOFA…" : "SOFA OFFLINE";
         }
 
         private async Task<TResponse> Post<TRequest, TResponse>(
@@ -186,7 +236,7 @@ namespace SurgePrep
                 : "ws://" + controllerUrl.Substring(controllerUrl.IndexOf("://", StringComparison.Ordinal) + 3);
             var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/hardware-stream");
             await socket.ConnectAsync(uri, token);
-            Status = "LIVE — click here and use WASD";
+            Status = SofaNative ? "LIVE — pose-only WASD" : "SOFA OFFLINE";
 
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
@@ -203,29 +253,33 @@ namespace SurgePrep
         private ToolSampleDto NextSample()
         {
             float sampleX;
+            float sampleY;
             float sampleZ;
-            float sampleForce;
+            string sampleTool;
             lock (stateLock)
             {
                 sampleX = xMm;
+                sampleY = frozen ? yMm : yMm;
                 sampleZ = zMm;
-                sampleForce = contactEngaged ? selectedForceN : 0f;
+                sampleTool = toolId;
             }
             return new ToolSampleDto
             {
-                contractVersion = "1.0",
+                contractVersion = "1.1",
                 sessionId = sessionId,
-                toolId = "blunt-stylus-1",
+                toolId = sampleTool,
                 deviceId = "unity-manual-demo",
                 calibrationId = calibrationId,
                 sequence = sequence++,
                 timestampMs = clock.ElapsedMilliseconds,
-                positionMm = new Vector3Dto { x = sampleX, y = 16f - sampleForce * 2f, z = sampleZ },
-                orientation = new QuaternionDto { qx = 0.461749f, qy = 0f, qz = 0f, qw = 0.887011f },
-                forceN = sampleForce,
-                contact = sampleForce > 0.08f,
-                quality = 1f,
-                sourceHealthy = true
+                positionMm = new Vector3Dto { x = sampleX, y = sampleY, z = sampleZ },
+                orientation = new QuaternionDto { qx = 0f, qy = 0f, qz = 0f, qw = 1f },
+                forceN = 0f,
+                contact = false,
+                quality = frozen ? 0.1f : 1f,
+                sourceHealthy = !frozen,
+                inputMode = "pose-only",
+                forceMeasurementValid = false
             };
         }
 
@@ -264,7 +318,6 @@ namespace SurgePrep
                 }
                 catch (Exception)
                 {
-                    // Play Mode can close before the completion request finishes.
                 }
             }
             http?.Dispose();

@@ -103,16 +103,50 @@ For API-only development, the default in-memory simulator preserves the same
 request/response shape. The demo must switch to the `sofa` backend so SOFA is
 authoritative. See `backend/README.md` for setup and controller flow.
 
-### Standalone ArUco tracking experiment
+### Browser optical tracking demo
 
-`tracking-web/` contains a browser-only camera study that detects a printed
-ArUco marker on a blunt training tool and displays its 2D path, image position,
-screen angle, approximate speed, and reference-based Z distance estimate. It
-can also analyze a local video or run a synthetic marker demo when no camera is
-attached. It is separate from the integrated controller/API/SOFA loop and does
-not claim calibrated 3D tool pose. See
-`tracking-web/README.md` for setup, limitations, and the path to a controller-owned
-camera tracker and later AR anatomy alignment.
+`tracking-web/` is a browser camera producer and diagnostic view for a blunt
+training tool. It detects a printed ArUco marker and/or the tool's purple body,
+shows the 2D path and screen angle, and sends image-derived observations to
+`WS /v1/tracking/stream` on the Scalpel controller at port `8100`. The browser
+connection is part of the integrated controller path; it does not connect to
+the API, SOFA, MongoDB, or embedded hardware directly.
+
+Run the API on `localhost:8000`, the Scalpel controller on `localhost:8100`,
+and a Unity showcase client that opens a session and sends samples through the
+controller. Then run the web app:
+
+```bash
+cd tracking-web
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173/`. Use the native showcase startup in
+`backend/README.md` and `scripts/start-showcase.sh` when SOFA is installed; an
+API using the memory simulator is suitable for development and contract checks
+but is not SOFA physics. The browser page can also run a local video or its
+synthetic demo without a camera, but those sources still need a controller if
+their observations are to enter a live session.
+
+The live path is:
+
+```text
+camera -> tracking-web (ArUco/purple image processing)
+        -> Scalpel controller tracking stream
+UnityManualDemoClient session hardware-stream -> controller merges optical pose + hardware state
+        -> API -> memory simulator or native SOFA -> controller -> Unity/XR
+```
+
+The browser maps image pixels to bounded millimetre fields and derives a
+screen-angle quaternion. Marker-size Z is only a relative starting-distance
+estimate; purple-scalpel-only tracking has no depth estimate. This demo has no
+camera-intrinsic calibration, camera-to-workspace registration, marker-to-tip
+offset, or calibrated all-side 3D pose. Native SOFA makes the evolving scene
+authoritative after the controller/API boundary, but it does not turn the
+browser's image-coordinate approximation into a calibrated measurement. See
+`tracking-web/README.md` for setup details, limits, and the route to a
+controller-owned calibrated tracker.
 
 The [ArUco workspace plan](docs/ARUCO_WORKSPACE_PLAN.md) records the current
 Unity data path, tracking limitations, and the proposed procedure for choosing

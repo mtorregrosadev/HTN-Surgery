@@ -1,9 +1,9 @@
 {
   "exerciseId": "chest-tube-access-demo",
-  "version": 1,
+  "version": 2,
   "title": "Chest-tube access rehearsal",
   "status": "draft-instructor-review-required",
-  "scope": "Landmark identification and blunt-tool approach on a synthetic surface only",
+  "scope": "Landmark identification and localized incision rehearsal with a blunt training blade on a synthetic surface only",
   "target": {
     "description": "Illustrative lateral-chest target to be reviewed against locally approved triangle-of-safety teaching guidance",
     "positionMm": { "x": 0, "y": 0, "z": 0 },
@@ -11,6 +11,12 @@
   },
   "illustrativeRubric": {
     "forceRangeN": { "minimum": 0.3, "maximum": 1.2 },
+    "incisionCorridor": {
+      "lengthMm": 36,
+      "halfWidthMm": 6,
+      "topologyCellWidthMm": 3,
+      "maximumDepthMm": 6
+    },
     "targetingWeight": 0.5,
     "controlledForceWeight": 0.3,
     "forceConsistencyWeight": 0.2

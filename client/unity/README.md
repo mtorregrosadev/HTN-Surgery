@@ -27,10 +27,19 @@ toggle skin, muscle, and bone; keys `1`, `2`, and `3` do the same. Press `Tab`
 to hide or restore the live guidance panel.
 
 While the Game view is focused, use `W/A/S/D` or the arrow keys to move the
-training tool, Space to make or release contact, `[` and `]` to change pressure,
-and `R` to reset. Right-drag and scroll remain available for camera orbit and
+training tool, Space to engage or release the training blade, `[` and `]` to
+change the pressure setting, and `R` to recenter and release the tool. Right-drag and scroll remain available for camera orbit and
 zoom. Because input and rendering now live in the same Unity window, the
 Terminal can remain hidden after Docker starts.
+
+To practice the incision, leave the default `0.75 N` pressure selected, press
+Space over the target, then hold `A` or `D` to travel along the highlighted
+corridor. Contact first indents the simulation surface; controlled movement then
+opens and deepens the incision. The HUD reports applied force, target offset,
+incision length, depth, and path completion. Blue feedback means insufficient
+pressure, green means the illustrative controlled band, and red means excessive
+pressure. The numeric thresholds are prototype rubric values awaiting instructor
+validation.
 
 The builder writes generated Unity assets only into the containing Unity
 project. Re-running it refreshes the scene without committing those generated

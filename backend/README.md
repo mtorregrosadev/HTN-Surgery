@@ -60,6 +60,13 @@ Snapshots include the authoritative tool pose plus deformable surface vertices
 and triangle topology for immersive rendering. The controller broadcasts these
 snapshots to Unity; clients must not open this API WebSocket directly.
 
+The chest-tube scene uses a localized, predefined incision corridor. Tool contact
+produces deformation; controlled force plus travel progressively changes the
+returned surface topology and wound-channel mesh. Incision length, depth, and
+completion are stored with simulation snapshots and returned in completed-session
+metrics. This is a prototype interaction model, not validated tissue or
+medical-device accuracy.
+
 Completing a session returns deterministic force, contact-time, target-offset,
 and force-consistency metrics plus an illustrative composite score. The draft
 weights and force range are recorded in

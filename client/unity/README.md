@@ -16,15 +16,21 @@ package added to a Unity project:
 3. The builder opens
    `Assets/SurgePrepShowcase/Scenes/ChestTubeShowcase.unity` and selects the
    `Surge Prep Simulation` object.
-4. Start the stack and synthetic stream using the commands below.
-5. Paste the printed session ID into **Scalpel Stream Client > Session Id** in
-   the Inspector, then enter Play Mode.
+4. Start the Docker stack with `docker compose up --build -d`.
+5. Enter Play Mode and click once inside the **Game** view. The showcase creates
+   its own demo session; no Terminal stream or pasted session ID is required.
 
 The scene presents a cropped high-resolution torso at an interactive surgical
 workstation inside a dark training lab. Use the **CHEST** and **ROOM** buttons
 for camera presets, right-drag to orbit, and scroll to zoom. The layer controls
 toggle skin, muscle, and bone; keys `1`, `2`, and `3` do the same. Press `Tab`
 to hide or restore the live guidance panel.
+
+While the Game view is focused, use `W/A/S/D` or the arrow keys to move the
+training tool, Space to make or release contact, `[` and `]` to change pressure,
+and `R` to reset. Right-drag and scroll remain available for camera orbit and
+zoom. Because input and rendering now live in the same Unity window, the
+Terminal can remain hidden after Docker starts.
 
 The builder writes generated Unity assets only into the containing Unity
 project. Re-running it refreshes the scene without committing those generated
@@ -56,24 +62,27 @@ wait until the exact glasses, Beam Pro firmware, and tracking mode are known.
 
 ## Develop without hardware
 
-Start the Docker stack, then run a continuous synthetic hardware source:
+The generated showcase includes `UnityManualDemoClient`, an explicitly
+synthetic input fallback. It creates a calibrated session and submits keyboard
+samples through the Scalpel controller, API, and simulation adapter, then
+renders the authoritative returned snapshots. It does not locally animate the
+tool or bypass the service boundary.
+
+Start the Docker stack:
 
 ```bash
 docker compose up --build -d
-docker compose exec controller \
-  python -m scalpel_controller.synthetic --controller-url http://localhost:8100
 ```
 
-Copy the printed session ID into `ScalpelStreamClient`. Enter Play Mode and the
-tool plus interactive tissue will move from live controller snapshots. Stop the
-synthetic stream with Ctrl+C; it will complete the session and print metrics.
+Then enter Play Mode and keep the Game view focused. Unity completes the session
+when Play Mode stops. The older command-line synthetic source remains available
+for API-only development, but it should not run at the same time as the Unity
+manual demo.
 
-For a hands-on laptop demo, add `--manual` to that command and keep the Terminal
-window focused while Unity remains visible. Use `W/A/S/D` to move over the
-target, Space to make or release contact, `[` and `]` to change force, `R` to
-reset, and `Q` to complete the attempt. This is explicitly a synthetic input
-fallback; the physical demo replaces it with controller-routed OAK-D and ESP32
-readings.
+For physical hardware, disable `UnityManualDemoClient`, enable
+`ScalpelStreamClient`, and set its active session ID. The physical demo replaces
+only the synthetic input source with controller-routed OAK-D and ESP32 readings;
+the authoritative API/simulation return path stays the same.
 
 The default Compose stack uses the deterministic memory simulation adapter so
 the whole team can run the presentation without a native SOFA install. It

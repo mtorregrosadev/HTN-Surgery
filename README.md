@@ -16,7 +16,7 @@ Build one convincing end-to-end exercise:
 6. Save the attempt, calculate objective metrics, and replay it.
 7. Generate an AI-assisted explanation grounded in an instructor-approved rubric.
 
-The demo should optimize for a complete, reliable loop rather than broad anatomical coverage or high-fidelity tissue cutting.
+The demo should optimize for a complete, reliable loop. Layered tissue opening is bounded to one instructor-defined chest-tube corridor; it is not general-purpose anatomical cutting.
 
 ## Canonical architecture
 
@@ -74,9 +74,10 @@ An illustrative normalized sample (the exact contract is still to be finalized):
 The runnable Python service under `backend/` exposes the controller-facing
 versioned REST and WebSocket API, owns session validation and deterministic
 metrics, persists through a MongoDB adapter, and drives SOFA through an isolated
-simulation adapter. Shared payload schemas live under `contracts/v1/`; embedded,
-controller, and VR work should generate or validate DTOs against those contracts
-instead of copying backend-internal models.
+simulation adapter. Shared payload schemas live under `contracts/v1/` (stored
+1.0 sessions) and `contracts/v1.1/` (showcase). Embedded, controller, and VR
+work should generate or validate DTOs against those contracts instead of
+copying backend-internal models. See `docs/SHOWCASE_IMPLEMENTATION_HANDOFF.md`.
 
 The runnable Scalpel relay under `controller/` separates hardware ingestion
 from client subscriptions. The embedded Unity package under `client/unity/`

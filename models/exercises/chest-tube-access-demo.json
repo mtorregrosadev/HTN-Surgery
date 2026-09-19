@@ -1,31 +1,85 @@
 {
   "exerciseId": "chest-tube-access-demo",
-  "version": 2,
+  "version": 3,
   "title": "Chest-tube access rehearsal",
   "status": "draft-instructor-review-required",
-  "scope": "Landmark identification and localized incision rehearsal with a blunt training blade on a synthetic surface only",
+  "scope": "Landmark identification and localized layered chest-tube rehearsal with blunt training instruments on a synthetic mannequin surface only",
+  "workflow": [
+    {
+      "stageId": "approach",
+      "title": "Approach and landmark alignment",
+      "instruction": "Align the scalpel with the lateral intercostal window without contacting protected rib geometry."
+    },
+    {
+      "stageId": "skin-incision",
+      "title": "Controlled skin incision",
+      "instruction": "Lower the scalpel until skin deforms, then travel the highlighted corridor."
+    },
+    {
+      "stageId": "blunt-dissection",
+      "title": "Blunt soft-tissue dissection",
+      "instruction": "Switch to the blunt dissector and open the subcutaneous and muscle tract."
+    },
+    {
+      "stageId": "pleural-entry",
+      "title": "Controlled pleural-layer entry",
+      "instruction": "Enter the pleural layer only after the soft-tissue tract is open."
+    },
+    {
+      "stageId": "tube-placement",
+      "title": "Tube placement",
+      "instruction": "Place the chest tube through the simulated tract."
+    },
+    {
+      "stageId": "complete",
+      "title": "Completion and scorecard",
+      "instruction": "Review deterministic metrics. This is training telemetry, not a clinical score."
+    }
+  ],
+  "tools": ["scalpel", "blunt-dissector", "chest-tube"],
   "target": {
-    "description": "Illustrative lateral-chest target to be reviewed against locally approved triangle-of-safety teaching guidance",
+    "description": "Illustrative lateral-chest intercostal target to be reviewed against locally approved triangle-of-safety teaching guidance. Not on the centre or front of the chest.",
     "positionMm": { "x": 0, "y": 0, "z": 0 },
-    "radiusMm": 10
+    "radiusMm": 10,
+    "patchSizeMm": { "x": 80, "y": 80 },
+    "corridor": {
+      "lengthMm": 36,
+      "halfWidthMm": 6,
+      "topologyCellWidthMm": 3,
+      "maximumDepthMm": 16
+    }
   },
+  "layers": [
+    { "layerId": "skin", "thicknessMm": 3, "opensDuring": "skin-incision" },
+    { "layerId": "subcutaneous", "thicknessMm": 5, "opensDuring": "blunt-dissection" },
+    { "layerId": "intercostal-muscle", "thicknessMm": 5, "opensDuring": "blunt-dissection" },
+    { "layerId": "pleura", "thicknessMm": 3, "opensDuring": "pleural-entry" }
+  ],
   "illustrativeRubric": {
     "forceRangeN": { "minimum": 0.3, "maximum": 1.2 },
     "incisionCorridor": {
       "lengthMm": 36,
       "halfWidthMm": 6,
       "topologyCellWidthMm": 3,
-      "maximumDepthMm": 6
+      "maximumDepthMm": 16
     },
-    "targetingWeight": 0.5,
-    "controlledForceWeight": 0.3,
-    "forceConsistencyWeight": 0.2
+    "targetingWeight": 0.22,
+    "instrumentAngleWeight": 0.1,
+    "controlledForceWeight": 0.16,
+    "forceConsistencyWeight": 0.1,
+    "incisionGeometryWeight": 0.12,
+    "outsideCorridorWeight": 0.1,
+    "layerViolationWeight": 0.1,
+    "completionTimeWeight": 0.05,
+    "tubePlacementWeight": 0.05
   },
   "safety": {
     "trainingPrototypeOnly": true,
     "instructorReviewRequired": true,
     "realPatientsProhibited": true,
-    "realClinicalInstrumentsProhibited": true
+    "realClinicalInstrumentsProhibited": true,
+    "notAMedicalDevice": true,
+    "noClinicalAccuracyClaims": true
   },
   "references": [
     "https://www.rightdecisions.scot.nhs.uk/south-east-scotland-major-trauma-guidelines/cardiothoracics/chest-drain-insertion/",

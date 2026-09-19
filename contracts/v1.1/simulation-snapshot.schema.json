@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://surge-prep.dev/contracts/v1.1/simulation-snapshot.schema.json",
+  "title": "SOFA simulation snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "sessionId", "tick", "simulationTimeMs", "tool", "tissue", "deformableMeshes", "events"],
+  "properties": {
+    "contractVersion": { "enum": ["1.0", "1.1"] },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "tick": { "type": "integer", "minimum": 0 },
+    "simulationTimeMs": { "type": "integer", "minimum": 0 },
+    "simulationBackend": {
+      "enum": ["sofa-native", "memory-development-only", "sofa-offline"],
+      "description": "Showcase mode requires sofa-native. memory-development-only must never be presented as real physics."
+    },
+    "procedureStage": {
+      "enum": [
+        "approach",
+        "landmark-alignment",
+        "skin-incision",
+        "blunt-dissection",
+        "pleural-entry",
+        "tube-placement",
+        "complete",
+        "degraded"
+      ]
+    },
+    "sessionDegraded": { "type": "boolean" },
+    "tool": {
+      "type": "object", "additionalProperties": false,
+      "required": ["positionMm", "orientation", "forceN", "contact"],
+      "properties": {
+        "positionMm": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
+        "orientation": { "$ref": "tool-sample.schema.json#/$defs/quaternion" },
+        "forceN": { "type": "number", "minimum": 0 },
+        "contact": { "type": "boolean" },
+        "contactPointMm": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
+        "contactNormal": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
+        "reactionForceN": { "type": "number", "minimum": 0 },
+        "penetrationDepthMm": { "type": "number", "minimum": 0 }
+      }
+    },
+    "tissue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["deformationMm", "incisionProgress", "incisionLengthMm", "incisionDepthMm", "interactionMode"],
+      "properties": {
+        "deformationMm": { "type": "number", "minimum": 0 },
+        "incisionProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "incisionLengthMm": { "type": "number", "minimum": 0 },
+        "incisionDepthMm": { "type": "number", "minimum": 0 },
+        "interactionMode": {
+          "enum": ["approach", "contact", "cutting", "low-force", "excessive-force", "outside-target"]
+        },
+        "activeLayer": {
+          "enum": ["skin", "subcutaneous", "intercostal-muscle", "pleura", "none"]
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["layerId", "opened", "openingProgress", "deformationMm"],
+            "properties": {
+              "layerId": {
+                "enum": ["skin", "subcutaneous", "intercostal-muscle", "pleura"]
+              },
+              "opened": { "type": "boolean" },
+              "openingProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+              "deformationMm": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "deformableMeshes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "topologyRevision", "verticesMm", "triangleIndices"],
+        "properties": {
+          "objectId": { "type": "string", "minLength": 1 },
+          "topologyRevision": { "type": "integer", "minimum": 1 },
+          "verticesMm": {
+            "type": "array",
+            "items": { "$ref": "tool-sample.schema.json#/$defs/vector3" }
+          },
+          "triangleIndices": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "events": { "type": "array", "items": { "type": "string" } }
+  }
+}

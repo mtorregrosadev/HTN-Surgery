@@ -39,10 +39,9 @@ export SURGE_PREP_SOFA_SCENE=../simulation/sofa_scene.py
 uvicorn surge_prep.app:app
 ```
 
-The bundled scene uses a small hexahedral training pad for responsive physics.
-It deliberately does not use the high-resolution anatomy surfaces as an FEM
-mesh. Replace the pad with a procedure-specific volumetric mesh later while
-keeping the API contracts unchanged.
+The showcase scene uses a localized ~80 × 80 mm layered chest region. Visual
+BodyParts3D meshes are never used as the FEM volume. Native SOFA v26.06 on the
+host Mac is required for the demo; see `docs/SHOWCASE_IMPLEMENTATION_HANDOFF.md`.
 
 ## Controller flow
 

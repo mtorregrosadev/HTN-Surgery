@@ -19,6 +19,12 @@ a modern OR. The default camera starts in a room orbit, then settles on the
 lateral-chest window. Right-drag orbits 360° horizontally, scroll zooms, middle
 mouse pans, `F` close-up, `O` room, `C` surgeon view.
 
+The procedure window includes a workstation setup panel. Adjust width, depth,
+and height in millimetres, press **Validate area**, and use the outlined
+rectangle on the table as the physical workspace preview. Validation currently
+checks only the minimum configured size; camera, board, and tool-tip calibration
+remain the next setup step. `Tab` hides or shows the setup panel.
+
 Pose-only tool control (hardware later):
 
 - `W/A/S/D` screen-relative movement

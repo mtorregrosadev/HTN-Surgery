@@ -17,8 +17,9 @@ uint8_t activePressurePin = PIN_PRESSURE_ADC; // Default to GPIO 1 for analog FS
 int adcZeroBaseline = 0;
 int contactThresholdHigh = 120;
 int contactThresholdLow = 60;
+float maxConductance = 3.0f; // Calibrated FSR conductance at full surgical pressure (~8.0 N)
 float smoothedRaw = 0.0f;
-bool cleanOutputMode = true; // Calm, clean, non-chaotic output
+bool cleanOutputMode = false; // Default to standard machine streaming
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -70,8 +71,8 @@ enum PullMode {
 PullMode currentPullMode = PULL_DOWN;
 bool pressureActiveHigh = true;   // true: HIGH indicates contact; false: LOW indicates contact
 bool streamTerminal = true;       // Continuous streaming to serial terminal
-bool jsonTerminal = false;        // Output format: true = JSON, false = human-readable text
-unsigned long streamIntervalMs = 200; // Terminal streaming rate (5Hz)
+bool jsonTerminal = true;         // Output format: true = JSON, false = human-readable text
+unsigned long streamIntervalMs = 50; // Terminal streaming rate (20Hz)
 unsigned long lastStreamMs = 0;
 
 struct PressureData {
@@ -254,6 +255,8 @@ void initPressureSensor() {
   applyPullMode(); // Anchors pin with internal pull-down to GND when unpressed
   pressure.isAdc = (digitalPinToAnalogChannel(activePressurePin) >= 0);
   if (pressure.isAdc) {
+    analogSetAttenuation(ADC_11db); // Full 0 - 3.3V range
+    analogReadResolution(12);       // 12-bit ADC (0 - 4095)
     calibrateAdcZero();
   }
   Serial.printf("[Sensor] Pressure Sensor configured on GPIO %d (%s, Mode: %s)\n",
@@ -268,19 +271,23 @@ void initPressureSensor() {
 bool updatePressureSensor() {
   unsigned long now = millis();
   int raw = 0;
+  int currentRaw = 0;
   bool contact = pressure.isContact;
 
   if (pressure.isAdc) {
-    // 8x oversampling to reject AC mains ripple
+    // 20ms windowed integration: exactly 1 full cycle of 50Hz AC mains ripple (Europe/Spain)
+    // Mathematically eliminates 50Hz hum and noise injected by human hand contact
     long sum = 0;
-    for (int i = 0; i < 8; i++) {
+    const int numSamples = 16;
+    for (int i = 0; i < numSamples; i++) {
       sum += analogRead(activePressurePin);
+      delayMicroseconds(1250); // 16 * 1250us = 20000us = 20.0ms
     }
-    raw = (int)(sum / 8);
+    raw = (int)(sum / numSamples);
 
-    // Responsive EMA filter (60% history, 40% new sample)
-    smoothedRaw = 0.60f * smoothedRaw + 0.40f * (float)raw;
-    int currentRaw = (int)smoothedRaw;
+    // Responsive EMA filter (70% history, 30% new sample) for butter-smooth steady output
+    smoothedRaw = 0.70f * smoothedRaw + 0.30f * (float)raw;
+    currentRaw = (int)smoothedRaw;
 
     // Automatic downward tare: if physical reading is below baseline,
     // immediately adapt baseline down to prevent sensor deafness from touch-at-boot
@@ -326,15 +333,22 @@ bool updatePressureSensor() {
     }
 
     int delta = max(0, currentRaw - adcZeroBaseline);
-    int span = max(150, 4095 - adcZeroBaseline);
-    pressure.forceEstimateN = contact ? ((float)delta / (float)span * 10.0f) : 0.0f;
+    // FSR Conductance Linearization:
+    // In an FSR, Force is directly proportional to Conductance (1 / R_FSR).
+    // In a voltage divider: V_out = Vcc * R_pd / (R_fsr + R_pd).
+    // Inverting gives Conductance G = (currentRaw - baseline) / (4095 - currentRaw).
+    // This removes the hyperbolic voltage saturation curve and provides smooth, continuous intermediate values!
+    float conductance = (float)delta / (float)max(150, 4095 - currentRaw);
+    float force = (conductance / maxConductance) * 8.0f;
+    pressure.forceEstimateN = contact ? constrain(force, 0.0f, 10.0f) : 0.0f;
   } else {
     raw = digitalRead(activePressurePin);
+    currentRaw = raw;
     contact = pressureActiveHigh ? (raw == HIGH) : (raw == LOW);
     pressure.forceEstimateN = contact ? 1.5f : 0.0f;
   }
 
-  pressure.rawValue = raw;
+  pressure.rawValue = currentRaw; // Report the smoothed, steady value (noise-free)
   pressure.sampleCount++;
   pressure.lastSampleMs = now;
 
@@ -403,12 +417,14 @@ void streamPressureToTerminal() {
     return;
   }
 
-  // Verbose stream mode
-  if (now - lastStreamMs < streamIntervalMs) return;
+  // Streaming rate: fast 40Hz (25ms) in JSON mode when touching, 16Hz (60ms) when idle
+  unsigned long effectiveInterval = jsonTerminal ? (pressure.isContact ? 25 : 60) : streamIntervalMs;
+  if (now - lastStreamMs < effectiveInterval) return;
   lastStreamMs = now;
 
   if (jsonTerminal) {
-    Serial.printf("{\"type\":\"pressure\",\"pin\":%d,\"isAdc\":%s,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"timestampMs\":%lu}\n",
+    Serial.printf("{\"type\":\"pressure\",\"seq\":%lu,\"pin\":%d,\"isAdc\":%s,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"timestampMs\":%lu}\n",
+                  pressure.sampleCount,
                   activePressurePin,
                   pressure.isAdc ? "true" : "false",
                   pressure.isContact ? "true" : "false",
@@ -462,9 +478,7 @@ void drawPressureScreen() {
   display.drawRect(2, 42, SCREEN_WIDTH - 4, 8, SSD1306_WHITE);
   int fillWidth = 0;
   if (pressure.isAdc) {
-    int delta = max(0, pressure.rawValue - adcZeroBaseline);
-    int span = max(100, 4095 - adcZeroBaseline);
-    fillWidth = map(constrain(delta, 0, span), 0, span, 0, SCREEN_WIDTH - 8);
+    fillWidth = constrain((int)((pressure.forceEstimateN / 8.0f) * (SCREEN_WIDTH - 8)), 0, SCREEN_WIDTH - 8);
   } else {
     fillWidth = pressure.isContact ? (SCREEN_WIDTH - 8) : 0;
   }
@@ -568,6 +582,7 @@ void printHelp() {
   Serial.println("  'p' : Switch to Pressure Sensor screen");
   Serial.println("  'k' : Toggle pin (GPIO 1 [ADC1 Analog] <-> GPIO 10 [Digital])");
   Serial.println("  'c' : Auto-zero ADC baseline for unpressed FSR 400/402");
+  Serial.println("  'x' : Set full scale span to current pressure (press firmly and send 'x')");
   Serial.println("  'v' : Toggle calm/clean mode vs verbose output");
   Serial.println("  't' : Toggle terminal pressure streaming (ON/OFF)");
   Serial.println("  'j' : Toggle JSON telemetry output (ON/OFF)");
@@ -669,6 +684,11 @@ void loop() {
       }
     } else if (ch == 'c') {
       calibrateAdcZero();
+    } else if (ch == 'x') {
+      int delta = max(100, pressure.rawValue - adcZeroBaseline);
+      maxConductance = max(0.5f, (float)delta / (float)max(150, 4095 - pressure.rawValue));
+      Serial.printf("\n[Calibrated] Full scale conductance set to: %.2f (Current raw: %d, Base: %d)\n\n",
+                    maxConductance, pressure.rawValue, adcZeroBaseline);
     } else if (ch == 'v') {
       cleanOutputMode = !cleanOutputMode;
       Serial.printf("[Terminal] Clean output mode: %s\n", cleanOutputMode ? "ENABLED (Calm)" : "DISABLED (Verbose)");
@@ -723,5 +743,5 @@ void loop() {
     renderCurrentMode();
   }
 
-  delay(20);
+  delay(5);
 }

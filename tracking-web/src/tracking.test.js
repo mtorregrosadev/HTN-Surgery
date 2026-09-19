@@ -62,7 +62,17 @@ test('OpenCV 4x4 marker family decodes a nonzero ID', () => {
   assert.match(markerSvg(DICTIONARIES.OPENCV_4X4_50), /^<svg/);
 });
 
-test('the marker preview SVG is detectable in both supported families', () => {
+test('OpenCV 5x5 marker family decodes marker #0 and ignores unreliable matches', () => {
+  const family = DICTIONARIES.OPENCV_5X5_250;
+  const detector = createDetector(family);
+  const marker = selectMarker(detector.detect(makeMarkerImage(detector, 0)), family);
+  assert.equal(marker?.id, 0);
+  assert.equal(marker.hammingDistance, 0);
+  assert.equal(selectMarker([{ ...marker, hammingDistance: 3 }], family), null);
+  assert.equal(selectMarker([{ ...marker, hammingDistance: 2 }], family)?.id, 0);
+});
+
+test('the marker preview SVG is detectable in every supported family', () => {
   for (const family of Object.values(DICTIONARIES)) {
     const detector = createDetector(family);
     const marker = selectMarker(detector.detect(rasterizeMarkerSvg(markerSvg(family))), family);

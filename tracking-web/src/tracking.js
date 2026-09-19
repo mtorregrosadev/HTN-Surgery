@@ -1,19 +1,31 @@
 import arucoPackage from 'js-aruco2';
 import 'js-aruco2/src/dictionaries/aruco_4x4_1000.js';
+import 'js-aruco2/src/dictionaries/aruco_5x5_1000.js';
 
 const { AR } = arucoPackage;
 
 export const DICTIONARIES = {
   SURGE_PREP: 'ARUCO_MIP_36h12',
   OPENCV_4X4_50: 'OPENCV_4X4_50',
+  OPENCV_5X5_250: 'OPENCV_5X5_250',
 };
-export const DEFAULT_DICTIONARY = DICTIONARIES.SURGE_PREP;
+export const DEFAULT_DICTIONARY = DICTIONARIES.OPENCV_5X5_250;
 export const TARGET_MARKER_ID = 0;
 export const MAX_PATH_POINTS = 180;
 
 AR.DICTIONARIES[DICTIONARIES.OPENCV_4X4_50] = {
   ...AR.DICTIONARIES.ARUCO_4X4_1000,
   codeList: AR.DICTIONARIES.ARUCO_4X4_1000.codeList.slice(0, 50),
+};
+AR.DICTIONARIES[DICTIONARIES.OPENCV_5X5_250] = {
+  ...AR.DICTIONARIES.ARUCO_5X5_1000,
+  codeList: AR.DICTIONARIES.ARUCO_5X5_1000.codeList.slice(0, 250),
+};
+
+const MAX_CORRECTION_BITS = {
+  [DICTIONARIES.SURGE_PREP]: 5,
+  [DICTIONARIES.OPENCV_4X4_50]: 1,
+  [DICTIONARIES.OPENCV_5X5_250]: 2,
 };
 
 export function createDetector(dictionaryName = DEFAULT_DICTIONARY) {
@@ -27,8 +39,9 @@ export function markerSvg(dictionaryName = DEFAULT_DICTIONARY) {
 }
 
 export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY) {
-  if (dictionaryName === DICTIONARIES.OPENCV_4X4_50) {
-    return markers.reduce((largest, marker) => {
+  const validMarkers = markers.filter((marker) => marker.hammingDistance <= MAX_CORRECTION_BITS[dictionaryName]);
+  if (dictionaryName !== DICTIONARIES.SURGE_PREP) {
+    return validMarkers.reduce((largest, marker) => {
       const size = marker.corners.reduce((sum, corner, index) => {
         const next = marker.corners[(index + 1) % 4];
         return sum + Math.hypot(next.x - corner.x, next.y - corner.y);
@@ -36,7 +49,7 @@ export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY) {
       return !largest || size > largest.size ? { marker, size } : largest;
     }, null)?.marker ?? null;
   }
-  return markers.find((marker) => marker.id === TARGET_MARKER_ID) ?? null;
+  return validMarkers.find((marker) => marker.id === TARGET_MARKER_ID) ?? null;
 }
 
 export function markerPose2d(marker, timestampMs) {

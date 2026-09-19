@@ -14,9 +14,9 @@ Open `http://127.0.0.1:5173/`, choose a marker family, and use **Show matching m
 
 If the browser reports **No camera found**, connect a webcam, open the page on a device with a camera, or choose **Open video file** to analyze a local recording. **Try synthetic demo** generates a moving marker in the browser so the tracker can be checked without hardware. Neither source is uploaded.
 
-The default marker family is `ARUCO_MIP_36h12` from `js-aruco2`. The page also supports OpenCV's common `DICT_4X4_50` family, selectable above the camera. The OpenCV option recognizes IDs 0–49, while the default Surge Prep option tracks ID 0. The generated preview and downloads always match the selected family. A similarly shaped marker from another generator can have different bits or a different ID; select its exact family or use the image from this page.
+The default marker family is OpenCV `DICT_5X5_250`, which recognizes IDs 0–249 and matches the common 5×5 marker generator shown in the camera test. The page also supports OpenCV `DICT_4X4_50` (IDs 0–49) and Surge Prep `ARUCO_MIP_36h12` (ID 0). Select the **exact dictionary** shown by your marker generator. The generated preview and downloads always match the selected family. A similarly shaped marker from another generator can have different bits or a different ID; use the image from this page if the family is unknown.
 
-When tracking fails, the page distinguishes a visible square with a code mismatch from a frame with no clean square candidate. A dark phone interface touching the black marker border can hide that border from the detector. The generated PNG includes a wide white margin to separate it from the surrounding screen.
+When tracking fails, the page distinguishes a visible square with a code mismatch from a frame with no clean square candidate. It ignores decoded markers beyond each dictionary's error-correction limit so unrelated screen elements do not trigger false tracking. A dark phone interface touching the black marker border can hide that border from the detector. The generated PNG includes a wide white margin to separate it from the surrounding screen.
 
 ## What the page measures
 

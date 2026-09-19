@@ -11,6 +11,12 @@ const preview = $('path-preview');
 const previewContext = preview.getContext('2d');
 let dictionaryName = DEFAULT_DICTIONARY;
 let detector = createDetector(dictionaryName);
+$('dictionary').value = dictionaryName;
+const familyDetails = {
+  [DICTIONARIES.SURGE_PREP]: { description: 'marker #0', label: 'Surge Prep · MIP 36h12', camera: 'LIVE / ARUCO MIP 36h12', filename: 'mip-36h12' },
+  [DICTIONARIES.OPENCV_4X4_50]: { description: 'an OpenCV 4×4 marker (IDs 0–49)', label: 'OpenCV · 4×4 50', camera: 'LIVE / OPENCV 4×4 50', filename: 'opencv-4x4-50' },
+  [DICTIONARIES.OPENCV_5X5_250]: { description: 'an OpenCV 5×5 marker (IDs 0–249)', label: 'OpenCV · 5×5 250', camera: 'LIVE / OPENCV 5×5 250', filename: 'opencv-5x5-250' },
+};
 
 let stream = null;
 let fileUrl = null;
@@ -26,7 +32,7 @@ let currentPose = null;
 let depthReference = null;
 
 function markerDescription() {
-  return dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'an OpenCV 4×4 marker (IDs 0–49)' : 'marker #0';
+  return familyDetails[dictionaryName].description;
 }
 
 function setStatus(label, kind = '') {
@@ -126,7 +132,9 @@ function processFrame(timestampMs) {
       previousPose = null;
       setStatus('MARKER LOST', 'searching');
       const hint = markers.length
-        ? 'A marker was decoded, but its ID does not match #0. Show the matching marker from this page.'
+        ? dictionaryName === DICTIONARIES.SURGE_PREP
+          ? 'This marker does not match Surge Prep #0. Select the family shown by your marker generator, or use the marker from this page.'
+          : 'The square is not a reliable match. Check the exact marker family in your generator, then keep its white margin visible.'
         : detector.candidates.length
           ? 'A square is visible, but its code does not match. Check the marker family above.'
           : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
@@ -299,7 +307,7 @@ $('dictionary').addEventListener('change', () => {
   path = [];
   drawPreview();
   clearMeasurements();
-  $('camera-label').textContent = dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'LIVE / OPENCV 4×4 50' : 'LIVE / ARUCO MIP 36h12';
+  $('camera-label').textContent = familyDetails[dictionaryName].camera;
   $('depth-hint').textContent = 'Set a new depth reference after changing the marker family.';
   if (source === 'demo') startDemo();
 });
@@ -310,7 +318,7 @@ function markerDataUrl() {
 
 function showMarker() {
   $('marker-preview').src = markerDataUrl();
-  $('marker-family-label').textContent = dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'OpenCV · 4×4 50' : 'Surge Prep · MIP 36h12';
+  $('marker-family-label').textContent = familyDetails[dictionaryName].label;
   $('marker-dialog').showModal();
 }
 
@@ -318,7 +326,7 @@ function downloadBlob(blob, extension) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  const family = dictionaryName === DICTIONARIES.OPENCV_4X4_50 ? 'opencv-4x4-50' : 'mip-36h12';
+  const family = familyDetails[dictionaryName].filename;
   link.download = `surge-prep-${family}-${TARGET_MARKER_ID}.${extension}`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);

@@ -142,9 +142,9 @@ class SofaSimulator(Simulator):
     """In-process bridge to a native SOFA Python scene."""
 
     name = "sofa-native"
-    # Two 10 ms implicit steps let contact settle while keeping the local loop
-    # interactive at showcase input rates.
-    network_substeps = 3
+    # Two authoritative 10 ms solves let contact constraints settle while
+    # Unity interpolates between returned states.
+    network_substeps = 2
     layer_nodes = {
         "skin": "skin",
         "subcutaneous": "subcutaneous",
@@ -339,9 +339,6 @@ class SofaSimulator(Simulator):
                 }
             )
             meshes = self._deformable_meshes(state)
-            wound = chest.wound_mesh(self._scene_module.chest_surface_y_mm)
-            if wound.triangle_indices:
-                meshes.append(wound)
             return _snapshot(
                 proxy_sample, state.tick, self.step_ms, self.name, chest, events,
                 contact, penetration, reaction, contact_point, deformation, mode,
@@ -553,6 +550,5 @@ class SofaSimulator(Simulator):
                 )
             )
         return meshes
-
 
 CONTACT_THRESHOLD_FROM_FEM = 0.12

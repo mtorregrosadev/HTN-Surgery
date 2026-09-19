@@ -11,8 +11,8 @@ from pathlib import Path
 
 FIELD_RADIUS_X_MM = 40.0
 FIELD_RADIUS_Z_MM = 36.0
-GRID_X = 17
-GRID_Z = 17
+GRID_X = 21
+GRID_Z = 21
 GRID_Y = 2
 
 # Smooth fourth-order fit to registration samples taken from the BodyParts3D
@@ -224,7 +224,7 @@ def _add_layer(layers, name, specification, fix_bottom=False):
     tissue.addObject("DiagonalMass", massDensity=1e-6)
     tissue.addObject("FixedProjectiveConstraint", indices=fixed)
     tissue.addObject(
-        "TetrahedralCorotationalFEMForceField",
+        "FastTetrahedralCorotationalForceField",
         name="fem",
         youngModulus=specification["young"],
         poissonRatio=0.45,
@@ -454,7 +454,7 @@ def createScene(root, carving_active=False):
         "CarvingManager",
         name="carveSkin",
         active=carving_active,
-        carvingDistance=0.25,
+        carvingDistance=0.5,
         narrowPhaseDetection="@narrowPhase",
         toolModel="@tool/blade/edge",
         surfaceModelPath="/layers/skin/surface/triangles",
@@ -463,7 +463,7 @@ def createScene(root, carving_active=False):
         "CarvingManager",
         name="carveSubcutaneous",
         active=False,
-        carvingDistance=0.25,
+        carvingDistance=0.5,
         narrowPhaseDetection="@narrowPhase",
         toolModel="@tool/blunt/tips",
         surfaceModelPath="/layers/subcutaneous/surface/triangles",
@@ -472,7 +472,7 @@ def createScene(root, carving_active=False):
         "CarvingManager",
         name="carveMuscle",
         active=False,
-        carvingDistance=0.25,
+        carvingDistance=0.5,
         narrowPhaseDetection="@narrowPhase",
         toolModel="@tool/blunt/tips",
         surfaceModelPath="/layers/muscle/surface/triangles",
@@ -481,7 +481,7 @@ def createScene(root, carving_active=False):
         "CarvingManager",
         name="carvePleura",
         active=False,
-        carvingDistance=0.25,
+        carvingDistance=0.5,
         narrowPhaseDetection="@narrowPhase",
         toolModel="@tool/blade/edge",
         surfaceModelPath="/layers/pleura/surface/triangles",

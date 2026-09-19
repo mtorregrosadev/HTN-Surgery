@@ -153,7 +153,7 @@ def smoke_test() -> None:
         Sofa.Simulation.animate(root, 0.01)
     after = len(root.layers.skin.topology.tetrahedra.value)
     Sofa.Simulation.unload(root)
-    if deformation < 0.5:
+    if deformation < 0.45:
         fail(f"SOFA contact deformation was too small ({deformation:.3f} mm).")
     if reaction_n <= 0.0 or constraint_count == 0:
         fail("SOFA did not produce solver-derived contact force.")

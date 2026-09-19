@@ -86,7 +86,9 @@ async def test_native_sofa_owns_contact_force_deformation_and_topology() -> None
             topology_changed = topology_changed or "topology-changed" in carved.events
             sequence += 1
         assert topology_changed
-        assert any(mesh.object_id == "wound-channel" for mesh in carved.deformable_meshes)
+        # The cavity is now the actual boundary created by SOFA topology
+        # removal; native mode must not append a procedural wound mesh.
+        assert all(mesh.object_id != "wound-channel" for mesh in carved.deformable_meshes)
         assert max(
             mesh.topology_revision for mesh in carved.deformable_meshes
         ) > before_revision

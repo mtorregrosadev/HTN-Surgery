@@ -4,15 +4,14 @@ services:
     restart: unless-stopped
     environment:
       MONGO_INITDB_DATABASE: surge_prep
-    ports:
-      - "27017:27017"
     volumes:
       - surge-prep-mongodb:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 5s
+      interval: 30s
       timeout: 3s
       retries: 10
+      start_period: 5s
 
   api:
     build: ./backend
@@ -27,6 +26,15 @@ services:
       mongodb:
         condition: service_healthy
 
+  controller:
+    build: ./controller
+    restart: unless-stopped
+    environment:
+      SURGE_PREP_API_URL: http://api:8000
+    ports:
+      - "8100:8100"
+    depends_on:
+      - api
+
 volumes:
   surge-prep-mongodb:
-

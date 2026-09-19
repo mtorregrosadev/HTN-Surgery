@@ -28,3 +28,17 @@ under Unity XR Plugin Management and supports Unity 2021.3+. Import the XREAL
 SDK into the containing Unity application, configure its loader and XR Origin,
 and keep these transport/rendering scripts unchanged. Hardware validation must
 wait until the exact glasses, Beam Pro firmware, and tracking mode are known.
+
+## Develop without hardware
+
+Start the Docker stack, then run a continuous synthetic hardware source:
+
+```bash
+docker compose up --build -d
+docker compose exec controller \
+  python -m scalpel_controller.synthetic --controller-url http://localhost:8100
+```
+
+Copy the printed session ID into `ScalpelStreamClient`. Enter Play Mode and the
+tool plus training pad will move from live controller snapshots. Stop the
+synthetic stream with Ctrl+C; it will complete the session and print metrics.

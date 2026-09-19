@@ -59,7 +59,7 @@ def createScene(root):
     surface.addObject("QuadSetTopologyContainer", name="topology")
     surface.addObject("QuadSetTopologyModifier")
     surface.addObject("Hexa2QuadTopologicalMapping", input="@../grid", output="@.")
-    surface.addObject("MechanicalObject")
+    surface.addObject("MechanicalObject", name="dofs")
     surface.addObject("QuadCollisionModel")
     surface.addObject("PointCollisionModel")
     surface.addObject("BarycentricMapping")

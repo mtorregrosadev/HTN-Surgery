@@ -55,3 +55,7 @@ keeping the API contracts unchanged.
 6. `GET /v1/sessions/{sessionId}/replay`
 
 REST `POST /v1/sessions/{sessionId}/samples` is also available for diagnostics.
+
+Snapshots include the authoritative tool pose plus deformable surface vertices
+and triangle topology for immersive rendering. The controller broadcasts these
+snapshots to Unity; clients must not open this API WebSocket directly.

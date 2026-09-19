@@ -78,6 +78,11 @@ simulation adapter. Shared payload schemas live under `contracts/v1/`; embedded,
 controller, and VR work should generate or validate DTOs against those contracts
 instead of copying backend-internal models.
 
+The runnable Scalpel relay under `controller/` separates hardware ingestion
+from client subscriptions. The embedded Unity package under `client/unity/`
+consumes those subscriptions, interpolates the authoritative tool pose and
+deformable SOFA surface, and is ready to host inside an OpenXR/XREAL project.
+
 For API-only development, the default in-memory simulator preserves the same
 request/response shape. The demo must switch to the `sofa` backend so SOFA is
 authoritative. See `backend/README.md` for setup and controller flow.

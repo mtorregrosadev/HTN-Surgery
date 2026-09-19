@@ -1,4 +1,4 @@
-from surge_prep.layered_chest import hits_protected_rib, in_patch
+from surge_prep.layered_chest import hits_protected_rib, in_carvable_field, in_patch
 
 
 def test_active_field_matches_the_elliptical_sofa_mesh() -> None:
@@ -6,6 +6,8 @@ def test_active_field_matches_the_elliptical_sofa_mesh() -> None:
     assert in_patch(39.0, 0.0)
     assert not in_patch(40.0, 36.0)
     assert not in_patch(0.0, 37.0)
+    assert in_carvable_field(18.0, 6.0)
+    assert not in_carvable_field(0.0, 30.0)
 
 
 def test_ribs_only_block_deep_tool_motion_over_their_bands() -> None:

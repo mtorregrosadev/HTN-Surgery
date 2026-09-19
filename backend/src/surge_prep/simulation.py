@@ -15,6 +15,7 @@ from .layered_chest import (
     RIB_TOP_Y_MM,
     exposed_surface_y_mm,
     hits_protected_rib,
+    in_carvable_field,
     in_patch,
     pose_contact,
     tool_state_from_pose,
@@ -339,6 +340,16 @@ class SofaSimulator(Simulator):
 
     def _apply_tool(self, root: Any, sample: ToolSample, tool_pose: list) -> None:
         root.tool.dofs.position.value = tool_pose
+        local_deformation = in_carvable_field(
+            sample.position_mm.x, sample.position_mm.z
+        )
+        for layer_id in self.layer_nodes:
+            surface = self._layer(root, layer_id).surface
+            surface.triangles.active.value = local_deformation
+            surface.points.active.value = local_deformation
+        body_shell = root.getChild("bodyContactShell")
+        if body_shell is not None:
+            body_shell.skin.active.value = not local_deformation
         scalpel = sample.tool_id == "scalpel"
         blunt = sample.tool_id == "blunt-dissector"
         tube = sample.tool_id == "chest-tube"
@@ -387,7 +398,7 @@ class SofaSimulator(Simulator):
             and SofaSimulator._tool_matches_layer(
                 sample.tool_id, layer_id or chest.current_layer()
             )
-            and in_patch(sample.position_mm.x, sample.position_mm.z)
+            and in_carvable_field(sample.position_mm.x, sample.position_mm.z)
             and 0.001 <= reaction_n <= 3.0
             and planar_travel_mm >= 0.2
         )
@@ -473,16 +484,44 @@ class SofaSimulator(Simulator):
         meshes: list[DeformableMeshState] = []
         for layer_id in cls.layer_nodes:
             layer = cls._layer(root, layer_id)
-            vertices = [
-                Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
-                for point in layer.dofs.position.value
-            ]
-            triangles = [
-                int(index)
+            current = layer.dofs.position.value
+            resting = layer.dofs.rest_position.value
+            top_by_column: dict[tuple[float, float], float] = {}
+            for point in resting:
+                key = (round(float(point[0]), 4), round(float(point[2]), 4))
+                top_by_column[key] = max(
+                    float(point[1]), top_by_column.get(key, -math.inf)
+                )
+            top_indices = {
+                index
+                for index, point in enumerate(resting)
+                if abs(
+                    float(point[1])
+                    - top_by_column[(round(float(point[0]), 4), round(float(point[2]), 4))]
+                )
+                < 0.05
+            }
+            finite_indices = {
+                index
+                for index, point in enumerate(current)
+                if all(math.isfinite(float(point[axis])) for axis in range(3))
+            }
+            surface_indices = top_indices & finite_indices
+            surface_triangles = [
+                [int(index) for index in triangle]
                 for triangle in layer.surface.topology.triangles.value
-                for index in triangle
+                if all(int(index) in surface_indices for index in triangle)
             ]
+            triangles = [index for triangle in surface_triangles for index in triangle]
             used_indices = sorted(set(triangles))
+            vertices = [
+                Vector3(
+                    x=float(current[index][0]),
+                    y=float(current[index][1]),
+                    z=float(current[index][2]),
+                )
+                for index in used_indices
+            ]
             remap = {
                 original: compact
                 for compact, original in enumerate(used_indices)
@@ -495,7 +534,7 @@ class SofaSimulator(Simulator):
                         + state.initial_tetrahedra[layer_id]
                         - state.previous_tetrahedra[layer_id]
                     ),
-                    vertices_mm=[vertices[index] for index in used_indices],
+                    vertices_mm=vertices,
                     triangle_indices=[remap[index] for index in triangles],
                 )
             )

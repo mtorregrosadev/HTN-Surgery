@@ -301,11 +301,16 @@ namespace SurgePrep
 
             public void SetTarget(DeformableMeshDto state)
             {
-                target = new Vector3[state.verticesMm.Length];
-                for (var index = 0; index < target.Length; index++)
+                var nextTarget = new Vector3[state.verticesMm.Length];
+                for (var index = 0; index < nextTarget.Length; index++)
                 {
-                    target[index] = RegisteredPosition(state.verticesMm[index]);
+                    if (!Finite(state.verticesMm[index]))
+                    {
+                        return;
+                    }
+                    nextTarget[index] = RegisteredPosition(state.verticesMm[index]);
                 }
+                target = nextTarget;
                 if (mesh.vertexCount != target.Length)
                 {
                     mesh.vertices = target;
@@ -319,6 +324,14 @@ namespace SurgePrep
                 }
             }
 
+            private static bool Finite(Vector3Dto value)
+            {
+                return value != null
+                    && !float.IsNaN(value.x) && !float.IsInfinity(value.x)
+                    && !float.IsNaN(value.y) && !float.IsInfinity(value.y)
+                    && !float.IsNaN(value.z) && !float.IsInfinity(value.z);
+            }
+
             private static int[] AnatomyFieldTriangles(DeformableMeshDto state)
             {
                 var visible = new List<int>(state.triangleIndices.Length);
@@ -329,8 +342,8 @@ namespace SurgePrep
                     var c = state.verticesMm[state.triangleIndices[index + 2]];
                     var xMm = (a.x + b.x + c.x) / 3f;
                     var zMm = (a.z + b.z + c.z) / 3f;
-                    var ellipse = xMm * xMm / (39f * 39f)
-                        + zMm * zMm / (35f * 35f);
+                    var ellipse = xMm * xMm / (30f * 30f)
+                        + zMm * zMm / (22f * 22f);
                     if (ellipse > 1f) continue;
                     visible.Add(state.triangleIndices[index]);
                     visible.Add(state.triangleIndices[index + 1]);

@@ -15,6 +15,8 @@ from .models import (
 SURFACE_Y_MM = 0.0
 PATCH_RADIUS_X_MM = 40.0
 PATCH_RADIUS_Z_MM = 36.0
+CARVABLE_RADIUS_X_MM = 30.0
+CARVABLE_RADIUS_Z_MM = 22.0
 CORRIDOR_MIN_X_MM = -18.0
 CORRIDOR_MAX_X_MM = 18.0
 CELL_WIDTH_MM = 3.0
@@ -75,6 +77,15 @@ def in_patch(x_mm: float, z_mm: float) -> bool:
     return (
         (x_mm / PATCH_RADIUS_X_MM) ** 2
         + (z_mm / PATCH_RADIUS_Z_MM) ** 2
+        <= 1.0
+    )
+
+
+def in_carvable_field(x_mm: float, z_mm: float) -> bool:
+    """Keep topology changes away from the field's fixed FEM boundary."""
+    return (
+        (x_mm / CARVABLE_RADIUS_X_MM) ** 2
+        + (z_mm / CARVABLE_RADIUS_Z_MM) ** 2
         <= 1.0
     )
 

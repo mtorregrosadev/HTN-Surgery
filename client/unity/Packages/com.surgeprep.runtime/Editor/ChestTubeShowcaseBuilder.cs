@@ -730,9 +730,9 @@ namespace SurgePrep.Editor
                     var c = sourceTriangles[index + 2];
                     var centre = (vertices[a] + vertices[b] + vertices[c]) / 3f;
                     var localX = (centre.x + 0.12f * sourceUnitsPerMetre)
-                        / (0.039f * sourceUnitsPerMetre);
+                        / (0.030f * sourceUnitsPerMetre);
                     var localZ = (centre.z - 1.20f * sourceUnitsPerMetre)
-                        / (0.035f * sourceUnitsPerMetre);
+                        / (0.022f * sourceUnitsPerMetre);
                     var insideProcedureWindow = localX * localX + localZ * localZ <= 1f
                         && centre.y < -0.10f * sourceUnitsPerMetre;
                     if (!insideProcedureWindow)

@@ -56,12 +56,22 @@ RIB_RADIUS_MM = 4.0
 RIB_TOP_DEPTH_MM = -10.0
 ANATOMY_BIN_MM = 12.0
 BODY_CONTACT_RADIUS_MM = 5.0
+DEFORMABLE_RADIUS_X_MM = 30.0
+DEFORMABLE_RADIUS_Z_MM = 22.0
 
 
 def chest_surface_y_mm(x_mm, z_mm):
     return sum(
         coefficient * (x_mm ** x_power) * (z_mm ** z_power)
         for (x_power, z_power), coefficient in CHEST_SURFACE_TERMS
+    )
+
+
+def in_deformable_field(x_mm, z_mm):
+    return (
+        (x_mm / DEFORMABLE_RADIUS_X_MM) ** 2
+        + (z_mm / DEFORMABLE_RADIUS_Z_MM) ** 2
+        <= 1.0
     )
 
 
@@ -101,7 +111,7 @@ def anatomy_surface_samples():
 
 
 def body_surface_y_mm(x_mm, z_mm):
-    if (x_mm / FIELD_RADIUS_X_MM) ** 2 + (z_mm / FIELD_RADIUS_Z_MM) ** 2 <= 1.0:
+    if in_deformable_field(x_mm, z_mm):
         return chest_surface_y_mm(x_mm, z_mm)
     bins = anatomy_surface_samples()
     target = (round(x_mm / ANATOMY_BIN_MM), round(z_mm / ANATOMY_BIN_MM))
@@ -351,7 +361,7 @@ def _add_body_contact_shell(root):
     for (x_bin, z_bin), surface_y in anatomy_surface_samples().items():
         x_mm = x_bin * ANATOMY_BIN_MM
         z_mm = z_bin * ANATOMY_BIN_MM
-        if (x_mm / 44.0) ** 2 + (z_mm / 40.0) ** 2 <= 1.0:
+        if (x_mm / 28.0) ** 2 + (z_mm / 20.0) ** 2 <= 1.0:
             continue
         positions.append([x_mm, surface_y - BODY_CONTACT_RADIUS_MM, z_mm])
     if not positions:

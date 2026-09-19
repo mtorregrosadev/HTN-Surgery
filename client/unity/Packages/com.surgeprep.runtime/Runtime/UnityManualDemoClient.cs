@@ -59,7 +59,7 @@ namespace SurgePrep
         public string Status { get; private set; } = "Starting controller session…";
         public string SimulationBackend { get; private set; } = "unknown";
         public string ToolId => toolId;
-        public bool SofaNative => SimulationBackend == "sofa-native" || SimulationBackend == "memory-development-only" || SimulationBackend == "sofa";
+        public bool SofaNative => SimulationBackend == "sofa-native";
         public bool TrackingHealthy => !trackingFailed;
         public bool HardwareConnected { get; private set; }
         public string HardwarePort { get; private set; } = "";
@@ -156,7 +156,7 @@ namespace SurgePrep
                 if (!string.IsNullOrEmpty(snapshot.simulationBackend))
                 {
                     SimulationBackend = snapshot.simulationBackend;
-                    if (SimulationBackend != "sofa-native" && SimulationBackend != "memory-development-only" && SimulationBackend != "sofa")
+                    if (!SofaNative)
                     {
                         Status = "SOFA OFFLINE";
                     }
@@ -285,7 +285,7 @@ namespace SurgePrep
             {
                 SimulationBackend = "sofa-offline";
             }
-            if (SimulationBackend != "sofa-native" && SimulationBackend != "memory-development-only" && SimulationBackend != "sofa")
+            if (!SofaNative)
             {
                 Status = "SOFA OFFLINE";
             }

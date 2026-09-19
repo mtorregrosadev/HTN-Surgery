@@ -96,8 +96,8 @@ namespace SurgePrep
             GUI.Label(new Rect(38, y, 380, 40), Instruction(snapshot), valueStyle);
             y += 44f;
 
-            GUI.color = isSimActive ? new Color(0.35f, 0.85f, 0.55f) : new Color(1f, 0.45f, 0.3f);
-            var statusLabel = isNative ? "SOFA  NATIVE" : (isSimActive ? "SOFA / SIMULATOR  ACTIVE" : "SOFA  OFFLINE");
+            GUI.color = isNative ? new Color(0.35f, 0.85f, 0.55f) : new Color(1f, 0.45f, 0.3f);
+            var statusLabel = isNative ? "SOFA  NATIVE" : (isSimActive ? "SOFA OFFLINE — DEV SIMULATOR" : "SOFA  OFFLINE");
             GUI.Label(new Rect(38, y, 380, 20), statusLabel, labelStyle);
             GUI.color = Color.white;
             y += 20f;
@@ -121,7 +121,7 @@ namespace SurgePrep
             {
                 GUI.color = new Color(0.85f, 0.45f, 1f);
                 var src = string.IsNullOrEmpty(manualDemo.TrackingSource) ? "OPTICAL" : manualDemo.TrackingSource.ToUpperInvariant();
-                GUI.Label(new Rect(38, y, 380, 20), $"OPTICAL TRACKING  ONLINE ({src} 3D POSE)", labelStyle);
+                GUI.Label(new Rect(38, y, 380, 20), $"OPTICAL TRACKING  ONLINE ({src} CAMERA ESTIMATE)", labelStyle);
             }
             else
             {

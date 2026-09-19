@@ -149,6 +149,11 @@ namespace SurgePrep.Editor
                 "InteractiveTissue", new Color(0.3f, 0.025f, 0.04f, 0.58f)
             );
             var tool = Material("TrainingTool", new Color(0.65f, 0.72f, 0.78f), 0.65f, 0.7f);
+            var roomWall = Material("RoomWall", new Color(0.018f, 0.035f, 0.065f), 0.0f, 0.3f);
+            var roomFloor = Material("RoomFloor", new Color(0.025f, 0.04f, 0.055f), 0.1f, 0.5f);
+            var roomPanel = Material("RoomPanel", new Color(0.025f, 0.08f, 0.12f), 0.2f, 0.5f);
+            var neon = EmissiveMaterial("RoomNeon", new Color(0.04f, 0.8f, 0.72f));
+            var warmNeon = EmissiveMaterial("RoomWarmNeon", new Color(0.9f, 0.22f, 0.1f));
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             RenderSettings.ambientLight = new Color(0.18f, 0.22f, 0.27f);
@@ -169,6 +174,8 @@ namespace SurgePrep.Editor
                 instance.name = FriendlyName(file);
                 AssignMaterial(instance, MaterialFor(file, bone, cartilage, muscle, diaphragm, skin));
             }
+
+            CreateTrainingRoom(roomWall, roomFloor, roomPanel, neon, warmNeon);
 
             var simulation = new GameObject("Surge Prep Simulation");
             simulation.transform.position = new Vector3(-0.105f, 0.005f, 0.215f);
@@ -195,6 +202,76 @@ namespace SurgePrep.Editor
             );
         }
 
+        private static void CreateTrainingRoom(
+            Material wall,
+            Material floor,
+            Material panel,
+            Material neon,
+            Material warmNeon
+        )
+        {
+            var room = new GameObject("Surge Prep Training Lab");
+            Cube("Floor", room.transform, new Vector3(0f, -1.31f, -0.1f), new Vector3(4f, 0.08f, 4f), floor);
+            Cube("Back wall", room.transform, new Vector3(0f, 0.0f, -0.82f), new Vector3(4f, 2.8f, 0.08f), wall);
+            Cube("Left wall", room.transform, new Vector3(-2f, 0.0f, 0.1f), new Vector3(0.08f, 2.8f, 4f), wall);
+            Cube("Right wall", room.transform, new Vector3(2f, 0.0f, 0.1f), new Vector3(0.08f, 2.8f, 4f), wall);
+            Cube("Ceiling", room.transform, new Vector3(0f, 1.4f, 0.1f), new Vector3(4f, 0.08f, 4f), wall);
+
+            Cube("Anatomy display panel", room.transform, new Vector3(0f, -0.02f, -0.74f), new Vector3(1.55f, 2.35f, 0.04f), panel);
+            Cube("Panel top light", room.transform, new Vector3(0f, 1.15f, -0.69f), new Vector3(1.5f, 0.018f, 0.012f), neon);
+            Cube("Panel left light", room.transform, new Vector3(-0.76f, -0.02f, -0.69f), new Vector3(0.018f, 2.3f, 0.012f), neon);
+            Cube("Panel right light", room.transform, new Vector3(0.76f, -0.02f, -0.69f), new Vector3(0.018f, 2.3f, 0.012f), neon);
+            Text("SURGE PREP", room.transform, new Vector3(0.52f, 1.0f, -0.68f), 0.045f, neon.color);
+            Text("CHEST ACCESS LAB", room.transform, new Vector3(0.52f, 0.9f, -0.68f), 0.023f, Color.white);
+            Text("LIVE SIMULATION", room.transform, new Vector3(0.52f, -1.02f, -0.68f), 0.023f, neon.color);
+
+            Cube("Instructor console", room.transform, new Vector3(-1.3f, -0.92f, 0.2f), new Vector3(0.95f, 0.08f, 0.5f), panel);
+            Cube("Console screen", room.transform, new Vector3(-1.3f, -0.63f, 0.17f), new Vector3(0.62f, 0.34f, 0.04f), wall);
+            Cube("Console status light", room.transform, new Vector3(-1.3f, -0.63f, 0.13f), new Vector3(0.48f, 0.012f, 0.01f), warmNeon);
+            Text("INSTRUCTOR", room.transform, new Vector3(1.0f, -0.43f, 0.12f), 0.022f, Color.white);
+
+            for (var index = -3; index <= 3; index++)
+            {
+                Cube("Floor guide " + index, room.transform, new Vector3(index * 0.35f, -1.265f, 0.85f), new Vector3(0.015f, 0.006f, 0.8f), neon);
+            }
+            Cube("Floor guide crossbar", room.transform, new Vector3(0f, -1.258f, 0.1f), new Vector3(2.5f, 0.006f, 0.015f), warmNeon);
+        }
+
+        private static GameObject Cube(
+            string name, Transform parent, Vector3 position, Vector3 scale, Material material
+        )
+        {
+            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.name = name;
+            cube.transform.SetParent(parent, false);
+            cube.transform.localPosition = position;
+            cube.transform.localScale = scale;
+            cube.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var collider = cube.GetComponent<Collider>();
+            if (collider != null)
+            {
+                UnityEngine.Object.DestroyImmediate(collider);
+            }
+            return cube;
+        }
+
+        private static void Text(
+            string value, Transform parent, Vector3 position, float size, Color colour
+        )
+        {
+            var label = new GameObject(value);
+            label.transform.SetParent(parent, false);
+            label.transform.localPosition = position;
+            label.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            var mesh = label.AddComponent<TextMesh>();
+            mesh.text = value;
+            mesh.fontSize = 64;
+            mesh.characterSize = size;
+            mesh.anchor = TextAnchor.MiddleLeft;
+            mesh.alignment = TextAlignment.Left;
+            mesh.color = colour;
+        }
+
         private static void CreateCamera()
         {
             var cameraObject = new GameObject("Main Camera");
@@ -204,9 +281,11 @@ namespace SurgePrep.Editor
             camera.backgroundColor = new Color(0.018f, 0.03f, 0.045f);
             camera.fieldOfView = 38f;
             camera.nearClipPlane = 0.01f;
-            cameraObject.transform.position = new Vector3(0f, 0.02f, 0.62f);
-            cameraObject.transform.LookAt(new Vector3(0f, 0.0f, 0.04f));
+            cameraObject.transform.position = new Vector3(0f, -0.02f, 1.8f);
+            cameraObject.transform.LookAt(new Vector3(0f, -0.35f, 0.05f));
+            camera.fieldOfView = 50f;
             cameraObject.AddComponent<AudioListener>();
+            cameraObject.AddComponent<SurgePrep.PhoneVrRig>();
         }
 
         private static void CreateLighting()
@@ -290,6 +369,15 @@ namespace SurgePrep.Editor
                 material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             }
             material.renderQueue = 3000;
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
+        private static Material EmissiveMaterial(string name, Color colour)
+        {
+            var material = Material(name, colour, 0f, 0.45f);
+            material.EnableKeyword("_EMISSION");
+            material.SetColor("_EmissionColor", colour * 3.0f);
             EditorUtility.SetDirty(material);
             return material;
         }

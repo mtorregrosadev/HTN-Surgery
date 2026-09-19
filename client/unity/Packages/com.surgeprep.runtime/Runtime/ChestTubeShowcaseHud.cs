@@ -7,8 +7,6 @@ namespace SurgePrep
         [SerializeField] private SimulationSceneRenderer sceneRenderer;
         [SerializeField] private UnityManualDemoClient manualDemo;
         [SerializeField] private string exerciseTitle = "Chest-tube access rehearsal";
-        [SerializeField] private float illustrativeForceMinimumN = 0.3f;
-        [SerializeField] private float illustrativeForceMaximumN = 1.2f;
 
         private GUIStyle titleStyle;
         private GUIStyle labelStyle;
@@ -36,7 +34,7 @@ namespace SurgePrep
                 return;
             }
 
-            var panel = new Rect(18, 18, 310, 294);
+            var panel = new Rect(18, 18, 330, 376);
             DrawRect(panel, new Color(0.025f, 0.045f, 0.065f, 0.94f));
             DrawRect(new Rect(panel.x, panel.y, 4, panel.height), new Color(0.1f, 0.85f, 0.78f));
 
@@ -59,21 +57,29 @@ namespace SurgePrep
             }
 
             var force = snapshot.tool.forceN;
+            var displayedForce = manualDemo != null && !snapshot.tool.contact
+                ? manualDemo.SelectedForceN
+                : force;
             var contact = snapshot.tool.contact;
             var radialError = Mathf.Sqrt(
                 snapshot.tool.positionMm.x * snapshot.tool.positionMm.x +
                 snapshot.tool.positionMm.z * snapshot.tool.positionMm.z
             );
-            var forceStatus = !contact
-                ? "Approach the highlighted target"
-                : force < illustrativeForceMinimumN
-                    ? "Contact detected — increase gently"
-                    : force <= illustrativeForceMaximumN
-                        ? "Controlled contact"
-                        : "Reduce pressure";
+            var mode = snapshot.tissue.interactionMode ?? "approach";
+            var forceStatus = mode == "cutting"
+                ? "INCISION ADVANCING"
+                : mode == "low-force"
+                    ? "Increase pressure with ]"
+                    : mode == "excessive-force"
+                        ? "Release pressure with ["
+                        : mode == "outside-target"
+                            ? "Return to highlighted corridor"
+                            : mode == "contact"
+                                ? "Move A / D to begin incision"
+                                : "SPACE engages the training blade";
             var statusColour = !contact
                 ? new Color(0.45f, 0.75f, 1f)
-                : force <= illustrativeForceMaximumN
+                : mode != "excessive-force"
                     ? new Color(0.15f, 0.9f, 0.62f)
                     : new Color(1f, 0.35f, 0.28f);
 
@@ -82,20 +88,22 @@ namespace SurgePrep
             GUI.Label(new Rect(38, 118, 255, 25), forceStatus, valueStyle);
             GUI.color = Color.white;
 
-            Metric("Force", $"{force:0.00} N", 158);
+            Metric(contact ? "Applied force" : "Pressure setting", $"{displayedForce:0.00} N", 158);
             Metric("Target offset", $"{radialError:0.0} mm", 194);
-            Metric("Simulation tick", snapshot.tick.ToString(), 230);
+            Metric("Incision length", $"{snapshot.tissue.incisionLengthMm:0.0} mm", 230);
+            Metric("Incision depth", $"{snapshot.tissue.incisionDepthMm:0.0} mm", 266);
+            Metric("Path complete", $"{snapshot.tissue.incisionProgress * 100f:0}%", 302);
 
             GUI.Label(
-                new Rect(38, 252, 255, 18),
-                "WASD move  •  SPACE contact  •  [ ] pressure  •  R reset",
+                new Rect(38, 334, 280, 18),
+                "WASD move  •  SPACE blade  •  [ ] pressure  •  R recenter",
                 smallStyle
             );
 
             var bar = new Rect(145, 166, 156, 8);
             DrawRect(bar, new Color(0.12f, 0.17f, 0.2f));
             DrawRect(
-                new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(force / 1.5f), bar.height),
+                new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(displayedForce / 1.5f), bar.height),
                 statusColour
             );
             Disclaimer(panel);

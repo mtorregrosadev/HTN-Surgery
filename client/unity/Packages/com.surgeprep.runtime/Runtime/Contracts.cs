@@ -32,6 +32,10 @@ namespace SurgePrep
     public sealed class TissueStateDto
     {
         public float deformationMm;
+        public float incisionProgress;
+        public float incisionLengthMm;
+        public float incisionDepthMm;
+        public string interactionMode;
     }
 
     [Serializable]

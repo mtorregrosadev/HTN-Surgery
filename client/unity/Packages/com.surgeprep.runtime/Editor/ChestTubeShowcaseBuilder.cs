@@ -150,6 +150,12 @@ namespace SurgePrep.Editor
             var tissue = TransparentMaterial(
                 "InteractiveTissue", new Color(0.3f, 0.025f, 0.04f, 0.58f)
             );
+            var incision = EmissiveMaterial(
+                "IncisionChannel", new Color(0.7f, 0.015f, 0.025f)
+            );
+            var pressure = TransparentMaterial(
+                "PressureIndicator", new Color(0.05f, 1f, 0.65f, 0.7f)
+            );
             var tool = Material("TrainingTool", new Color(0.65f, 0.72f, 0.78f), 0.65f, 0.7f);
             var roomWall = Material("RoomWall", new Color(0.018f, 0.035f, 0.065f), 0.0f, 0.3f);
             var roomFloor = Material("RoomFloor", new Color(0.008f, 0.018f, 0.028f), 0.1f, 0.5f);
@@ -201,7 +207,9 @@ namespace SurgePrep.Editor
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
             var hud = simulation.AddComponent<ChestTubeShowcaseHud>();
             SetObject(renderer, "tissueMaterial", tissue);
+            SetObject(renderer, "incisionMaterial", incision);
             SetObject(renderer, "toolMaterial", tool);
+            SetObject(renderer, "pressureIndicatorMaterial", pressure);
             SetObject(stream, "sceneRenderer", renderer);
             SetObject(manualDemo, "sceneRenderer", renderer);
             SetObject(hud, "sceneRenderer", renderer);

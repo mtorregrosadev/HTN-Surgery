@@ -9,12 +9,16 @@ namespace SurgePrep
         [SerializeField] private Transform toolTransform;
         [SerializeField, Min(1f)] private float interpolationSpeed = 20f;
         [SerializeField] private Material tissueMaterial;
+        [SerializeField] private Material incisionMaterial;
         [SerializeField] private Material toolMaterial;
+        [SerializeField] private Material pressureIndicatorMaterial;
 
         private readonly Dictionary<string, MeshView> meshes =
             new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
         private Quaternion toolTargetRotation = Quaternion.identity;
+        private Transform pressureIndicator;
+        private Material pressureIndicatorInstance;
 
         public SimulationSnapshotDto LatestSnapshot { get; private set; }
         public event Action<SimulationSnapshotDto> SnapshotReceived;
@@ -26,6 +30,7 @@ namespace SurgePrep
             {
                 toolTargetPosition = CoordinateFrame.Position(snapshot.tool.positionMm);
                 toolTargetRotation = CoordinateFrame.Rotation(snapshot.tool.orientation);
+                UpdatePressureIndicator(snapshot.tool);
             }
             foreach (var state in snapshot.deformableMeshes ?? new DeformableMeshDto[0])
             {
@@ -56,7 +61,47 @@ namespace SurgePrep
                 {
                     shaft.GetComponent<MeshRenderer>().sharedMaterial = toolMaterial;
                 }
+
+                var indicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                indicator.name = "Contact pressure indicator";
+                indicator.transform.SetParent(tip.transform, false);
+                indicator.transform.localScale = Vector3.one * 0.008f;
+                var indicatorCollider = indicator.GetComponent<Collider>();
+                if (indicatorCollider != null)
+                {
+                    Destroy(indicatorCollider);
+                }
+                pressureIndicator = indicator.transform;
+                if (pressureIndicatorMaterial != null)
+                {
+                    pressureIndicatorInstance = new Material(pressureIndicatorMaterial);
+                    indicator.GetComponent<MeshRenderer>().sharedMaterial = pressureIndicatorInstance;
+                }
+                indicator.SetActive(false);
             }
+        }
+
+        private void UpdatePressureIndicator(ToolStateDto tool)
+        {
+            if (pressureIndicator == null)
+            {
+                return;
+            }
+            pressureIndicator.gameObject.SetActive(tool.contact);
+            pressureIndicator.localScale = Vector3.one * (0.006f + tool.forceN * 0.004f);
+            if (pressureIndicatorInstance == null)
+            {
+                return;
+            }
+            var colour = tool.forceN > 1.2f
+                ? new Color(1f, 0.08f, 0.03f, 0.75f)
+                : tool.forceN < 0.3f
+                    ? new Color(0.2f, 0.55f, 1f, 0.65f)
+                    : new Color(0.05f, 1f, 0.65f, 0.7f);
+            if (pressureIndicatorInstance.HasProperty("_BaseColor"))
+                pressureIndicatorInstance.SetColor("_BaseColor", colour);
+            if (pressureIndicatorInstance.HasProperty("_Color"))
+                pressureIndicatorInstance.SetColor("_Color", colour);
         }
 
         private void Update()
@@ -84,9 +129,12 @@ namespace SurgePrep
             child.transform.SetParent(transform, false);
             var filter = child.AddComponent<MeshFilter>();
             var renderer = child.AddComponent<MeshRenderer>();
-            if (tissueMaterial != null)
+            var selectedMaterial = state.objectId.Contains("incision")
+                ? incisionMaterial
+                : tissueMaterial;
+            if (selectedMaterial != null)
             {
-                renderer.sharedMaterial = tissueMaterial;
+                renderer.sharedMaterial = selectedMaterial;
             }
             var created = new MeshView(filter);
             meshes.Add(state.objectId, created);

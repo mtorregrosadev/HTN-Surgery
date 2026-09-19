@@ -37,7 +37,8 @@ namespace SurgePrep
         private HttpClient http;
         private float xMm;
         private float zMm;
-        private float forceN;
+        private float selectedForceN = 0.75f;
+        private bool contactEngaged;
         private long sequence;
         private string calibrationId;
         private string sessionId;
@@ -46,6 +47,8 @@ namespace SurgePrep
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
         public string SessionId => sessionId;
         public string Status { get; private set; } = "Starting controller session…";
+        public float SelectedForceN => selectedForceN;
+        public bool ContactEngaged => contactEngaged;
 
         private async void OnEnable()
         {
@@ -103,15 +106,18 @@ namespace SurgePrep
                 zMm += vertical * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
                 if (ShowcaseInput.Pressed(KeyCode.Space))
                 {
-                    forceN = forceN > 0f ? 0f : 0.75f;
+                    contactEngaged = !contactEngaged;
                 }
-                if (ShowcaseInput.Pressed(KeyCode.LeftBracket)) forceN = Mathf.Max(0f, forceN - 0.1f);
-                if (ShowcaseInput.Pressed(KeyCode.RightBracket)) forceN = Mathf.Min(1.5f, forceN + 0.1f);
+                if (ShowcaseInput.Pressed(KeyCode.LeftBracket))
+                    selectedForceN = Mathf.Max(0.1f, selectedForceN - 0.1f);
+                if (ShowcaseInput.Pressed(KeyCode.RightBracket))
+                    selectedForceN = Mathf.Min(1.5f, selectedForceN + 0.1f);
                 if (ShowcaseInput.Pressed(KeyCode.R))
                 {
                     xMm = 0f;
                     zMm = 0f;
-                    forceN = 0f;
+                    selectedForceN = 0.75f;
+                    contactEngaged = false;
                 }
             }
         }
@@ -193,7 +199,7 @@ namespace SurgePrep
             {
                 sampleX = xMm;
                 sampleZ = zMm;
-                sampleForce = forceN;
+                sampleForce = contactEngaged ? selectedForceN : 0f;
             }
             return new ToolSampleDto
             {

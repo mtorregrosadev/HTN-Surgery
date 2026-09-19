@@ -46,17 +46,17 @@ export SURGE_PREP_SOFA_SCENE=../simulation/sofa_scene.py
 uvicorn surge_prep.app:app
 ```
 
-The showcase scene uses a localized ~80 × 80 mm layered chest region. Visual
-BodyParts3D meshes are never used as the FEM volume. Native SOFA v26.06 on the
+The showcase scene uses a localized ~80 × 80 mm chest-wall volume 32 mm thick.
+Visual BodyParts3D meshes are never used as the FEM volume. Native SOFA v26.06 on the
 host Mac is required for the demo; see `docs/SHOWCASE_IMPLEMENTATION_HANDOFF.md`.
 The physical region is a mapped tetrahedral continuum with constraint contact,
 solver-derived reaction force, and a dynamically updated collision boundary.
 The collision pipeline follows SOFA's documented `MinProximityIntersection`
 pattern. Because that pipeline uses discrete rather than continuous collision
 detection, a surface-coupled proxy prevents tracked poses from tunnelling
-through the tissue between updates. SofaCarving removes tetrahedra only after
-the correct stage tool has physically opened enough of the
-instructor-defined corridor.
+through the tissue between updates. SofaCarving can puncture on first
+sufficient blade contact; Unity renders the returned wound-channel mesh rather
+than hiding it.
 
 Verify both the native scene and the complete running transport:
 

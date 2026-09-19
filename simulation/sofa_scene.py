@@ -38,9 +38,9 @@ CHEST_SURFACE_TERMS = [
 
 LAYER_SPECS = {
     "skin": {"top": 0.0, "bottom": -3.0, "young": 0.35},
-    "subcutaneous": {"top": -3.0, "bottom": -8.0, "young": 0.055},
-    "muscle": {"top": -8.0, "bottom": -13.0, "young": 0.18},
-    "pleura": {"top": -13.0, "bottom": -16.0, "young": 0.12},
+    "subcutaneous": {"top": -3.0, "bottom": -15.0, "young": 0.055},
+    "muscle": {"top": -15.0, "bottom": -25.0, "young": 0.18},
+    "pleura": {"top": -25.0, "bottom": -32.0, "young": 0.12},
 }
 
 SCALPEL_CUTTING_EDGE_MM = [
@@ -53,7 +53,7 @@ SCALPEL_CUTTING_EDGE_MM = [
 SCALPEL_CUTTING_EDGE_SEGMENTS = [[index, index + 1] for index in range(4)]
 RIB_CENTRES_Z_MM = (-18.0, 18.0)
 RIB_RADIUS_MM = 4.0
-RIB_TOP_DEPTH_MM = -10.0
+RIB_TOP_DEPTH_MM = -18.0
 ANATOMY_BIN_MM = 12.0
 BODY_CONTACT_RADIUS_MM = 5.0
 DEFORMABLE_RADIUS_X_MM = 30.0
@@ -141,7 +141,7 @@ def _linspace(minimum, maximum, count):
     return [minimum + (maximum - minimum) * index / (count - 1) for index in range(count)]
 
 
-def _layer_mesh(top_mm, bottom_mm):
+def _layer_mesh(top_mm, bottom_mm, fix_bottom=False):
     xs = _linspace(-FIELD_RADIUS_X_MM, FIELD_RADIUS_X_MM, GRID_X)
     zs = _linspace(-FIELD_RADIUS_Z_MM, FIELD_RADIUS_Z_MM, GRID_Z)
     depths = _linspace(top_mm, bottom_mm, GRID_Y)
@@ -192,18 +192,18 @@ def _layer_mesh(top_mm, bottom_mm):
             )
 
     fixed = []
-    for (x_index, _depth_index, z_index), index in point_indices.items():
+    for (x_index, depth_index, z_index), index in point_indices.items():
         radial = (xs[x_index] / FIELD_RADIUS_X_MM) ** 2 + (
             zs[z_index] / FIELD_RADIUS_Z_MM
         ) ** 2
-        if radial >= 0.82:
+        if radial >= 0.82 or (fix_bottom and depth_index == GRID_Y - 1):
             fixed.append(index)
     return points, tetrahedra, sorted(set(fixed))
 
 
-def _add_layer(layers, name, specification):
+def _add_layer(layers, name, specification, fix_bottom=False):
     points, tetrahedra, fixed = _layer_mesh(
-        specification["top"], specification["bottom"]
+        specification["top"], specification["bottom"], fix_bottom=fix_bottom
     )
     tissue = layers.addChild(name)
     tissue.addObject("EulerImplicitSolver", rayleighStiffness=0.12, rayleighMass=0.08)
@@ -445,7 +445,7 @@ def createScene(root, carving_active=False):
 
     layers = root.addChild("layers")
     for name, specification in LAYER_SPECS.items():
-        _add_layer(layers, name, specification)
+        _add_layer(layers, name, specification, fix_bottom=(name == "pleura"))
     _add_body_contact_shell(root)
     _add_protected_anatomy(root)
     _add_tool(root)

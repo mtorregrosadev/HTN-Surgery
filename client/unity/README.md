@@ -14,24 +14,27 @@ package.
    SOFA. If SOFA is missing, the HUD shows **SOFA OFFLINE**.
 4. Enter Play Mode and click the Game view. No session ID paste is required.
 
-The generated scene registers the supplied high-resolution BodyParts3D skin and
-internal chest anatomy in a supine pose on an operating table. A fitted cloth
-drape covers only the pelvic genital region; the chest and limbs remain visible.
-The right anterolateral simulation patch is registered directly into the skin.
-SOFA remains authoritative for contact, deformation, force, and incision
-progress. Unity incrementally opens the corresponding render triangles and
-builds a bounded wound bed and side walls from those measurements; this visual
-mesh never calculates the canonical score or cut state. The default camera
-starts in a room orbit, then settles on that window. Right-drag orbits 360°
+The generated scene registers every high-resolution BodyParts3D OBJ in
+`bodyparts3d_highres/` on the operating table. The mannequin skin stays intact;
+press `K` for an anatomy cutaway. SOFA tissue sits on the registered field.
+SOFA remains authoritative for contact, deformation, force, and
+incision progress. As soon as the blade makes sufficient SOFA contact, the API
+returns a wound trough (lips, walls, bed) that Unity renders; this visual mesh
+never calculates the canonical score. The chest wall is 32 mm thick and is not
+hard-stopped at 16 mm. The default camera starts in a room orbit, then settles
+on that window. Right-drag orbits 360°
 horizontally, scroll zooms, middle mouse pans, `F` close-up, `O` room, `C`
 surgeon view.
 
 The scalpel visual uses the supplied Onshape/SolidWorks OBJ from
 `Runtime/Models/Scalpel`; its measured blade tip is registered to the unchanged
-SOFA collision proxy. The procedural scalpel is retained only as a missing-asset
-fallback.
+SOFA collision proxy. Keyboard input holds the instrument at a 40° incision
+angle so the blade meets the chest. The procedural scalpel is retained only as
+a missing-asset fallback.
 
-Pose-only tool control (hardware later):
+Pose-only keyboard fallback (calibrated hardware uses the same 1.1 pose
+contract through the controller; disable this client and enable
+`ScalpelStreamClient` when that stream is live):
 
 - `W/A/S/D` screen-relative movement
 - `Q/E` raise/lower

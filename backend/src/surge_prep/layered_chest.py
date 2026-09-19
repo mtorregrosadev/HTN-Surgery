@@ -31,9 +31,13 @@ MAXIMUM_REACTION_N = 3.0
 CUT_THRESHOLD_MM = 0.5
 REACTION_PER_MM = 0.38
 CONTACT_THRESHOLD_MM = 0.15
+PUNCTURE_DEPTH_MM = 0.4
 RIB_HALF_WIDTH_MM = 4.0
 RIB_CENTRES_MM = (-18.0, 18.0)
-RIB_TOP_Y_MM = -10.0
+RIB_TOP_Y_MM = -18.0
+# Keyboard fallback only. Calibrated hardware must not reuse this bound.
+WORKSPACE_MIN_Y_MM = -80.0
+WORKSPACE_MAX_Y_MM = 40.0
 JITTER_HOLD_MS = 180
 DEGRADE_TIMEOUT_MS = 500
 
@@ -46,15 +50,15 @@ LAYER_TOOLS = {
 }
 LAYER_BOTTOMS_MM = {
     "skin": -3.0,
-    "subcutaneous": -8.0,
-    "intercostal-muscle": -13.0,
-    "pleura": -16.0,
+    "subcutaneous": -15.0,
+    "intercostal-muscle": -25.0,
+    "pleura": -32.0,
 }
 LAYER_TOPS_MM = {
     "skin": 0.0,
     "subcutaneous": -3.0,
-    "intercostal-muscle": -8.0,
-    "pleura": -13.0,
+    "intercostal-muscle": -15.0,
+    "pleura": -25.0,
 }
 LAYER_STAGES = {
     "skin": "skin-incision",
@@ -174,6 +178,7 @@ class LayeredChestState:
     tube_placed: bool = False
     layer_violations: int = 0
     outside_corridor_contacts: int = 0
+    blade_path: list[tuple[float, float, float, float]] = field(default_factory=list)
 
     @property
     def topology_revision(self) -> int:
@@ -218,7 +223,7 @@ class LayeredChestState:
             sample.tool_id == "chest-tube"
             and self.layers["pleura"].opened
             and in_corridor(sample.position_mm.x, sample.position_mm.z)
-            and sample.position_mm.y <= -10.0
+            and sample.position_mm.y <= LAYER_BOTTOMS_MM["intercostal-muscle"]
         ):
             if not self.tube_placed:
                 self.tube_placed = True
@@ -315,6 +320,28 @@ class LayeredChestState:
             events.append("stage-completed")
         return events
 
+    def track_blade_path(
+        self, sample: ToolSample, penetration_mm: float, surface_y: float
+    ) -> None:
+        """Record the visible incision trough from SOFA contact, not Unity."""
+        if penetration_mm < PUNCTURE_DEPTH_MM:
+            return
+        if not in_carvable_field(sample.position_mm.x, sample.position_mm.z):
+            return
+        point = (
+            float(sample.position_mm.x),
+            float(sample.position_mm.z),
+            float(penetration_mm),
+            float(surface_y),
+        )
+        if self.blade_path:
+            last = self.blade_path[-1]
+            if abs(last[0] - point[0]) < 0.45 and abs(last[1] - point[1]) < 0.45:
+                if point[2] > last[2]:
+                    self.blade_path[-1] = point
+                return
+        self.blade_path.append(point)
+
     def active_layer_for_depth(self, penetration_mm: float) -> str:
         y_mm = SURFACE_Y_MM - penetration_mm
         for name in LAYER_ORDER:
@@ -341,7 +368,10 @@ class LayeredChestState:
             deformation_mm=deformation_mm,
             incision_progress=skin.progress,
             incision_length_mm=skin.length_mm,
-            incision_depth_mm=max(layer.depth_mm for layer in self.layers.values()),
+            incision_depth_mm=max(
+                max(layer.depth_mm for layer in self.layers.values()),
+                max((point[2] for point in self.blade_path), default=0.0),
+            ),
             interaction_mode=mode,
             active_layer=active if active in LAYER_ORDER else "none",
             layers=[
@@ -360,7 +390,7 @@ class LayeredChestState:
             self._layer_mesh(name, sample, deformation_mm if name == self.current_layer() else 0.0, contact)
             for name in LAYER_ORDER
         ]
-        meshes.append(self._wound_mesh())
+        meshes.append(self.wound_mesh())
         return meshes
 
     def _layer_mesh(
@@ -404,27 +434,68 @@ class LayeredChestState:
             triangle_indices=triangles,
         )
 
-    def _wound_mesh(self) -> DeformableMeshState:
+    def wound_mesh(self, surface_y_fn=None) -> DeformableMeshState:
+        def height(x_mm: float, z_mm: float) -> float:
+            if surface_y_fn is None:
+                return SURFACE_Y_MM
+            return float(surface_y_fn(x_mm, z_mm))
+
+        points = list(self.blade_path)
+        if not points:
+            skin = self.layers["skin"]
+            for cell in sorted(skin.cut_cells):
+                x_mm = CORRIDOR_MIN_X_MM + (cell + 0.5) * CELL_WIDTH_MM
+                depth = max(
+                    layer.depths_mm.get(cell, 0.0) for layer in self.layers.values()
+                )
+                points.append((x_mm, 0.0, depth, height(x_mm, 0.0)))
+        if not points:
+            return DeformableMeshState(
+                object_id="wound-channel",
+                topology_revision=1,
+                vertices_mm=[],
+                triangle_indices=[],
+            )
+        points = sorted(points, key=lambda item: item[0])
+        if len(points) == 1:
+            x_mm, z_mm, depth, surface = points[0]
+            points = [
+                (x_mm - 1.6, z_mm, depth, surface),
+                (x_mm + 1.6, z_mm, depth, surface),
+            ]
+
         vertices: list[Vector3] = []
         triangles: list[int] = []
-        skin = self.layers["skin"]
-        for cell in sorted(skin.cut_cells):
-            x0 = CORRIDOR_MIN_X_MM + cell * CELL_WIDTH_MM
-            x1 = x0 + CELL_WIDTH_MM
-            depth = max(layer.depths_mm.get(cell, 0.0) for layer in self.layers.values())
-            half_width = min(5.8, 1.35 + depth * 0.75)
+
+        def add_quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> None:
             base = len(vertices)
-            y_mm = SURFACE_Y_MM - depth * 0.8 - 0.2
-            vertices.extend([
-                Vector3(x=x0, y=y_mm, z=-half_width),
-                Vector3(x=x1, y=y_mm, z=-half_width),
-                Vector3(x=x1, y=y_mm, z=half_width),
-                Vector3(x=x0, y=y_mm, z=half_width),
-            ])
-            triangles.extend([base, base + 2, base + 1, base, base + 3, base + 2])
+            vertices.extend([a, b, c, d])
+            triangles.extend(
+                [base, base + 2, base + 1, base, base + 3, base + 2]
+            )
+            triangles.extend(
+                [base, base + 1, base + 2, base, base + 2, base + 3]
+            )
+
+        for index in range(len(points) - 1):
+            x0, z0, depth0, surface0 = points[index]
+            x1, z1, depth1, surface1 = points[index + 1]
+            depth0 = max(0.9, depth0)
+            depth1 = max(0.9, depth1)
+            half0 = min(5.8, 0.7 + depth0 * 0.32)
+            half1 = min(5.8, 0.7 + depth1 * 0.32)
+            left0 = Vector3(x=x0, y=surface0 + 0.2, z=z0 - half0)
+            left1 = Vector3(x=x1, y=surface1 + 0.2, z=z1 - half1)
+            right0 = Vector3(x=x0, y=surface0 + 0.2, z=z0 + half0)
+            right1 = Vector3(x=x1, y=surface1 + 0.2, z=z1 + half1)
+            bed0 = Vector3(x=x0, y=surface0 - depth0, z=z0)
+            bed1 = Vector3(x=x1, y=surface1 - depth1, z=z1)
+            add_quad(left0, left1, bed1, bed0)
+            add_quad(right0, bed0, bed1, right1)
+
         return DeformableMeshState(
             object_id="wound-channel",
-            topology_revision=self.topology_revision,
+            topology_revision=max(1, len(points)),
             vertices_mm=vertices,
             triangle_indices=triangles,
         )

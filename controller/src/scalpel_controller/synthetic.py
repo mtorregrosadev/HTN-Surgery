@@ -31,7 +31,7 @@ class ManualToolState:
             self.y_mm = min(24.0, self.y_mm + 1.0)
             return True
         if key == "e":
-            self.y_mm = max(-16.0, self.y_mm - 1.0)
+            self.y_mm = max(-80.0, self.y_mm - 1.0)
             return True
         if key == "a":
             self.x_mm += 2.0

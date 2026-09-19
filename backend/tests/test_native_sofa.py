@@ -86,6 +86,7 @@ async def test_native_sofa_owns_contact_force_deformation_and_topology() -> None
             topology_changed = topology_changed or "topology-changed" in carved.events
             sequence += 1
         assert topology_changed
+        assert any(mesh.object_id == "wound-channel" for mesh in carved.deformable_meshes)
         assert max(
             mesh.topology_revision for mesh in carved.deformable_meshes
         ) > before_revision
@@ -114,11 +115,11 @@ async def test_native_sofa_hard_stops_the_tool_at_protected_ribs() -> None:
         assert "outside-corridor" in body_contact.events
 
         snapshot = await simulator.step(
-            sample(10, -16.0, 0.0, "scalpel", z_mm=18.0)
+            sample(10, -22.0, 0.0, "scalpel", z_mm=18.0)
         )
         surface_y = simulator._scene_module.chest_surface_y_mm(0.0, 18.0)
         assert "protected-anatomy" in snapshot.events
-        assert snapshot.tool.position_mm.y == pytest.approx(surface_y - 10.0)
+        assert snapshot.tool.position_mm.y == pytest.approx(surface_y - 18.0)
         assert all(mesh.topology_revision == 1 for mesh in snapshot.deformable_meshes)
     finally:
         await simulator.end_session("native-test")
@@ -148,14 +149,14 @@ async def test_native_sofa_completes_layered_opening_from_physical_contact() -> 
         assert skin.opened
         assert snapshot.tissue.active_layer in ("subcutaneous", "none")
 
-        for y_mm in (0.0, -1.0, -2.0, -3.0):
+        for y_mm in (0.0, -4.0, -8.0, -12.0):
             snapshot = await simulator.step(
                 sample(sequence, y_mm, 15.0, "blunt-dissector")
             )
             sequence += 1
         for x_mm in range(15, -16, -1):
             snapshot = await simulator.step(
-                sample(sequence, -3.0, float(x_mm), "blunt-dissector")
+                sample(sequence, -12.0, float(x_mm), "blunt-dissector")
             )
             sequence += 1
         subcutaneous = next(
@@ -165,14 +166,14 @@ async def test_native_sofa_completes_layered_opening_from_physical_contact() -> 
         )
         assert subcutaneous.opened
 
-        for y_mm in (-4.0, -5.0, -6.0, -7.0, -8.0):
+        for y_mm in (-14.0, -16.0, -18.0, -20.0):
             snapshot = await simulator.step(
                 sample(sequence, y_mm, -15.0, "blunt-dissector")
             )
             sequence += 1
         for x_mm in range(-15, 16):
             snapshot = await simulator.step(
-                sample(sequence, -8.0, float(x_mm), "blunt-dissector")
+                sample(sequence, -20.0, float(x_mm), "blunt-dissector")
             )
             sequence += 1
         muscle = next(
@@ -182,14 +183,14 @@ async def test_native_sofa_completes_layered_opening_from_physical_contact() -> 
         )
         assert muscle.opened
 
-        for y_mm in (-9.0, -10.0, -11.0, -12.0, -13.0):
+        for y_mm in (-22.0, -24.0, -26.0, -28.0):
             snapshot = await simulator.step(
                 sample(sequence, y_mm, 15.0, "scalpel")
             )
             sequence += 1
         for x_mm in range(15, -16, -1):
             snapshot = await simulator.step(
-                sample(sequence, -13.0, float(x_mm), "scalpel")
+                sample(sequence, -28.0, float(x_mm), "scalpel")
             )
             sequence += 1
         pleura = next(
@@ -198,7 +199,7 @@ async def test_native_sofa_completes_layered_opening_from_physical_contact() -> 
         if not pleura.opened:
             for x_mm in range(-18, 19):
                 snapshot = await simulator.step(
-                    sample(sequence, -15.0, float(x_mm), "scalpel")
+                    sample(sequence, -30.0, float(x_mm), "scalpel")
                 )
                 sequence += 1
             pleura = next(
@@ -208,7 +209,7 @@ async def test_native_sofa_completes_layered_opening_from_physical_contact() -> 
             )
         assert pleura.opened
 
-        for y_mm in (-9.0, -10.0, -11.0):
+        for y_mm in (-24.0, -26.0, -28.0):
             snapshot = await simulator.step(
                 sample(sequence, y_mm, -15.0, "chest-tube")
             )

@@ -54,8 +54,15 @@ namespace SurgePrep
         private static bool LayerVisible(string objectId, SimulationSnapshotDto snapshot)
         {
             if (objectId == "layer-skin") return true;
-            if (objectId == "wound-channel") return false;
-            var openedSkin = snapshot.tissue != null && snapshot.tissue.incisionProgress > 0.05f;
+            if (objectId == "wound-channel")
+            {
+                return snapshot.tissue != null
+                    && (snapshot.tissue.incisionDepthMm > 0.2f
+                        || snapshot.tissue.incisionProgress > 0.01f
+                        || snapshot.tissue.interactionMode == "cutting");
+            }
+            var openedSkin = snapshot.tissue != null
+                && (snapshot.tissue.incisionProgress > 0.02f || snapshot.tissue.incisionDepthMm > 0.4f);
             if (objectId == "layer-subcutaneous") return openedSkin;
             var fatOpen = LayerOpened(snapshot, "subcutaneous");
             if (objectId == "layer-intercostal-muscle") return fatOpen;
@@ -91,23 +98,7 @@ namespace SurgePrep
         {
             scalpelVisual = new GameObject("Scalpel visual");
             scalpelVisual.transform.SetParent(tip, false);
-            if (scalpelModel != null)
-            {
-                var imported = Instantiate(scalpelModel, scalpelVisual.transform);
-                imported.name = "Supplied SolidWorks scalpel";
-                imported.transform.localPosition = ScalpelGeometry.ModelToToolPosition;
-                imported.transform.localRotation = ScalpelGeometry.ModelToToolRotation;
-                imported.transform.localScale = Vector3.one;
-            }
-            else
-            {
-                Primitive("Fallback blade handle", PrimitiveType.Capsule, scalpelVisual.transform,
-                    new Vector3(0f, 0.065f, 0f), new Vector3(0.007f, 0.05f, 0.007f));
-                Primitive("Fallback training blade", PrimitiveType.Cube, scalpelVisual.transform,
-                    new Vector3(0.002f, 0.012f, 0f), new Vector3(0.012f, 0.024f, 0.0018f));
-                Primitive("Fallback blade guard", PrimitiveType.Cube, scalpelVisual.transform,
-                    new Vector3(0f, 0.029f, 0f), new Vector3(0.022f, 0.004f, 0.011f));
-            }
+            CreateReadableScalpel(scalpelVisual.transform);
 
             dissectorVisual = new GameObject("Blunt dissector visual");
             dissectorVisual.transform.SetParent(tip, false);
@@ -137,6 +128,10 @@ namespace SurgePrep
             {
                 foreach (var renderer in tip.GetComponentsInChildren<MeshRenderer>())
                 {
+                    if (renderer.sharedMaterial != null && renderer.sharedMaterial.name == "ScalpelBlade")
+                    {
+                        continue;
+                    }
                     renderer.sharedMaterial = toolMaterial;
                 }
             }
@@ -151,6 +146,32 @@ namespace SurgePrep
             );
             if (dissectorVisual != null) dissectorVisual.SetActive(toolId == "blunt-dissector");
             if (tubeVisual != null) tubeVisual.SetActive(toolId == "chest-tube");
+        }
+
+        private static void CreateReadableScalpel(Transform parent)
+        {
+            Primitive(
+                "Scalpel handle", PrimitiveType.Capsule, parent,
+                new Vector3(0f, 0.072f, 0f), new Vector3(0.011f, 0.048f, 0.011f)
+            );
+            Primitive(
+                "Scalpel guard", PrimitiveType.Cube, parent,
+                new Vector3(0f, 0.032f, 0f), new Vector3(0.018f, 0.006f, 0.012f)
+            );
+            var blade = Primitive(
+                "Scalpel blade", PrimitiveType.Cube, parent,
+                new Vector3(0.005f, 0.014f, 0f), new Vector3(0.016f, 0.028f, 0.0024f)
+            );
+            var renderer = blade.GetComponent<MeshRenderer>();
+            if (renderer != null)
+            {
+                var bladeMaterial = new Material(renderer.sharedMaterial)
+                {
+                    name = "ScalpelBlade",
+                    color = new Color(0.82f, 0.84f, 0.86f)
+                };
+                renderer.sharedMaterial = bladeMaterial;
+            }
         }
 
         private static GameObject Primitive(
@@ -318,7 +339,9 @@ namespace SurgePrep
                 if (topologyRevision != state.topologyRevision)
                 {
                     mesh.triangles = CoordinateFrame.ReflectedTriangles(
-                        AnatomyFieldTriangles(state)
+                        objectId.Contains("wound") || objectId.Contains("incision")
+                            ? state.triangleIndices
+                            : AnatomyFieldTriangles(state)
                     );
                     topologyRevision = state.topologyRevision;
                 }

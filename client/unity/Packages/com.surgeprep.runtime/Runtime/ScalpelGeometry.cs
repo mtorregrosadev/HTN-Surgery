@@ -14,7 +14,9 @@ namespace SurgePrep
             -0.159158f, 0.0016f, 0.00570772f
         );
 
-        public static readonly Quaternion ModelToToolRotation = Quaternion.Euler(0f, 0f, 90f);
+        // Z90 puts the tip on +Y. Y90 turns the 12 mm blade face toward a
+        // chest-front camera so the instrument is not an edge-on needle.
+        public static readonly Quaternion ModelToToolRotation = Quaternion.Euler(0f, 90f, 90f);
 
         public static Vector3 ModelToToolPosition =>
             -(ModelToToolRotation * ModelTipMetres);

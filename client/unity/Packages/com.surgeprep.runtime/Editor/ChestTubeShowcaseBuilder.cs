@@ -21,40 +21,13 @@ namespace SurgePrep.Editor
         private const string ScalpelModelPath =
             "Packages/com.surgeprep.runtime/Runtime/Models/Scalpel/scalepl.obj";
 
-        private static readonly string[] AnatomyFiles =
+        private static string[] ListAnatomyFiles(string source)
         {
-            "FJ2810_BP22617_FMA7163_Skin.obj",
-            "FJ3178_BP22232_FMA7487_Body of sternum.obj",
-            "FJ3290_BP22794_FMA7486_Manubrium.obj",
-            "FJ3153_BP22299_FMA7488_Xiphoid process.obj",
-            "FJ3237_BP23283_FMA13323_Left clavicle.obj",
-            "FJ3362_BP23174_FMA13322_Right clavicle.obj",
-            "FJ3231_BP22488_FMA8148_Left fourth rib.obj",
-            "FJ3232_BP22285_FMA8093_Left fifth rib.obj",
-            "FJ3233_BP22298_FMA8202_Left sixth rib.obj",
-            "FJ3234_BP22332_FMA8256_Left seventh rib.obj",
-            "FJ3235_BP23684_FMA8310_Left eighth rib.obj",
-            "FJ3340_BP22336_FMA7957_Right fourth rib.obj",
-            "FJ3342_BP22307_FMA8066_Right fifth rib.obj",
-            "FJ3344_BP22272_FMA8175_Right sixth rib.obj",
-            "FJ3346_BP22330_FMA8229_Right seventh rib.obj",
-            "FJ3347_BP23993_FMA8283_Right eighth rib.obj",
-            "FJ3248_BP22751_FMA8167_Left fourth costal cartilage.obj",
-            "FJ3251_BP21380_FMA8112_Left fifth costal cartilage.obj",
-            "FJ3254_BP21377_FMA8221_Left sixth costal cartilage.obj",
-            "FJ3255_BP22753_FMA8275_Left seventh costal cartilage.obj",
-            "FJ3339_BP21410_FMA7976_Right fourth costal cartilage.obj",
-            "FJ3341_BP21376_FMA8070_Right fifth costal cartilage.obj",
-            "FJ3343_BP22071_FMA8194_Right sixth costal cartilage.obj",
-            "FJ3345_BP21381_FMA8248_Right seventh costal cartilage.obj",
-            "FJ1451M_BP23614_FMA9756_External intercostal muscle.obj",
-            "FJ1451_BP23614_FMA9756_External intercostal muscle.obj",
-            "FJ1456M_BP23831_FMA13376_Left pectoralis minor.obj",
-            "FJ1456_BP23886_FMA13375_Right pectoralis minor.obj",
-            "FJ1464M_BP24065_FMA79980_Sternocostal part of left pectoralis major.obj",
-            "FJ1464_BP23276_FMA79979_Sternocostal part of right pectoralis major.obj",
-            "FJ3131_BP23131_FMA13295_Diaphragm.obj"
-        };
+            return Directory.GetFiles(source, "*.obj")
+                .Select(Path.GetFileName)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
 
         [MenuItem("Surge Prep/Build Chest-Tube Showcase")]
         public static void BuildShowcase()
@@ -78,7 +51,15 @@ namespace SurgePrep.Editor
 
             try
             {
-                ImportAnatomy(source);
+                var files = ListAnatomyFiles(source);
+                if (!files.Any(file => file.Contains("_Skin.obj")))
+                {
+                    throw new FileNotFoundException(
+                        "High-resolution BodyParts3D skin is missing",
+                        Path.Combine(source, "FJ2810_BP22617_FMA7163_Skin.obj")
+                    );
+                }
+                ImportAnatomy(source, files);
                 CreateScene();
             }
             catch (Exception error)
@@ -106,16 +87,16 @@ namespace SurgePrep.Editor
             return Directory.Exists(source) ? source : null;
         }
 
-        private static void ImportAnatomy(string source)
+        private static void ImportAnatomy(string source, string[] files)
         {
             Directory.CreateDirectory(AnatomyRoot);
-            for (var index = 0; index < AnatomyFiles.Length; index++)
+            for (var index = 0; index < files.Length; index++)
             {
-                var file = AnatomyFiles[index];
+                var file = files[index];
                 EditorUtility.DisplayProgressBar(
                     "Preparing chest anatomy",
                     file,
-                    (float)index / AnatomyFiles.Length
+                    files.Length == 0 ? 1f : (float)index / files.Length
                 );
                 var sourcePath = Path.Combine(source, file);
                 if (!File.Exists(sourcePath))
@@ -146,6 +127,10 @@ namespace SurgePrep.Editor
             Directory.CreateDirectory(MaterialRoot);
             Directory.CreateDirectory(GeneratedRoot);
             Directory.CreateDirectory(SceneRoot);
+            foreach (var guid in AssetDatabase.FindAssets("ProcedureWindowSkin t:Mesh", new[] { GeneratedRoot }))
+            {
+                AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(guid));
+            }
             var bone = Material("Bone", new Color(0.86f, 0.8f, 0.7f), 0.02f, 0.28f);
             var cartilage = Material("Cartilage", new Color(0.72f, 0.78f, 0.74f), 0.0f, 0.42f);
             var muscle = Material("Muscle", new Color(0.42f, 0.12f, 0.14f), 0.0f, 0.34f);
@@ -191,7 +176,9 @@ namespace SurgePrep.Editor
             var cartilageLayer = Layer("Cartilage layer", anatomy.transform);
             var diaphragmLayer = Layer("Diaphragm layer", anatomy.transform);
 
-            foreach (var file in AnatomyFiles)
+            var visceraLayer = Layer("Viscera layer", anatomy.transform);
+
+            foreach (var file in ListAnatomyFiles(Path.Combine(Application.dataPath, "SurgePrepShowcase/Anatomy")))
             {
                 var assetPath = AnatomyRoot + "/" + file;
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
@@ -200,20 +187,17 @@ namespace SurgePrep.Editor
                     throw new InvalidOperationException("Unity could not import " + file);
                 }
                 var parent = LayerFor(
-                    file, skinLayer, muscleLayer, boneLayer, cartilageLayer, diaphragmLayer
+                    file, skinLayer, muscleLayer, boneLayer, cartilageLayer, diaphragmLayer, visceraLayer
                 );
                 var instance = PrefabUtility.InstantiatePrefab(prefab, parent) as GameObject;
                 instance.name = FriendlyName(file);
                 AssignMaterial(instance, MaterialFor(file, bone, cartilage, muscle, diaphragm, skin));
-                if (file.Contains("_Skin.obj"))
-                {
-                    CutProcedureWindow(instance);
-                }
             }
             muscleLayer.gameObject.SetActive(false);
             boneLayer.gameObject.SetActive(false);
             cartilageLayer.gameObject.SetActive(false);
             diaphragmLayer.gameObject.SetActive(false);
+            visceraLayer.gameObject.SetActive(false);
             CreateModestyCover(tableTop, drape);
 
             var window = new GameObject("RegistrationAnchor_ProcedureWindow");
@@ -601,13 +585,21 @@ namespace SurgePrep.Editor
             Transform muscle,
             Transform bone,
             Transform cartilage,
-            Transform diaphragm
+            Transform diaphragm,
+            Transform viscera
         )
         {
-            if (file.Contains("Skin")) return skin;
-            if (file.Contains("Diaphragm")) return diaphragm;
-            if (file.Contains("cartilage")) return cartilage;
-            if (file.Contains("muscle") || file.Contains("pectoralis")) return muscle;
+            var name = file.ToLowerInvariant();
+            if (name.Contains("skin")) return skin;
+            if (name.Contains("diaphragm")) return diaphragm;
+            if (name.Contains("trachea") || name.Contains("esophagus")) return viscera;
+            if (name.Contains("cartilage") || name.Contains("disk")) return cartilage;
+            if (name.Contains("muscle") || name.Contains("pectoralis")
+                || name.Contains("subclavius") || name.Contains("subscapularis")
+                || name.Contains("levator") || name.Contains("intercostal"))
+            {
+                return muscle;
+            }
             return bone;
         }
 
@@ -692,10 +684,19 @@ namespace SurgePrep.Editor
             Material skin
         )
         {
-            if (file.Contains("Skin")) return skin;
-            if (file.Contains("Diaphragm")) return diaphragm;
-            if (file.Contains("cartilage")) return cartilage;
-            if (file.Contains("muscle") || file.Contains("pectoralis")) return muscle;
+            var name = file.ToLowerInvariant();
+            if (name.Contains("skin")) return skin;
+            if (name.Contains("diaphragm") || name.Contains("trachea") || name.Contains("esophagus"))
+            {
+                return diaphragm;
+            }
+            if (name.Contains("cartilage") || name.Contains("disk")) return cartilage;
+            if (name.Contains("muscle") || name.Contains("pectoralis")
+                || name.Contains("subclavius") || name.Contains("subscapularis")
+                || name.Contains("levator") || name.Contains("intercostal"))
+            {
+                return muscle;
+            }
             return bone;
         }
 

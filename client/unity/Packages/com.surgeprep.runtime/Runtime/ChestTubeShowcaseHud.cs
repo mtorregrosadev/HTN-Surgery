@@ -12,6 +12,7 @@ namespace SurgePrep
         private GUIStyle labelStyle;
         private GUIStyle valueStyle;
         private GUIStyle smallStyle;
+        private GUIStyle keyStyle;
         private bool visible = true;
         private string toast;
         private float toastUntil;
@@ -49,7 +50,7 @@ namespace SurgePrep
             EnsureStyles();
             if (!visible)
             {
-                if (GUI.Button(new Rect(18, 18, 160, 28), "SHOW GUIDANCE [TAB]"))
+                if (GUI.Button(new Rect(18, 18, 220, 32), "Show guidance  [Tab]"))
                 {
                     visible = true;
                 }
@@ -61,80 +62,123 @@ namespace SurgePrep
             if (snapshot != null && snapshot.simulationBackend == "sofa-native") sofaNative = true;
             if (snapshot != null && snapshot.simulationBackend == "memory-development-only") sofaNative = false;
 
-            var panel = new Rect(18, 18, 340, completed ? 430 : 248);
-            DrawRect(panel, new Color(0.07f, 0.1f, 0.14f, 0.92f));
+            var panel = new Rect(16, 16, 420, completed ? 560 : 458);
+            DrawRect(panel, new Color(0.07f, 0.1f, 0.14f, 0.94f));
             DrawRect(new Rect(panel.x, panel.y, 4, panel.height), new Color(0.2f, 0.55f, 0.72f));
 
-            GUI.Label(new Rect(38, 28, 270, 24), exerciseTitle, titleStyle);
-            var stage = snapshot != null ? PrettyStage(snapshot.procedureStage) : "Connecting";
-            GUI.Label(new Rect(38, 54, 270, 20), stage, labelStyle);
-            GUI.Label(new Rect(38, 76, 280, 36), Instruction(snapshot), valueStyle);
+            var y = 26f;
+            GUI.Label(new Rect(38, y, 380, 24), exerciseTitle, titleStyle);
+            y += 26f;
+            GUI.Label(
+                new Rect(38, y, 380, 20),
+                snapshot != null ? PrettyStage(snapshot.procedureStage) : "Connecting",
+                labelStyle
+            );
+            y += 22f;
+            GUI.Label(new Rect(38, y, 380, 40), Instruction(snapshot), valueStyle);
+            y += 44f;
 
-            var sofaLabel = sofaNative ? "SOFA NATIVE" : "SOFA OFFLINE";
             GUI.color = sofaNative ? new Color(0.35f, 0.85f, 0.55f) : new Color(1f, 0.45f, 0.3f);
-            GUI.Label(new Rect(38, 118, 180, 20), sofaLabel, labelStyle);
+            GUI.Label(new Rect(38, y, 380, 20), sofaNative ? "SOFA  NATIVE" : "SOFA  OFFLINE", labelStyle);
             GUI.color = Color.white;
+            y += 22f;
 
             if (snapshot != null && snapshot.tool != null)
             {
                 var contact = snapshot.tool.contact;
                 GUI.Label(
-                    new Rect(38, 140, 280, 20),
+                    new Rect(38, y, 380, 20),
                     contact
-                        ? $"Contact  {snapshot.tool.reactionForceN:0.00} N  •  {snapshot.tool.penetrationDepthMm:0.1} mm"
+                        ? "Contact  " + snapshot.tool.reactionForceN.ToString("0.00")
+                            + " N    depth  " + snapshot.tool.penetrationDepthMm.ToString("0.1") + " mm"
                         : "No tissue contact",
                     smallStyle
                 );
+                y += 20f;
                 var offset = Mathf.Sqrt(
                     snapshot.tool.positionMm.x * snapshot.tool.positionMm.x +
                     snapshot.tool.positionMm.z * snapshot.tool.positionMm.z
                 );
-                GUI.Label(new Rect(38, 160, 280, 18), $"Alignment  {offset:0.0} mm from corridor centre", smallStyle);
+                GUI.Label(
+                    new Rect(38, y, 380, 18),
+                    "Alignment  " + offset.ToString("0.0") + " mm from corridor centre",
+                    smallStyle
+                );
+                y += 20f;
                 var progress = snapshot.tissue != null ? snapshot.tissue.incisionProgress : 0f;
-                DrawRect(new Rect(38, 186, 280, 8), new Color(0.12f, 0.16f, 0.2f));
-                DrawRect(new Rect(38, 186, 280f * Mathf.Clamp01(progress), 8), new Color(0.25f, 0.62f, 0.7f));
+                DrawRect(new Rect(38, y, 360, 8), new Color(0.12f, 0.16f, 0.2f));
+                DrawRect(new Rect(38, y, 360f * Mathf.Clamp01(progress), 8), new Color(0.25f, 0.62f, 0.7f));
+                y += 18f;
             }
             else
             {
                 GUI.Label(
-                    new Rect(38, 140, 280, 48),
+                    new Rect(38, y, 380, 36),
                     manualDemo != null ? manualDemo.Status : "Waiting for Scalpel controller…",
                     smallStyle
                 );
+                y += 36f;
             }
 
             if (Time.unscaledTime < toastUntil && !string.IsNullOrEmpty(toast))
             {
-                DrawRect(new Rect(38, 204, 280, 28), new Color(0.45f, 0.12f, 0.08f, 0.92f));
-                GUI.Label(new Rect(46, 208, 264, 22), toast, smallStyle);
+                DrawRect(new Rect(38, y, 360, 26), new Color(0.45f, 0.12f, 0.08f, 0.92f));
+                GUI.Label(new Rect(46, y + 3, 344, 20), toast, smallStyle);
+                y += 30f;
             }
+
+            y += 6f;
+            GUI.Label(new Rect(38, y, 380, 18), "Controls", labelStyle);
+            y += 20f;
+            DrawRect(new Rect(38, y, 360, 168), new Color(0.05f, 0.07f, 0.1f, 0.8f));
+            y += 8f;
+            ControlLine(ref y, "W A S D", "move on the chest");
+            ControlLine(ref y, "Q / E", "raise / lower the tool");
+            ControlLine(ref y, "1 / 2 / 3", "scalpel / dissector / tube");
+            ControlLine(ref y, "F / C / O", "close-up / surgeon / room");
+            ControlLine(ref y, "K", "anatomy cutaway");
+            ControlLine(ref y, "R then R", "reset the attempt");
+            ControlLine(ref y, "Tab", "hide this panel");
+            y += 8f;
 
             if (completed && snapshot != null && snapshot.tissue != null)
             {
-                GUI.Label(new Rect(38, 244, 280, 20), "SCORECARD — stored telemetry", labelStyle);
-                GUI.Label(new Rect(38, 268, 280, 18), $"Incision {snapshot.tissue.incisionLengthMm:0.0} mm  •  depth {snapshot.tissue.incisionDepthMm:0.0} mm", smallStyle);
-                GUI.Label(new Rect(38, 288, 280, 18), $"Reaction {snapshot.tool.reactionForceN:0.00} N  •  stage {snapshot.procedureStage}", smallStyle);
-                GUI.Label(new Rect(38, 308, 280, 36), "Canonical scores come from the API/MongoDB replay, not this overlay.", smallStyle);
+                GUI.Label(new Rect(38, y, 380, 18), "Scorecard  —  stored telemetry", labelStyle);
+                y += 20f;
+                GUI.Label(
+                    new Rect(38, y, 380, 18),
+                    "Incision  " + snapshot.tissue.incisionLengthMm.ToString("0.0")
+                        + " mm    depth  " + snapshot.tissue.incisionDepthMm.ToString("0.0") + " mm",
+                    smallStyle
+                );
+                y += 18f;
             }
 
             GUI.Label(
-                new Rect(38, panel.yMax - 52, 280, 36),
-                "Training prototype • No real patients • Instructor review required",
+                new Rect(38, panel.yMax - 36, 380, 28),
+                "Training prototype. No real patients. Instructor review required.",
                 smallStyle
             );
+        }
+
+        private void ControlLine(ref float y, string keys, string meaning)
+        {
+            GUI.Label(new Rect(48, y, 110, 18), keys, keyStyle);
+            GUI.Label(new Rect(164, y, 230, 18), meaning, smallStyle);
+            y += 22f;
         }
 
         private static string PrettyStage(string stage)
         {
             switch (stage)
             {
-                case "approach": return "1  Approach and landmarks";
-                case "landmark-alignment": return "1  Landmark alignment";
-                case "skin-incision": return "2  Controlled skin incision";
-                case "blunt-dissection": return "3  Blunt soft-tissue dissection";
-                case "pleural-entry": return "4  Pleural-layer entry";
-                case "tube-placement": return "5  Tube placement";
-                case "complete": return "6  Completion";
+                case "approach": return "1    Approach and landmarks";
+                case "landmark-alignment": return "1    Landmark alignment";
+                case "skin-incision": return "2    Controlled skin incision";
+                case "blunt-dissection": return "3    Blunt soft-tissue dissection";
+                case "pleural-entry": return "4    Pleural-layer entry";
+                case "tube-placement": return "5    Tube placement";
+                case "complete": return "6    Completion";
                 case "degraded": return "Session degraded";
                 default: return stage ?? "Approach";
             }
@@ -152,7 +196,7 @@ namespace SurgePrep
             switch (snapshot.procedureStage)
             {
                 case "skin-incision":
-                    return "Lower the scalpel until skin deforms, then travel the corridor.";
+                    return "Hold E to lower until the skin dents, then sweep A/D along the guide.";
                 case "blunt-dissection":
                     return "Press 2 for the blunt dissector and open the soft-tissue tract.";
                 case "pleural-entry":
@@ -162,27 +206,35 @@ namespace SurgePrep
                 case "complete":
                     return "Attempt complete. Detailed metrics are on the scorecard.";
                 default:
-                    return "Align over the lateral intercostal window. Q/E raises and lowers.";
+                    return "Align on the guide. E lowers. Q raises. WASD moves.";
             }
         }
 
         private void EnsureStyles()
         {
             if (titleStyle != null) return;
-            titleStyle = Style(17, FontStyle.Bold, Color.white);
-            labelStyle = Style(11, FontStyle.Normal, new Color(0.72f, 0.78f, 0.82f));
-            valueStyle = Style(13, FontStyle.Bold, Color.white);
+            var font = Font.CreateDynamicFontFromOSFont(
+                new[] { "Helvetica Neue", "Helvetica", "Arial", "Lucida Grande" },
+                14
+            );
+            titleStyle = Style(font, 17, FontStyle.Bold, Color.white);
+            labelStyle = Style(font, 12, FontStyle.Normal, new Color(0.72f, 0.78f, 0.82f));
+            valueStyle = Style(font, 13, FontStyle.Bold, Color.white);
             valueStyle.wordWrap = true;
-            smallStyle = Style(10, FontStyle.Normal, new Color(0.75f, 0.8f, 0.84f));
+            smallStyle = Style(font, 12, FontStyle.Normal, new Color(0.78f, 0.82f, 0.86f));
             smallStyle.wordWrap = true;
+            keyStyle = Style(font, 12, FontStyle.Bold, new Color(0.55f, 0.85f, 0.95f));
         }
 
-        private static GUIStyle Style(int size, FontStyle fontStyle, Color colour)
+        private static GUIStyle Style(Font font, int size, FontStyle fontStyle, Color colour)
         {
             return new GUIStyle(GUI.skin.label)
             {
+                font = font,
                 fontSize = size,
                 fontStyle = fontStyle,
+                wordWrap = false,
+                clipping = TextClipping.Overflow,
                 normal = { textColor = colour }
             };
         }

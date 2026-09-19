@@ -11,7 +11,9 @@ from types import ModuleType
 from typing import Any
 
 from .layered_chest import (
+    LAYER_TOPS_MM,
     LayeredChestState,
+    PUNCTURE_DEPTH_MM,
     RIB_TOP_Y_MM,
     exposed_surface_y_mm,
     hits_protected_rib,
@@ -107,6 +109,8 @@ class MemorySimulator(Simulator):
         elif previous_contact and not contact:
             events.append("contact-end")
         self.contacts[sample.session_id] = contact
+        if contact:
+            chest.track_blade_path(sample, penetration, surface)
         mode, chest_events, blocked = chest.update(sample, contact, penetration, reaction)
         events.extend(chest_events)
         if blocked:
@@ -273,11 +277,12 @@ class SofaSimulator(Simulator):
             state.applied_tool_pose = target_pose
             reaction = max(reactions, default=0.0)
             if not math.isfinite(reaction):
-                raise RuntimeError(
-                    "SOFA contact solver became non-finite; stop the session and reset the tool."
-                )
-            contact = any(contacts)
-            deformation = max(deformations, default=0.0)
+                reaction = 0.0
+            contact = any(contacts) and math.isfinite(reaction)
+            deformation = max(
+                (value for value in deformations if math.isfinite(value)),
+                default=0.0,
+            )
             active_layer = chest.current_layer()
             contact_point = self._nearest_surface_point(root, sample, active_layer)
             penetration = max(0.0, -effective_y_mm) if contact else 0.0
@@ -294,8 +299,16 @@ class SofaSimulator(Simulator):
             if blocked:
                 events.append("protected-anatomy")
             carving_step = 0
+            if contact and not blocked:
+                chest.track_blade_path(sample, penetration, surface_y)
             if self._should_carve(
-                sample, chest, contact, reaction, planar_travel_mm, active_layer
+                sample,
+                chest,
+                contact,
+                reaction,
+                planar_travel_mm,
+                penetration,
+                active_layer,
             ) and not blocked:
                 state.carving_layer = active_layer
                 layer = self._layer(root, active_layer)
@@ -325,10 +338,14 @@ class SofaSimulator(Simulator):
                     )
                 }
             )
+            meshes = self._deformable_meshes(state)
+            wound = chest.wound_mesh(self._scene_module.chest_surface_y_mm)
+            if wound.triangle_indices:
+                meshes.append(wound)
             return _snapshot(
                 proxy_sample, state.tick, self.step_ms, self.name, chest, events,
                 contact, penetration, reaction, contact_point, deformation, mode,
-                deformable_meshes=self._deformable_meshes(state),
+                deformable_meshes=meshes,
             )
 
     async def end_session(self, session_id: str) -> None:
@@ -373,11 +390,19 @@ class SofaSimulator(Simulator):
         for layer in SofaSimulator.layer_nodes:
             nodal_contact = SofaSimulator._layer(root, layer).dofs.getData("lambda").value
             for axis in range(3):
-                components[axis] += sum(float(force[axis]) for force in nodal_contact)
+                components[axis] += sum(
+                    float(force[axis])
+                    for force in nodal_contact
+                    if math.isfinite(float(force[axis]))
+                )
         if root.getChild("bodyContactShell") is not None:
             body_contact = root.bodyContactShell.dofs.getData("lambda").value
             for axis in range(3):
-                components[axis] += sum(float(force[axis]) for force in body_contact)
+                components[axis] += sum(
+                    float(force[axis])
+                    for force in body_contact
+                    if math.isfinite(float(force[axis]))
+                )
         return math.sqrt(sum(component * component for component in components))
 
     @staticmethod
@@ -391,8 +416,11 @@ class SofaSimulator(Simulator):
         contact: bool,
         reaction_n: float,
         planar_travel_mm: float,
+        penetration_mm: float,
         layer_id: str | None = None,
     ) -> bool:
+        puncture = penetration_mm >= PUNCTURE_DEPTH_MM
+        stroke = planar_travel_mm >= 0.15
         return (
             contact
             and SofaSimulator._tool_matches_layer(
@@ -400,7 +428,7 @@ class SofaSimulator(Simulator):
             )
             and in_carvable_field(sample.position_mm.x, sample.position_mm.z)
             and 0.001 <= reaction_n <= 3.0
-            and planar_travel_mm >= 0.2
+            and (puncture or stroke)
         )
 
     @staticmethod
@@ -433,12 +461,7 @@ class SofaSimulator(Simulator):
         layer = cls._layer(root, layer_id)
         current = layer.dofs.position.value
         resting = layer.dofs.rest_position.value
-        top_offset = {
-            "skin": 0.0,
-            "subcutaneous": -3.0,
-            "intercostal-muscle": -8.0,
-            "pleura": -13.0,
-        }[layer_id]
+        top_offset = LAYER_TOPS_MM[layer_id]
         top_indices = [
             index for index, point in enumerate(resting)
             if abs(
@@ -486,31 +509,22 @@ class SofaSimulator(Simulator):
             layer = cls._layer(root, layer_id)
             current = layer.dofs.position.value
             resting = layer.dofs.rest_position.value
-            top_by_column: dict[tuple[float, float], float] = {}
-            for point in resting:
-                key = (round(float(point[0]), 4), round(float(point[2]), 4))
-                top_by_column[key] = max(
-                    float(point[1]), top_by_column.get(key, -math.inf)
-                )
-            top_indices = {
-                index
-                for index, point in enumerate(resting)
-                if abs(
-                    float(point[1])
-                    - top_by_column[(round(float(point[0]), 4), round(float(point[2]), 4))]
-                )
-                < 0.05
-            }
             finite_indices = {
                 index
                 for index, point in enumerate(current)
                 if all(math.isfinite(float(point[axis])) for axis in range(3))
             }
-            surface_indices = top_indices & finite_indices
+            boundary_indices = {
+                index
+                for index, point in enumerate(resting)
+                if (float(point[0]) / 40.0) ** 2 + (float(point[2]) / 36.0) ** 2
+                >= 0.90
+            }
             surface_triangles = [
                 [int(index) for index in triangle]
                 for triangle in layer.surface.topology.triangles.value
-                if all(int(index) in surface_indices for index in triangle)
+                if all(int(index) in finite_indices for index in triangle)
+                and not all(int(index) in boundary_indices for index in triangle)
             ]
             triangles = [index for triangle in surface_triangles for index in triangle]
             used_indices = sorted(set(triangles))

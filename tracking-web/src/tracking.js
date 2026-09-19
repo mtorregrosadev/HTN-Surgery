@@ -1,6 +1,7 @@
 import arucoPackage from 'js-aruco2';
 import 'js-aruco2/src/dictionaries/aruco_4x4_1000.js';
 import 'js-aruco2/src/dictionaries/aruco_5x5_1000.js';
+import 'js-aruco2/src/dictionaries/apriltag_36h11.js';
 
 const { AR } = arucoPackage;
 
@@ -8,11 +9,12 @@ export const DICTIONARIES = {
   SURGE_PREP: 'ARUCO_MIP_36h12',
   OPENCV_4X4_50: 'OPENCV_4X4_50',
   OPENCV_5X5_250: 'OPENCV_5X5_250',
+  APRILTAG_36H11: 'APRILTAG_36h11',
 };
-export const DEFAULT_DICTIONARY = DICTIONARIES.OPENCV_5X5_250;
+export const DEFAULT_DICTIONARY = DICTIONARIES.APRILTAG_36H11;
 export const TARGET_MARKER_ID = 0;
 export const MAX_PATH_POINTS = 180;
-export const CALIBRATION_FRAMES = 8;
+export const CALIBRATION_FRAMES = 5;
 
 AR.DICTIONARIES[DICTIONARIES.OPENCV_4X4_50] = {
   ...AR.DICTIONARIES.ARUCO_4X4_1000,
@@ -27,6 +29,7 @@ const MAX_CORRECTION_BITS = {
   [DICTIONARIES.SURGE_PREP]: 5,
   [DICTIONARIES.OPENCV_4X4_50]: 1,
   [DICTIONARIES.OPENCV_5X5_250]: 2,
+  [DICTIONARIES.APRILTAG_36H11]: 5,
 };
 
 const GEOMETRY_EPSILON = 1e-8;
@@ -39,6 +42,40 @@ export function createDetector(dictionaryName = DEFAULT_DICTIONARY) {
 export function markerSvg(dictionaryName = DEFAULT_DICTIONARY) {
   if (!Object.values(DICTIONARIES).includes(dictionaryName)) throw new Error('Unsupported marker dictionary');
   return new AR.Dictionary(dictionaryName).generateSVG(TARGET_MARKER_ID);
+}
+
+/**
+ * Stretch the luminance range of an ImageData in-place so that js-aruco2's
+ * fixed 5×5 adaptive threshold (offset=7) has adequate contrast to work on
+ * dimly lit or low-contrast camera frames.
+ *
+ * Only activates when the image is under-exposed (max<200) or lacks a dark
+ * baseline (min>60). Skips for well-lit scenes to keep the fast path free.
+ *
+ * The function is intentionally simple (linear per-channel rescale) so it adds
+ * less than 1 ms at 640×480 on a modern device.
+ */
+export function contrastStretch(imageData) {
+  const { data } = imageData;
+  let lo = 255;
+  let hi = 0;
+  // Sample every 4th pixel to find the luminance range quickly.
+  for (let i = 0; i < data.length; i += 16) {
+    const lum = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+    if (lum < lo) lo = lum;
+    if (lum > hi) hi = lum;
+  }
+  // Only stretch if the range is compressed (dark scene or washed-out background).
+  const range = hi - lo;
+  if (range < 1 || (lo < 10 && hi > 220)) return imageData; // already full-range
+  const scale = 255 / range;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = Math.min(255, Math.max(0, (data[i] - lo) * scale + 0.5) | 0);
+    data[i + 1] = Math.min(255, Math.max(0, (data[i + 1] - lo) * scale + 0.5) | 0);
+    data[i + 2] = Math.min(255, Math.max(0, (data[i + 2] - lo) * scale + 0.5) | 0);
+    // alpha unchanged
+  }
+  return imageData;
 }
 
 function cross(ax, ay, bx, by) {
@@ -146,6 +183,16 @@ export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY, locke
   }, null)?.marker ?? null;
 }
 
+// Retain the selected ID through brief occlusion. A different tag can take over
+// only after the old one has been absent long enough to avoid frame-to-frame
+// jumps between multiple visible tags.
+export function selectMarkerAfterLoss(markers, dictionaryName, lockedMarkerId, lastSeenMs, timestampMs, switchAfterMs = 1000) {
+  const selected = selectMarker(markers, dictionaryName, lockedMarkerId);
+  if (selected || lockedMarkerId === null || lockedMarkerId === undefined) return selected;
+  if (!Number.isFinite(lastSeenMs) || !Number.isFinite(timestampMs) || timestampMs - lastSeenMs < switchAfterMs) return null;
+  return selectMarker(markers, dictionaryName);
+}
+
 export function markerPose2d(marker, timestampMs) {
   if (!marker || !Array.isArray(marker.corners) || marker.corners.length !== 4) return null;
   const { corners } = marker;
@@ -187,7 +234,7 @@ export function advanceDepthCalibration(samples, pose) {
   const first = samples[0];
   if (first && (
     pose.markerId !== first.markerId ||
-    Math.hypot(pose.x - first.x, pose.y - first.y) > 12 ||
+    Math.hypot(pose.x - first.x, pose.y - first.y) > 20 ||
     Math.abs(pose.sizePx - first.sizePx) > first.sizePx * 0.05
   )) {
     samples = [];

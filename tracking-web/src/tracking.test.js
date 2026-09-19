@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, detectPurpleScalpel, DICTIONARIES, isPurpleColor, projectiveMarkerCenter, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, SignalSmoother } from './tracking.js';
+import { readFileSync } from 'node:fs';
+import { PNG } from 'pngjs';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, contrastStretch, createDetector, demoMarkerState, detectPurpleScalpel, DICTIONARIES, isPurpleColor, projectiveMarkerCenter, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, selectMarkerAfterLoss, SignalSmoother } from './tracking.js';
 
 function makeMarkerImage(detector, markerId) {
   const size = 320;
@@ -120,6 +122,17 @@ test('generated Surge Prep marker #0 is detected', () => {
   assert.match(markerSvg(DICTIONARIES.SURGE_PREP), /^<svg/);
 });
 
+test('the camera photo detects printed AprilTag IDs 0, 1 and 2 at the app processing width', () => {
+  // A 480 px camera crop from the supplied photo; the surrounding person was
+  // masked before this fixture was added to the repository.
+  const image = PNG.sync.read(readFileSync(new URL('../test/fixtures/apriltag-36h11-camera.png', import.meta.url)));
+  assert.equal(image.width, 480);
+  const detected = createDetector(DICTIONARIES.APRILTAG_36H11).detect(image);
+  assert.deepEqual(detected.sort((a, b) => a.corners[0].x - b.corners[0].x).map((marker) => marker.id), [0, 1, 2]);
+  assert.ok(detected.every((marker) => marker.hammingDistance === 0));
+  for (const marker of detected) assert.equal(selectMarker(detected, DICTIONARIES.APRILTAG_36H11, marker.id)?.id, marker.id);
+});
+
 test('OpenCV 4x4 marker family decodes a nonzero ID', () => {
   const detector = createDetector(DICTIONARIES.OPENCV_4X4_50);
   const marker = selectMarker(detector.detect(makeMarkerImage(detector, 23)), DICTIONARIES.OPENCV_4X4_50);
@@ -215,6 +228,15 @@ test('selected marker ID stays locked through a competing marker and loss', () =
   assert.equal(selectMarker([small], DICTIONARIES.OPENCV_5X5_250, selected.id), null);
   assert.equal(selectMarker([small, large], DICTIONARIES.OPENCV_5X5_250, selected.id)?.id, 23);
   assert.equal(selectMarker([small], DICTIONARIES.OPENCV_5X5_250)?.id, 7);
+});
+
+test('another tag is selected only after the previous one has been missing for a second', () => {
+  const first = syntheticMarker(0, squareCorners(80, 80, 80));
+  const replacement = syntheticMarker(1, squareCorners(240, 80, 80));
+  const family = DICTIONARIES.APRILTAG_36H11;
+  assert.equal(selectMarkerAfterLoss([first, replacement], family, 0, 1000, 2200)?.id, 0);
+  assert.equal(selectMarkerAfterLoss([replacement], family, 0, 1000, 1900), null);
+  assert.equal(selectMarkerAfterLoss([replacement], family, 0, 1000, 2000)?.id, 1);
 });
 
 test('path records a visible break instead of fabricating a dropout bridge', () => {
@@ -453,4 +475,56 @@ test('detectPurpleScalpel keeps the directed angle continuous across vertical', 
     Math.abs(readings[1].angleDeg - readings[0].angleDeg) < 6,
     `Expected a continuous crossing, got ${readings[0].angleDeg}° -> ${readings[1].angleDeg}°`,
   );
+});
+
+test('printed AprilTag photo detects IDs 0, 1 and 2 at the app processing width', () => {
+  // Fixture is a real iPhone photo of three printed AprilTag 36h11 markers,
+  // resized to 480px wide — the same processing width the app uses.
+  // The test uses selectMarker (with Hamming filter) as the app does, rather than
+  // raw detected counts, because the library may emit duplicates or high-error
+  // candidates that selectMarker already rejects before any pose is used.
+  const image = PNG.sync.read(readFileSync(new URL('../test/fixtures/apriltag-36h11-printed-photo.png', import.meta.url)));
+  assert.equal(image.width, 480);
+  const detected = createDetector(DICTIONARIES.APRILTAG_36H11).detect(image);
+  // Each physical marker must be selectable by its own ID
+  for (const id of [0, 1, 2]) {
+    const picked = selectMarker(detected, DICTIONARIES.APRILTAG_36H11, id);
+    assert.equal(picked?.id, id, `marker ID ${id} must be selectable from the real photo`);
+    assert.equal(picked.hammingDistance, 0, `ID ${id} should decode with zero bit errors`);
+  }
+});
+
+test('contrastStretch is a no-op on a well-lit image and stretches a dark image', () => {
+  // Well-lit: lo=0, hi=255 — full dynamic range; skip is triggered.
+  const wellLit = {
+    data: new Uint8ClampedArray([
+      0, 0, 0, 255,
+      128, 128, 128, 255,
+      255, 255, 255, 255,
+      200, 200, 200, 255, // 4th pixel, sampled at stride 16
+    ]),
+  };
+  const originalWell = Uint8ClampedArray.from(wellLit.data);
+  contrastStretch(wellLit);
+  assert.deepEqual(wellLit.data, originalWell, 'full-range image should not be modified');
+
+  // Dark / low-contrast image: all luminance values between 80–140.
+  // Must be at least 16 bytes so the stride-16 sampler picks up both extremes.
+  const darkData = new Uint8ClampedArray(16 * 4); // 16 pixels
+  for (let i = 0; i < 16; i += 1) {
+    const v = 80 + Math.round((i / 15) * 60); // 80..140
+    darkData[i * 4] = v;
+    darkData[i * 4 + 1] = v;
+    darkData[i * 4 + 2] = v;
+    darkData[i * 4 + 3] = 255; // alpha
+  }
+  const dark = { data: darkData };
+  contrastStretch(dark);
+  // After stretching lo=80 maps to 0, hi=140 maps to 255
+  assert.equal(dark.data[0], 0, 'darkest pixel should be stretched to 0');
+  assert.equal(dark.data[(15 * 4)], 255, 'brightest pixel should be stretched to 255');
+  // Alpha channels must remain unchanged throughout
+  for (let i = 0; i < 16; i += 1) {
+    assert.equal(dark.data[i * 4 + 3], 255, `alpha at pixel ${i} must be unchanged`);
+  }
 });

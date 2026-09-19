@@ -1,5 +1,5 @@
 import './style.css';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, demoMarkerState, detectPurpleScalpel, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, SignalSmoother, TARGET_MARKER_ID } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, contrastStretch, createDetector, DEFAULT_DICTIONARY, demoMarkerState, detectPurpleScalpel, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarkerAfterLoss, SignalSmoother, TARGET_MARKER_ID } from './tracking.js';
 
 // Auto-redirect from 127.0.0.1 to localhost for browser camera permissions compliance
 if (typeof window !== 'undefined' && window.location.hostname === '127.0.0.1') {
@@ -21,6 +21,7 @@ const familyDetails = {
   [DICTIONARIES.SURGE_PREP]: { description: 'marker #0', label: 'Surge Prep · MIP 36h12', camera: 'LIVE / ARUCO MIP 36h12', filename: 'mip-36h12' },
   [DICTIONARIES.OPENCV_4X4_50]: { description: 'an OpenCV 4×4 marker (IDs 0–49)', label: 'OpenCV · 4×4 50', camera: 'LIVE / OPENCV 4×4 50', filename: 'opencv-4x4-50' },
   [DICTIONARIES.OPENCV_5X5_250]: { description: 'an OpenCV 5×5 marker (IDs 0–249)', label: 'OpenCV · 5×5 250', camera: 'LIVE / OPENCV 5×5 250', filename: 'opencv-5x5-250' },
+  [DICTIONARIES.APRILTAG_36H11]: { description: 'an AprilTag 36h11 (including the printed IDs 0, 1 and 2)', label: 'AprilTag · 36h11', camera: 'LIVE / APRILTAG 36h11', filename: 'apriltag-36h11' },
 };
 
 let stream = null;
@@ -34,6 +35,7 @@ let previousPose = null;
 let path = [];
 let frameCount = 0;
 let selectedMarkerId = null;
+let lastMarkerSeenMs = 0;
 let depthReference = null;
 let calibrationSamples = [];
 let lastDetectionMs = 0;
@@ -239,6 +241,7 @@ function beginDepthCalibration() {
 
 function resetMarkerSelection() {
   selectedMarkerId = null;
+  lastMarkerSeenMs = 0;
 }
 
 let isProcessing = false;
@@ -408,8 +411,11 @@ function processFrame(timestampMs) {
     lastProcessedMs = timestampMs;
     processingContext.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
     const pixels = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
+    // Stretch contrast before detection so js-aruco2's fixed 5×5 threshold works
+    // in low-light or washed-out camera conditions. No-op on well-lit frames.
+    if (source === 'camera') contrastStretch(pixels);
     const markers = detector.detect(pixels);
-    const marker = selectMarker(markers, dictionaryName, selectedMarkerId);
+    const marker = selectMarkerAfterLoss(markers, dictionaryName, selectedMarkerId, lastMarkerSeenMs, timestampMs);
     frameCount += 1;
     $('frame-count').textContent = String(frameCount);
 
@@ -442,7 +448,19 @@ function processFrame(timestampMs) {
 
     if (pose) {
       lastDetectionMs = timestampMs;
-      if (selectedMarkerId === null) selectedMarkerId = pose.markerId;
+      if (selectedMarkerId !== null && selectedMarkerId !== pose.markerId) {
+        // A replacement tag has its own scale and image location. Treat it as
+        // a new observation instead of carrying Z or joining the old path.
+        depthReference = null;
+        calibrationSamples = [];
+        previousPose = null;
+        missingFrames = 0;
+        $('position-z').textContent = '—';
+        $('depth-hint').textContent = `Marker #${pose.markerId} selected. Hold it still to set a new starting position.`;
+        setCalibrationStep(2);
+      }
+      selectedMarkerId = pose.markerId;
+      lastMarkerSeenMs = timestampMs;
       if (!depthReference) {
         const result = advanceDepthCalibration(calibrationSamples, pose);
         calibrationSamples = result.samples;
@@ -489,7 +507,7 @@ function processFrame(timestampMs) {
       missingFrames = 0;
 
       if (scalpel) {
-        setStatus('DUAL: QR + SCALPEL', 'dual');
+        setStatus('DUAL: TAG + SCALPEL', 'dual');
         setTracking('Dual tracking active', `Marker #${pose.markerId} and purple scalpel tracked simultaneously.`);
         $('marker-substatus').textContent = `#${pose.markerId}`;
         $('marker-substatus').className = 'marker-active';
@@ -557,7 +575,7 @@ function processFrame(timestampMs) {
       missingFrames = 0;
 
       setStatus('SCALPEL TRACKING', 'scalpel');
-      setTracking('Tracking Purple Scalpel', 'QR marker occluded; maintaining tool position via purple scalpel.');
+      setTracking('Tracking Purple Scalpel', 'Marker occluded; maintaining tool position via purple scalpel.');
       $('marker-substatus').textContent = 'OCCLUDED';
       $('marker-substatus').className = '';
       $('scalpel-substatus').textContent = 'ACTIVE';
@@ -568,7 +586,10 @@ function processFrame(timestampMs) {
       $('position-y').textContent = Math.round(scalpelPose.y);
       $('angle').textContent = `${Math.round(scalpel.angleDeg)}°`;
       $('speed').textContent = speed == null ? '—' : Math.round(speed);
-      if (depthReference) setCalibrationStatus('Z READY', true);
+      $('marker-id').textContent = '—';
+      $('marker-size').textContent = '—';
+      $('position-z').textContent = '—';
+      if (depthReference) setCalibrationStatus('Z PAUSED');
 
       dispatchTrackingUpdate(
         scalpelPose.x,
@@ -769,7 +790,11 @@ function startProcessing(kind) {
   resetMarkerSelection();
   const vidW = (video.videoWidth && video.videoWidth > 0) ? video.videoWidth : 640;
   const vidH = (video.videoHeight && video.videoHeight > 0) ? video.videoHeight : 480;
-  processingCanvas.width = Math.min(vidW, 480);
+  // Use a wider processing canvas for live camera so markers cover more pixels
+  // and the js-aruco2 adaptive threshold has a better signal-to-noise ratio.
+  // Demo and file sources keep 480px which is already sufficient for generated content.
+  const maxProcW = kind === 'camera' ? 640 : 480;
+  processingCanvas.width = Math.min(vidW, maxProcW);
   processingCanvas.height = Math.round(processingCanvas.width * vidH / vidW);
   overlay.width = processingCanvas.width;
   overlay.height = processingCanvas.height;

@@ -173,6 +173,7 @@ namespace SurgePrep
         public string type;
         public string sessionId;
         public int status;
+        public bool recoverable;
         public StreamErrorDetailDto detail;
     }
 

@@ -81,6 +81,11 @@ UnityManualDemoClient → session samples ──────┘
                                       controller → Unity/XR snapshots
 ```
 
+After optical tracking has been used in a session, stale camera input pauses
+sample forwarding and the controller reports a recoverable error. Fresh optical
+input resumes the stream. A session that has only used keyboard input continues
+to work without a camera.
+
 1. For a calibrated production path, move camera acquisition and detection into the **Scalpel controller** or connect a calibrated hardware tracker there. The browser detector remains a replaceable proof of concept, not a calibrated client-to-camera boundary.
 2. Calibrate camera intrinsics and distortion, physical marker size, the fixed marker-to-tip transform, and camera-to-training-surface transform. Use fixed workspace markers or a calibrated board so tool pose and anatomy share one coordinate frame. Validate error and freshness before sending a pose.
 3. Extend or map a versioned controller observation to `contracts/v1/tool-sample.schema.json`, retaining device ID, sequence, source timestamp, receive time, calibration ID, quality flags, and units. Fuse the camera pose with the embedded contact/pressure path in the controller/API according to the accepted boundaries. A missing or stale marker must degrade tracking rather than reuse an old pose.

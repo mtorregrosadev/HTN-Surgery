@@ -90,6 +90,7 @@ class SessionHub:
                         session_id,
                         409,
                         {"detail": "Optical tracking is stale; waiting for a fresh pose"},
+                        recoverable=True,
                     )
                     continue
 
@@ -137,6 +138,7 @@ class SessionHub:
                         session_id,
                         503,
                         {"detail": "Controller could not reach the simulation API"},
+                        recoverable=True,
                     )
                     continue
 
@@ -154,12 +156,14 @@ class SessionHub:
         session_id: str,
         status_code: int,
         detail: Any,
+        recoverable: bool = False,
     ) -> None:
         error = {
             "type": "error",
             "sessionId": session_id,
             "status": status_code,
             "detail": detail,
+            "recoverable": recoverable,
         }
         await socket.send_json(error)
         await self.broadcast(session_id, error)
@@ -302,4 +306,3 @@ def create_app(
 
 
 app = create_app()
-

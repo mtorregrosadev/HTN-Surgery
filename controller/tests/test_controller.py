@@ -104,6 +104,7 @@ def test_hardware_rejection_reaches_hardware_and_vr_without_snapshot():
     assert hardware_error["type"] == "error"
     assert hardware_error["sessionId"] == "demo"
     assert hardware_error["status"] == 409
+    assert hardware_error["recoverable"] is False
     assert hardware_error["detail"]["detail"] == (
         "Tool source is unhealthy or tracking is invalid"
     )
@@ -129,6 +130,7 @@ def test_upstream_failure_returns_one_error_and_next_sample_continues():
                 assert hardware_error == vr_error
                 assert hardware_error["type"] == "error"
                 assert hardware_error["status"] == 503
+                assert hardware_error["recoverable"] is True
                 assert hardware_error["detail"]["detail"] == (
                     "Controller could not reach the simulation API"
                 )
@@ -177,6 +179,7 @@ def test_stale_optical_tracking_is_rejected_until_tracking_resumes():
                 assert vr.receive_json() == stale_error
                 assert stale_error["type"] == "error"
                 assert stale_error["status"] == 409
+                assert stale_error["recoverable"] is True
                 assert stale_error["detail"]["detail"] == (
                     "Optical tracking is stale; waiting for a fresh pose"
                 )

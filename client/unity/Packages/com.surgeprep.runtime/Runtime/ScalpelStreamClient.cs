@@ -24,15 +24,17 @@ namespace SurgePrep
         private ClientWebSocket socket;
         private CancellationTokenSource cancellation;
         private bool trackingFailed;
+        private bool trackingPaused;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
-        public bool TrackingHealthy => !trackingFailed;
+        public bool TrackingHealthy => !trackingFailed && !trackingPaused;
         public string Status { get; private set; } = "Starting Scalpel controller stream…";
 
         private async void OnEnable()
         {
             cancellation = new CancellationTokenSource();
             trackingFailed = false;
+            trackingPaused = false;
             ClearReceived();
             Status = "Connecting to Scalpel controller…";
             try
@@ -75,6 +77,11 @@ namespace SurgePrep
             var snapshot = JsonUtility.FromJson<SimulationSnapshotDto>(latest);
             if (!trackingFailed && snapshot != null && ContractCompatibility.Accepts(snapshot.contractVersion))
             {
+                if (trackingPaused)
+                {
+                    trackingPaused = false;
+                    Status = "Connected — receiving authoritative tracking";
+                }
                 sceneRenderer.SetTarget(snapshot);
             }
         }
@@ -82,8 +89,16 @@ namespace SurgePrep
         private void HandleTrackingError(StreamErrorDto error)
         {
             if (trackingFailed) return;
-            trackingFailed = true;
             var message = ContractCompatibility.DescribeError(error);
+            if (error != null && error.recoverable)
+            {
+                trackingPaused = true;
+                Status = $"Tracking paused: {message}";
+                Debug.LogWarning($"Scalpel controller tracking paused: {message}");
+                return;
+            }
+            trackingFailed = true;
+            trackingPaused = false;
             Status = $"Tracking failed: {message}";
             Debug.LogError($"Scalpel controller tracking rejected: {message}");
         }

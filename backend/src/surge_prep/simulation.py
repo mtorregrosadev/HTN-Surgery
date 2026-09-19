@@ -3,13 +3,21 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import asyncio
 from collections import defaultdict
+from dataclasses import dataclass
 import importlib.util
+import math
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from .layered_chest import LayeredChestState, exposed_surface_y_mm, pose_contact, tool_state_from_pose
-from .models import SimulationSnapshot, ToolSample
+from .layered_chest import (
+    LayeredChestState,
+    exposed_surface_y_mm,
+    in_corridor,
+    pose_contact,
+    tool_state_from_pose,
+)
+from .models import DeformableMeshState, SimulationSnapshot, ToolSample, Vector3
 
 
 class Simulator(ABC):
@@ -45,6 +53,7 @@ def _snapshot(
     deformation_mm: float,
     mode: str,
     degraded: bool = False,
+    deformable_meshes: list[DeformableMeshState] | None = None,
 ) -> SimulationSnapshot:
     stage = "degraded" if degraded else chest.procedure_stage(contact)
     return SimulationSnapshot(
@@ -56,7 +65,11 @@ def _snapshot(
         session_degraded=degraded,
         tool=tool_state_from_pose(sample, contact, penetration_mm, reaction_n, contact_point),
         tissue=chest.tissue_state(deformation_mm, mode),
-        deformable_meshes=chest.meshes(sample, deformation_mm, contact),
+        deformable_meshes=(
+            deformable_meshes
+            if deformable_meshes is not None
+            else chest.meshes(sample, deformation_mm, contact)
+        ),
         events=events,
     )
 
@@ -107,6 +120,15 @@ class MemorySimulator(Simulator):
         self.chests.pop(session_id, None)
 
 
+@dataclass
+class SofaSessionState:
+    root: Any
+    tick: int
+    previous_contact: bool
+    initial_tetrahedra: int
+    previous_tetrahedra: int
+
+
 class SofaSimulator(Simulator):
     """In-process bridge to a native SOFA Python scene."""
 
@@ -120,7 +142,7 @@ class SofaSimulator(Simulator):
         self._sofa: Any = None
         self._simulation: Any = None
         self._scene_module: ModuleType | None = None
-        self._sessions: dict[str, tuple[Any, int, bool]] = {}
+        self._sessions: dict[str, SofaSessionState] = {}
         self._chests: dict[str, LayeredChestState] = {}
 
     async def start(self) -> None:
@@ -154,8 +176,8 @@ class SofaSimulator(Simulator):
 
     async def close(self) -> None:
         async with self._lock:
-            for root, _, _ in self._sessions.values():
-                self._simulation.unload(root)
+            for state in self._sessions.values():
+                self._simulation.unload(state.root)
             self._sessions.clear()
 
     async def begin_session(self, session_id: str) -> None:
@@ -163,9 +185,16 @@ class SofaSimulator(Simulator):
             raise RuntimeError("SOFA simulator has not been started")
         async with self._lock:
             root = self._sofa.Core.Node(f"session_{session_id}")
-            self._scene_module.createScene(root)
+            self._scene_module.createScene(root, carving_active=False)
             self._simulation.init(root)
-            self._sessions[session_id] = (root, 0, False)
+            tetrahedra = len(root.tissue.topology.tetrahedra.value)
+            self._sessions[session_id] = SofaSessionState(
+                root=root,
+                tick=0,
+                previous_contact=False,
+                initial_tetrahedra=tetrahedra,
+                previous_tetrahedra=tetrahedra,
+            )
             self._chests[session_id] = LayeredChestState()
 
     async def step(self, sample: ToolSample) -> SimulationSnapshot:
@@ -173,57 +202,161 @@ class SofaSimulator(Simulator):
             state = self._sessions.get(sample.session_id)
             if state is None:
                 raise RuntimeError("SOFA session has not been initialized")
-            root, tick, previous_contact = state
+            root = state.root
             tool_pose = [[
                 sample.position_mm.x, sample.position_mm.y, sample.position_mm.z,
                 sample.orientation.qx, sample.orientation.qy,
                 sample.orientation.qz, sample.orientation.qw,
             ]]
             self._apply_tool(root, sample, tool_pose)
-            for _ in range(self.network_substeps):
+            root.carvingManager.active.value = False
+            for _ in range(self.network_substeps - 1):
                 self._simulation.animate(root, 0.01)
-            tick += self.network_substeps
+            preliminary_reaction = self._reaction_force_n(root)
+            preliminary_contact = self._has_contact(root, preliminary_reaction)
+            root.carvingManager.active.value = self._should_carve(
+                sample, preliminary_contact, preliminary_reaction
+            )
+            self._simulation.animate(root, 0.01)
+            root.carvingManager.active.value = False
+            state.tick += self.network_substeps
             chest = self._chests[sample.session_id]
-            surface = exposed_surface_y_mm(chest, sample.position_mm.x, sample.position_mm.z)
-            contact, penetration, reaction, contact_point = pose_contact(sample, surface)
-            deformation = max(penetration, self._maximum_deformation_mm(root))
+            reaction = self._reaction_force_n(root)
+            contact = self._has_contact(root, reaction)
+            deformation = self._maximum_deformation_mm(root)
+            contact_point = self._nearest_surface_point(root, sample)
+            penetration = deformation if contact else 0.0
             events: list[str] = []
-            if contact and not previous_contact:
+            if contact and not state.previous_contact:
                 events.append("first-contact")
                 events.append("contact-start")
-            elif previous_contact and not contact:
+            elif state.previous_contact and not contact:
                 events.append("contact-end")
             mode, chest_events, blocked = chest.update(sample, contact, penetration, reaction)
             events.extend(chest_events)
             if blocked:
                 events.append("protected-anatomy")
-            self._sessions[sample.session_id] = (root, tick, contact)
+            tetrahedra = len(root.tissue.topology.tetrahedra.value)
+            if tetrahedra < state.previous_tetrahedra:
+                events.append("topology-changed")
+            state.previous_tetrahedra = tetrahedra
+            state.previous_contact = contact
             return _snapshot(
-                sample, tick, self.step_ms, self.name, chest, events,
+                sample, state.tick, self.step_ms, self.name, chest, events,
                 contact, penetration, reaction, contact_point, deformation, mode,
+                deformable_meshes=self._deformable_meshes(state),
             )
 
     async def end_session(self, session_id: str) -> None:
         async with self._lock:
             state = self._sessions.pop(session_id, None)
             if state is not None:
-                self._simulation.unload(state[0])
+                self._simulation.unload(state.root)
             self._chests.pop(session_id, None)
 
     def _apply_tool(self, root: Any, sample: ToolSample, tool_pose: list) -> None:
         root.tool.dofs.position.value = tool_pose
         radius = {"scalpel": 1.6, "blunt-dissector": 2.4, "chest-tube": 3.2}.get(sample.tool_id, 2.0)
-        root.tool.CollisionModel.ParticleModel.radius.value = radius
+        root.tool.collision.sphere.radius.value = radius
+
+    @staticmethod
+    def _reaction_force_n(root: Any) -> float:
+        nodal_contact = root.tissue.dofs.getData("lambda").value
+        components = [
+            sum(float(force[axis]) for force in nodal_contact)
+            for axis in range(3)
+        ]
+        return math.sqrt(sum(component * component for component in components))
+
+    @staticmethod
+    def _has_contact(root: Any, reaction_n: float) -> bool:
+        return (
+            reaction_n > 1e-4
+            and len(root.contactSolver.constraintForces.value) > 0
+        )
+
+    @staticmethod
+    def _should_carve(
+        sample: ToolSample, contact: bool, reaction_n: float
+    ) -> bool:
+        return (
+            contact
+            and sample.tool_id == "scalpel"
+            and in_corridor(sample.position_mm.x, sample.position_mm.z)
+            and 0.04 <= reaction_n <= 1.5
+        )
 
     @staticmethod
     def _maximum_deformation_mm(root: Any) -> float:
-        current = root.skin.dofs.position.value
-        resting = root.skin.dofs.rest_position.value
+        current = root.tissue.dofs.position.value
+        resting = root.tissue.dofs.rest_position.value
         maximum_squared = 0.0
         for point, rest in zip(current, resting):
             squared = sum((float(point[index]) - float(rest[index])) ** 2 for index in range(3))
             maximum_squared = max(maximum_squared, squared)
         return maximum_squared ** 0.5
+
+    @staticmethod
+    def _nearest_surface_point(root: Any, sample: ToolSample) -> Vector3:
+        current = root.tissue.dofs.position.value
+        resting = root.tissue.dofs.rest_position.value
+        top_indices = [
+            index for index, point in enumerate(resting)
+            if float(point[1]) > -0.01
+        ]
+        nearest = min(
+            top_indices,
+            key=lambda index: (
+                (float(current[index][0]) - sample.position_mm.x) ** 2
+                + (float(current[index][2]) - sample.position_mm.z) ** 2
+            ),
+        )
+        point = current[nearest]
+        return Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
+
+    @staticmethod
+    def _deformable_meshes(state: SofaSessionState) -> list[DeformableMeshState]:
+        root = state.root
+        vertices = [
+            Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
+            for point in root.tissue.dofs.position.value
+        ]
+        layers: dict[str, list[int]] = {
+            "skin": [],
+            "subcutaneous": [],
+            "intercostal-muscle": [],
+            "pleura": [],
+        }
+        resting = root.tissue.dofs.rest_position.value
+        for triangle in root.tissue.surface.topology.triangles.value:
+            indices = [int(index) for index in triangle]
+            mean_y = sum(float(resting[index][1]) for index in indices) / 3.0
+            if mean_y >= -3.0:
+                layer = "skin"
+            elif mean_y >= -8.0:
+                layer = "subcutaneous"
+            elif mean_y >= -13.0:
+                layer = "intercostal-muscle"
+            else:
+                layer = "pleura"
+            layers[layer].extend(indices)
+        revision = 1 + state.initial_tetrahedra - state.previous_tetrahedra
+        meshes: list[DeformableMeshState] = []
+        for layer, triangles in layers.items():
+            used_indices = sorted(set(triangles))
+            remap = {
+                original: compact
+                for compact, original in enumerate(used_indices)
+            }
+            meshes.append(
+                DeformableMeshState(
+                    object_id=f"layer-{layer}",
+                    topology_revision=revision,
+                    vertices_mm=[vertices[index] for index in used_indices],
+                    triangle_indices=[remap[index] for index in triangles],
+                )
+            )
+        return meshes
 
 
 CONTACT_THRESHOLD_FROM_FEM = 0.12

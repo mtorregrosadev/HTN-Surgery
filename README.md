@@ -82,6 +82,15 @@ For API-only development, the default in-memory simulator preserves the same
 request/response shape. The demo must switch to the `sofa` backend so SOFA is
 authoritative. See `backend/README.md` for setup and controller flow.
 
+### Standalone ArUco tracking experiment
+
+`tracking-web/` contains a browser-only camera study that detects a printed
+ArUco marker on a blunt training tool and displays its 2D path, image position,
+screen angle, and approximate speed. It is separate from the integrated
+controller/API/SOFA loop and does not claim calibrated 3D tool pose. See
+`tracking-web/README.md` for setup, limitations, and the path to a controller-owned
+camera tracker and later AR anatomy alignment.
+
 ### Physical setup
 
 - Blunt plastic training stylus or spatula

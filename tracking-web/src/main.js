@@ -47,7 +47,8 @@ let latestHardware = null;
 
 function connectController() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.hostname || '127.0.0.1';
+  const rawHost = window.location.hostname || '127.0.0.1';
+  const host = rawHost === 'localhost' ? '127.0.0.1' : rawHost;
   const url = `${protocol}//${host}:8100/v1/tracking/stream`;
 
   try {

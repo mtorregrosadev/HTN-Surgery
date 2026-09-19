@@ -24,7 +24,7 @@ class ApiUpstream:
         self.client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
-        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=5.0)
+        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=10.0)
 
     async def close(self) -> None:
         if self.client is not None:
@@ -82,7 +82,8 @@ class SessionHub:
                     sample["contact"] = hw.is_contact
                     sample["forceMeasurementValid"] = True
                     sample["inputMode"] = "calibrated-hardware"
-                    sample["deviceId"] = hw.device_id
+                    if not sample.get("deviceId"):
+                        sample["deviceId"] = hw.device_id
 
                 # 2. If optical camera tracking is active, merge tracked position & orientation
                 if self.tracking and self.tracking.is_active():
@@ -98,7 +99,7 @@ class SessionHub:
                         "qz": tr.qz,
                         "qw": tr.qw,
                     }
-                    sample["quality"] = tr.confidence
+                    sample["quality"] = max(0.5, tr.confidence)
                     sample["sourceHealthy"] = True
                     # If hardware FSR is not connected, use optical surface depth for contact
                     if not (self.hardware and self.hardware.is_active()):
@@ -107,9 +108,13 @@ class SessionHub:
                             sample["forceN"] = min(8.0, abs(tr.y_mm) * 0.8 + 0.5)
                             sample["forceMeasurementValid"] = True
 
-                status_code, snapshot = await self.upstream.request(
-                    "POST", f"/v1/sessions/{session_id}/samples", sample
-                )
+                try:
+                    status_code, snapshot = await self.upstream.request(
+                        "POST", f"/v1/sessions/{session_id}/samples", sample
+                    )
+                except Exception:
+                    continue
+
                 if status_code >= 400:
                     error = {
                         "type": "error",

@@ -99,8 +99,9 @@ namespace SurgePrep
         private async Task ConnectAndReceive(CancellationToken token)
         {
             socket = new ClientWebSocket();
+            var normUrl = (controllerUrl ?? "ws://127.0.0.1:8100").Replace("localhost", "127.0.0.1");
             var uri = new Uri(
-                $"{controllerUrl.TrimEnd('/')}/v1/sessions/{sessionId}/client-stream"
+                $"{normUrl.TrimEnd('/')}/v1/sessions/{sessionId}/client-stream"
             );
             await socket.ConnectAsync(uri, token);
             Status = "Connected — awaiting authoritative tracking";

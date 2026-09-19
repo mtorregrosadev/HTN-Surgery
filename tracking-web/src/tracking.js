@@ -283,17 +283,17 @@ export function isPurpleColor(r, g, b) {
   // Reject pure white glare, deep shadow/black, or extreme lightness
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  if (max < 45 || max > 250) return false;
+  if (max < 55 || max > 245) return false;
 
   const delta = max - min;
-  if (delta < 18) return false; // Reject greys / neutrals
+  if (delta < 24) return false; // Reject greys / neutrals
 
   const sat = delta / max;
-  if (sat < 0.15) return false; // Reject washed-out low-saturation tones
+  if (sat < 0.20) return false; // Reject washed-out low-saturation tones
 
   // In purple/violet/magenta/lilac, Green is suppressed compared to Red and Blue
-  if (g >= r - 6 && g >= b - 6) return false;
-  if (g > (r + b) * 0.46) return false;
+  if (g >= r - 8 && g >= b - 8) return false;
+  if (g > (r + b) * 0.44) return false;
 
   // Standard HSV Hue calculation (0 to 360 degrees)
   let h = 0;
@@ -305,8 +305,8 @@ export function isPurpleColor(r, g, b) {
     h = ((r - g) / delta + 4) * 60;
   }
 
-  // Full purple / violet / magenta / lilac spectrum: 240° to 345°
-  return h >= 240 && h <= 345;
+  // Full purple / violet / magenta / lilac spectrum: 245° to 335°
+  return h >= 245 && h <= 335;
 }
 
 export function detectPurpleScalpel(imageData, options = {}) {
@@ -411,13 +411,48 @@ export function detectPurpleScalpel(imageData, options = {}) {
   const bestComp = components[0];
   const activeLabels = new Set([bestComp.label]);
 
-  // Collinear tool merging across hand occlusion: unite blade tip with handle
+  // Compute bestComp's principal axis to test collinearity
+  const basePts = [];
+  let baseSumX = 0;
+  let baseSumY = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const c = Math.floor(pts[i].x / cellSize);
+    const r = Math.floor(pts[i].y / cellSize);
+    if (labels[r * cols + c] === bestComp.label) {
+      basePts.push(pts[i]);
+      baseSumX += pts[i].x;
+      baseSumY += pts[i].y;
+    }
+  }
+
+  if (basePts.length < minPixels) return null;
+
+  const baseCx = baseSumX / basePts.length;
+  const baseCy = baseSumY / basePts.length;
+
+  let bmu20 = 0;
+  let bmu02 = 0;
+  let bmu11 = 0;
+  for (let i = 0; i < basePts.length; i += 1) {
+    const dx = basePts[i].x - baseCx;
+    const dy = basePts[i].y - baseCy;
+    bmu20 += dx * dx;
+    bmu02 += dy * dy;
+    bmu11 += dx * dy;
+  }
+  const baseTheta = 0.5 * Math.atan2(2 * bmu11, bmu20 - bmu02);
+  const cosT = Math.cos(baseTheta);
+  const sinT = Math.sin(baseTheta);
+
+  // Collinear tool merging across hand occlusion: only unite components strictly
+  // aligned with the tool axis (reject off-axis skin, reflections, shadows)
   for (let i = 1; i < components.length; i += 1) {
     const comp = components[i];
-    const dx = comp.cx - bestComp.cx;
-    const dy = comp.cy - bestComp.cy;
-    const centerDist = Math.hypot(dx, dy);
-    if (centerDist < 140) {
+    const dx = comp.cx - baseCx;
+    const dy = comp.cy - baseCy;
+    const perpDist = Math.abs(-dx * sinT + dy * cosT);
+    const axialDist = Math.abs(dx * cosT + dy * sinT);
+    if (perpDist <= 22 && axialDist <= 160) {
       activeLabels.add(comp.label);
     }
   }

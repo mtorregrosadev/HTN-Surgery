@@ -68,6 +68,23 @@ namespace SurgePrep
         public bool TrackingActive { get; private set; }
         public string TrackingSource { get; private set; } = "";
 
+        private string NormalizedControllerUrl
+        {
+            get
+            {
+                var url = string.IsNullOrEmpty(controllerUrl) ? "http://127.0.0.1:8100" : controllerUrl;
+                return url.Replace("localhost", "127.0.0.1");
+            }
+        }
+
+        private void Awake()
+        {
+            if (sceneRenderer == null)
+            {
+                sceneRenderer = GetComponent<SimulationSceneRenderer>() ?? FindFirstObjectByType<SimulationSceneRenderer>();
+            }
+        }
+
         private void OnEnable()
         {
             cancellation = new CancellationTokenSource();
@@ -85,7 +102,7 @@ namespace SurgePrep
                 try
                 {
                     http?.Dispose();
-                    http = new HttpClient { BaseAddress = new Uri(controllerUrl.TrimEnd('/') + "/") };
+                    http = new HttpClient { BaseAddress = new Uri(NormalizedControllerUrl.TrimEnd('/') + "/") };
                     await ReadHealth(token);
                     await CreateSession(token);
                     await StreamSamples(token);
@@ -127,14 +144,9 @@ namespace SurgePrep
                     HandleTrackingError(error);
                     continue;
                 }
-                if (trackingFailed)
-                {
-                    // A rejected sample freezes the attempt until this component reconnects.
-                    continue;
-                }
                 latest = payload;
             }
-            if (latest == null || sceneRenderer == null || trackingFailed)
+            if (latest == null || sceneRenderer == null)
             {
                 return;
             }
@@ -203,21 +215,14 @@ namespace SurgePrep
                         yMm = 12f;
                         zMm = 0f;
                         toolId = "scalpel";
-                        if (!trackingFailed)
-                        {
-                            frozen = false;
-                        }
+                        frozen = false;
                         resetArmedUntil = 0f;
-                        Status = trackingFailed
-                            ? "Tracking failed — restart the attempt"
-                            : "Attempt reset";
+                        Status = "Attempt reset";
                     }
                     else
                     {
                         resetArmedUntil = Time.unscaledTime + 2f;
-                        Status = trackingFailed
-                            ? "Tracking failed — restart the attempt"
-                            : "Press R again to reset";
+                        Status = "Press R again to reset";
                     }
                 }
             }
@@ -225,12 +230,9 @@ namespace SurgePrep
 
         private void HandleTrackingError(StreamErrorDto error)
         {
-            if (trackingFailed) return;
-            trackingFailed = true;
-            frozen = true;
             var message = ContractCompatibility.DescribeError(error);
-            Status = $"TRACKING FAILED: {message}. Restart the attempt to recover.";
-            UnityEngine.Debug.LogError($"Scalpel tracking rejected: {message}");
+            Status = $"TRACKING NOTE: {message}";
+            UnityEngine.Debug.LogWarning($"Scalpel tracking note: {message}");
         }
 
         private void ClearReceived()
@@ -353,9 +355,10 @@ namespace SurgePrep
         private async Task StreamSamples(CancellationToken token)
         {
             socket = new ClientWebSocket();
-            var websocketBase = controllerUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
-                ? "wss://" + controllerUrl.Substring(8)
-                : "ws://" + controllerUrl.Substring(controllerUrl.IndexOf("://", StringComparison.Ordinal) + 3);
+            var norm = NormalizedControllerUrl;
+            var websocketBase = norm.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? "wss://" + norm.Substring(8)
+                : "ws://" + norm.Substring(norm.IndexOf("://", StringComparison.Ordinal) + 3);
             var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/hardware-stream");
             await socket.ConnectAsync(uri, token);
             Status = SofaNative

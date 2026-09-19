@@ -117,9 +117,9 @@ export function movementSpeed(previous, current) {
   return Math.hypot(current.x - previous.x, current.y - previous.y) / elapsedSeconds;
 }
 
-export function appendPath(path, pose) {
+export function appendPath(path, pose, isContinuous = true) {
   if (!pose) return path;
   const last = path.at(-1);
   if (last && Math.hypot(pose.x - last.x, pose.y - last.y) < 2) return path;
-  return [...path, { x: pose.x, y: pose.y }].slice(-MAX_PATH_POINTS);
+  return [...path, { x: pose.x, y: pose.y, continuous: isContinuous }].slice(-MAX_PATH_POINTS);
 }

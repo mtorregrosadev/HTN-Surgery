@@ -13,45 +13,32 @@
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// Marker definitions
-// 1 = White (Lit), 0 = Black (Dark)
-// OpenCV 5x5 #0 (9x9 grid with 1-module white border)
-const uint8_t ARUCO_5X5_ID0[9][9] = {
-  {1, 1, 1, 1, 1, 1, 1, 1, 1},
-  {1, 0, 0, 0, 0, 0, 0, 0, 1},
-  {1, 0, 1, 0, 1, 0, 0, 0, 1},
-  {1, 0, 0, 1, 0, 1, 1, 0, 1},
-  {1, 0, 0, 1, 1, 0, 0, 0, 1},
-  {1, 0, 1, 0, 1, 0, 1, 0, 1},
-  {1, 0, 1, 1, 1, 0, 0, 0, 1},
-  {1, 0, 0, 0, 0, 0, 0, 0, 1},
-  {1, 1, 1, 1, 1, 1, 1, 1, 1}
+// Inner data bits (1 = white, 0 = black)
+// OpenCV 5x5 #0 (5x5 inner data)
+const uint8_t BITS_5X5_0[5][5] = {
+  {1, 0, 1, 0, 0},
+  {0, 1, 0, 1, 1},
+  {0, 1, 1, 0, 0},
+  {1, 0, 1, 0, 1},
+  {1, 1, 1, 0, 0}
 };
 
-// Surge Prep MIP 36h12 #0 (10x10 grid with 1-module white border)
-const uint8_t ARUCO_MIP_ID0[10][10] = {
-  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-  {1, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-  {1, 0, 1, 1, 0, 1, 0, 0, 0, 1},
-  {1, 0, 1, 0, 1, 0, 1, 1, 0, 1},
-  {1, 0, 0, 1, 1, 0, 0, 0, 0, 1},
-  {1, 0, 1, 1, 1, 0, 1, 0, 0, 1},
-  {1, 0, 0, 0, 0, 0, 1, 0, 0, 1},
-  {1, 0, 0, 1, 1, 1, 0, 1, 0, 1},
-  {1, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
+// OpenCV 4x4 #0 (4x4 inner data)
+const uint8_t BITS_4X4_0[4][4] = {
+  {1, 0, 1, 1},
+  {0, 1, 0, 1},
+  {0, 0, 1, 1},
+  {0, 0, 1, 0}
 };
 
-// OpenCV 4x4 #0 (8x8 grid with 1-module white border)
-const uint8_t ARUCO_4X4_ID0[8][8] = {
-  {1, 1, 1, 1, 1, 1, 1, 1},
-  {1, 0, 0, 0, 0, 0, 0, 1},
-  {1, 0, 1, 0, 1, 1, 0, 1},
-  {1, 0, 0, 1, 0, 1, 0, 1},
-  {1, 0, 0, 0, 1, 1, 0, 1},
-  {1, 0, 0, 0, 1, 0, 0, 1},
-  {1, 0, 0, 0, 0, 0, 0, 1},
-  {1, 1, 1, 1, 1, 1, 1, 1}
+// Surge Prep MIP 36h12 #0 (6x6 inner data)
+const uint8_t BITS_MIP_0[6][6] = {
+  {1, 1, 0, 1, 0, 0},
+  {1, 0, 1, 0, 1, 1},
+  {0, 1, 1, 0, 0, 0},
+  {1, 1, 1, 0, 1, 0},
+  {0, 0, 0, 0, 1, 0},
+  {0, 1, 1, 1, 0, 1}
 };
 
 enum DisplayMode {
@@ -69,126 +56,141 @@ unsigned long lastCycleMs = 0;
 bool lastBtnState = HIGH;
 
 void drawAruco5x5Centered() {
-  display.clearDisplay();
-  const int moduleSize = 7;
-  const int totalSize = 9 * moduleSize; // 63px
-  const int startX = (SCREEN_WIDTH - totalSize) / 2; // ~32
-  const int startY = (SCREEN_HEIGHT - totalSize) / 2; // 0
+  // Fill entire display with white quiet zone
+  display.fillScreen(SSD1306_WHITE);
 
-  for (int r = 0; r < 9; r++) {
-    for (int c = 0; c < 9; c++) {
-      uint16_t color = ARUCO_5X5_ID0[r][c] ? SSD1306_WHITE : SSD1306_BLACK;
-      display.fillRect(startX + c * moduleSize, startY + r * moduleSize, moduleSize, moduleSize, color);
-    }
-  }
-  display.display();
-}
+  // 7x7 modules (1 border + 5 data + 1 border) * 8px = 56px
+  const int moduleSize = 8;
+  const int totalSize = 7 * moduleSize; // 56px
+  const int startX = (SCREEN_WIDTH - totalSize) / 2; // 36
+  const int startY = (SCREEN_HEIGHT - totalSize) / 2; // 4
 
-void drawArucoMipCentered() {
-  display.clearDisplay();
-  const int moduleSize = 6;
-  const int totalSize = 10 * moduleSize; // 60px
-  const int startX = (SCREEN_WIDTH - totalSize) / 2; // 34
-  const int startY = (SCREEN_HEIGHT - totalSize) / 2; // 2
+  // Outer black square
+  display.fillRect(startX, startY, totalSize, totalSize, SSD1306_BLACK);
 
-  for (int r = 0; r < 10; r++) {
-    for (int c = 0; c < 10; c++) {
-      uint16_t color = ARUCO_MIP_ID0[r][c] ? SSD1306_WHITE : SSD1306_BLACK;
-      display.fillRect(startX + c * moduleSize, startY + r * moduleSize, moduleSize, moduleSize, color);
+  // Inner 5x5 data modules
+  for (int r = 0; r < 5; r++) {
+    for (int c = 0; c < 5; c++) {
+      if (BITS_5X5_0[r][c]) {
+        display.fillRect(startX + (c + 1) * moduleSize, startY + (r + 1) * moduleSize, moduleSize, moduleSize, SSD1306_WHITE);
+      }
     }
   }
   display.display();
 }
 
 void drawAruco4x4Centered() {
-  display.clearDisplay();
-  const int moduleSize = 8;
-  const int totalSize = 8 * moduleSize; // 64px
-  const int startX = (SCREEN_WIDTH - totalSize) / 2; // 32
-  const int startY = 0;
+  // Fill entire display with white quiet zone
+  display.fillScreen(SSD1306_WHITE);
 
-  for (int r = 0; r < 8; r++) {
-    for (int c = 0; c < 8; c++) {
-      uint16_t color = ARUCO_4X4_ID0[r][c] ? SSD1306_WHITE : SSD1306_BLACK;
-      display.fillRect(startX + c * moduleSize, startY + r * moduleSize, moduleSize, moduleSize, color);
+  // 6x6 modules (1 border + 4 data + 1 border) * 10px = 60px
+  const int moduleSize = 10;
+  const int totalSize = 6 * moduleSize; // 60px
+  const int startX = (SCREEN_WIDTH - totalSize) / 2; // 34
+  const int startY = (SCREEN_HEIGHT - totalSize) / 2; // 2
+
+  // Outer black square
+  display.fillRect(startX, startY, totalSize, totalSize, SSD1306_BLACK);
+
+  // Inner 4x4 data modules
+  for (int r = 0; r < 4; r++) {
+    for (int c = 0; c < 4; c++) {
+      if (BITS_4X4_0[r][c]) {
+        display.fillRect(startX + (c + 1) * moduleSize, startY + (r + 1) * moduleSize, moduleSize, moduleSize, SSD1306_WHITE);
+      }
+    }
+  }
+  display.display();
+}
+
+void drawArucoMipCentered() {
+  // Fill entire display with white quiet zone
+  display.fillScreen(SSD1306_WHITE);
+
+  // 8x8 modules (1 border + 6 data + 1 border) * 7px = 56px
+  const int moduleSize = 7;
+  const int totalSize = 8 * moduleSize; // 56px
+  const int startX = (SCREEN_WIDTH - totalSize) / 2; // 36
+  const int startY = (SCREEN_HEIGHT - totalSize) / 2; // 4
+
+  // Outer black square
+  display.fillRect(startX, startY, totalSize, totalSize, SSD1306_BLACK);
+
+  // Inner 6x6 data modules
+  for (int r = 0; r < 6; r++) {
+    for (int c = 0; c < 6; c++) {
+      if (BITS_MIP_0[r][c]) {
+        display.fillRect(startX + (c + 1) * moduleSize, startY + (r + 1) * moduleSize, moduleSize, moduleSize, SSD1306_WHITE);
+      }
     }
   }
   display.display();
 }
 
 void drawQRCode(const char* payload) {
-  display.clearDisplay();
+  display.fillScreen(SSD1306_WHITE);
   QRCode qrcode;
   const int version = 2; // 25x25 modules
   uint8_t qrcodeData[qrcode_getBufferSize(version)];
   qrcode_initText(&qrcode, qrcodeData, version, ECC_LOW, payload);
 
-  const int quietBorder = 1; // 1 module border
-  const int totalModules = qrcode.size + 2 * quietBorder; // 27
-  const int modulePixel = 2; // 2px per module = 54px
+  const int modulePixel = 2; // 2px per module = 50px
   const int startX = 6;
-  const int startY = (SCREEN_HEIGHT - totalModules * modulePixel) / 2; // 5
+  const int startY = (SCREEN_HEIGHT - qrcode.size * modulePixel) / 2; // 7
 
-  // Background white quiet zone
-  display.fillRect(startX, startY, totalModules * modulePixel, totalModules * modulePixel, SSD1306_WHITE);
-
-  // Black modules
+  // Black modules on white background
   for (int y = 0; y < qrcode.size; y++) {
     for (int x = 0; x < qrcode.size; x++) {
       if (qrcode_getModule(&qrcode, x, y)) {
-        display.fillRect(
-          startX + (x + quietBorder) * modulePixel,
-          startY + (y + quietBorder) * modulePixel,
-          modulePixel, modulePixel,
-          SSD1306_BLACK
-        );
+        display.fillRect(startX + x * modulePixel, startY + y * modulePixel, modulePixel, modulePixel, SSD1306_BLACK);
       }
     }
   }
 
   // Text on the right side
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
   display.setTextSize(1);
-  display.setCursor(68, 6);
+  display.setCursor(66, 6);
   display.print("SURGE");
-  display.setCursor(68, 16);
+  display.setCursor(66, 16);
   display.print("PREP");
-  display.drawLine(68, 27, 122, 27, SSD1306_WHITE);
-  display.setCursor(68, 32);
+  display.drawLine(66, 27, 122, 27, SSD1306_BLACK);
+  display.setCursor(66, 33);
   display.print("QR CODE");
-  display.setCursor(68, 44);
-  display.print("SCAN ME");
-  display.setCursor(68, 54);
+  display.setCursor(66, 45);
   display.print(":5173");
 
   display.display();
 }
 
 void drawSplitView() {
-  display.clearDisplay();
-  // ArUco 5x5 on left (9x9 modules * 7px = 63px)
-  const int moduleSize = 7;
-  for (int r = 0; r < 9; r++) {
-    for (int c = 0; c < 9; c++) {
-      uint16_t color = ARUCO_5X5_ID0[r][c] ? SSD1306_WHITE : SSD1306_BLACK;
-      display.fillRect(c * moduleSize, r * moduleSize, moduleSize, moduleSize, color);
+  display.fillScreen(SSD1306_WHITE);
+  // ArUco 5x5 on left (56px)
+  const int moduleSize = 8;
+  const int totalSize = 56;
+  const int startX = 4;
+  const int startY = 4;
+  display.fillRect(startX, startY, totalSize, totalSize, SSD1306_BLACK);
+  for (int r = 0; r < 5; r++) {
+    for (int c = 0; c < 5; c++) {
+      if (BITS_5X5_0[r][c]) {
+        display.fillRect(startX + (c + 1) * moduleSize, startY + (r + 1) * moduleSize, moduleSize, moduleSize, SSD1306_WHITE);
+      }
     }
   }
 
   // Label on right
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
   display.setTextSize(1);
-  display.setCursor(68, 4);
+  display.setCursor(68, 6);
   display.print("SURGE");
-  display.setCursor(68, 14);
+  display.setCursor(68, 16);
   display.print("PREP");
-  display.drawLine(68, 24, 122, 24, SSD1306_WHITE);
-  display.setCursor(68, 29);
+  display.drawLine(68, 27, 122, 27, SSD1306_BLACK);
+  display.setCursor(68, 33);
   display.print("ARUCO");
-  display.setCursor(68, 39);
+  display.setCursor(68, 44);
   display.print("5x5 #0");
-  display.setCursor(68, 51);
-  display.print("READY");
 
   display.display();
 }
@@ -196,7 +198,7 @@ void drawSplitView() {
 void renderCurrentMode() {
   switch (currentMode) {
     case MODE_ARUCO_5X5:
-      Serial.println("[Display] Mode 0: ArUco OpenCV 5x5 #0 (Centered Large)");
+      Serial.println("[Display] Mode 0: ArUco OpenCV 5x5 #0 (White Quiet Zone)");
       drawAruco5x5Centered();
       break;
     case MODE_QR_CODE:
@@ -204,11 +206,11 @@ void renderCurrentMode() {
       drawQRCode("http://127.0.0.1:5173/");
       break;
     case MODE_ARUCO_MIP:
-      Serial.println("[Display] Mode 2: ArUco MIP 36h12 #0 (Centered Large)");
+      Serial.println("[Display] Mode 2: ArUco MIP 36h12 #0 (White Quiet Zone)");
       drawArucoMipCentered();
       break;
     case MODE_ARUCO_4X4:
-      Serial.println("[Display] Mode 3: ArUco OpenCV 4x4 #0 (Centered Large)");
+      Serial.println("[Display] Mode 3: ArUco OpenCV 4x4 #0 (White Quiet Zone, 10px modules)");
       drawAruco4x4Centered();
       break;
     case MODE_SPLIT:
@@ -253,23 +255,24 @@ void setup() {
   // Initialize OLED display
   if (!display.begin(SSD1306_SWITCHCAPVCC, foundAddress)) {
     Serial.printf("SSD1306 allocation failed at 0x%02X\n", foundAddress);
-    // try fallback address
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
       Serial.println("SSD1306 fallback 0x3D also failed.");
     }
   } else {
     Serial.printf("SSD1306 OLED initialized at 0x%02X\n", foundAddress);
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(0xFF); // Maximum contrast
   }
 
   renderCurrentMode();
   lastCycleMs = millis();
 
   Serial.println("\nCommands via Serial:");
-  Serial.println("  '0' : ArUco OpenCV 5x5 #0 (Large Centered - Matches Web Default)");
+  Serial.println("  '0' : ArUco OpenCV 5x5 #0");
   Serial.println("  '1' : QR Code (Web URL)");
   Serial.println("  '2' : ArUco MIP 36h12 #0");
-  Serial.println("  '3' : ArUco OpenCV 4x4 #0");
-  Serial.println("  '4' : Split View (ArUco + Text)");
+  Serial.println("  '3' : ArUco OpenCV 4x4 #0 (High Motion Tolerance)");
+  Serial.println("  '4' : Split View");
   Serial.println("  'a' : Toggle auto-cycle mode");
   Serial.println("  ' ' : Next screen");
   Serial.println("Or press BOOT button (GPIO 9) to switch screen\n");

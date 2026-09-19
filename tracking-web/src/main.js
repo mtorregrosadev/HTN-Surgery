@@ -86,11 +86,23 @@ function beginDepthCalibration() {
   $('position-z').textContent = '—';
 }
 
-function drawPath(context, points, scaleX, scaleY) {
+let isProcessing = false;
+
+function drawPath(context, points, scaleX = 1, scaleY = 1) {
   if (points.length < 2) return;
   context.beginPath();
-  context.moveTo(points[0].x * scaleX, points[0].y * scaleY);
-  for (const point of points.slice(1)) context.lineTo(point.x * scaleX, point.y * scaleY);
+  let started = false;
+  for (let i = 0; i < points.length; i += 1) {
+    const pt = points[i];
+    const x = pt.x * scaleX;
+    const y = pt.y * scaleY;
+    if (!started || pt.continuous === false) {
+      context.moveTo(x, y);
+      started = true;
+    } else {
+      context.lineTo(x, y);
+    }
+  }
   context.strokeStyle = '#a7edba';
   context.lineWidth = 2.5;
   context.lineJoin = 'round';
@@ -136,72 +148,80 @@ function drawOverlay(pose) {
 }
 
 function processFrame(timestampMs) {
-  if (!source || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || timestampMs - lastProcessedMs < 32) return;
-  lastProcessedMs = timestampMs;
-  processingContext.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
-  const pixels = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
-  const markers = detector.detect(pixels);
-  const marker = selectMarker(markers, dictionaryName);
-  frameCount += 1;
-  $('frame-count').textContent = String(frameCount);
+  if (!source || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  if (isProcessing) return;
+  if (timestampMs - lastProcessedMs < 25) return;
+  isProcessing = true;
+  try {
+    lastProcessedMs = timestampMs;
+    processingContext.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
+    const pixels = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
+    const markers = detector.detect(pixels);
+    const marker = selectMarker(markers, dictionaryName);
+    frameCount += 1;
+    $('frame-count').textContent = String(frameCount);
 
-  const pose = markerPose2d(marker, timestampMs);
-  if (pose) {
-    missingFrames = 0;
-    if (depthReference && depthReference.markerId !== pose.markerId) {
-      beginDepthCalibration();
-      $('depth-hint').textContent = 'Marker ID changed. Hold this marker still to set a new starting position.';
-    }
-    if (!depthReference) {
-      const result = advanceDepthCalibration(calibrationSamples, pose);
-      calibrationSamples = result.samples;
-      if (result.reference) {
-        depthReference = result.reference;
-        setCalibrationStep(3);
-        setCalibrationStatus('Z READY', true);
-        $('depth-hint').textContent = 'Starting position set. Positive Z means farther away; negative Z means closer.';
-      } else {
-        setCalibrationStatus(`HOLD STILL ${calibrationSamples.length}/${CALIBRATION_FRAMES}`);
+    const pose = markerPose2d(marker, timestampMs);
+    if (pose) {
+      const isContinuous = missingFrames === 0 && previousPose !== null;
+      missingFrames = 0;
+      if (depthReference && depthReference.markerId !== pose.markerId) {
+        beginDepthCalibration();
+        $('depth-hint').textContent = 'Marker ID changed. Hold this marker still to set a new starting position.';
+      }
+      if (!depthReference) {
+        const result = advanceDepthCalibration(calibrationSamples, pose);
+        calibrationSamples = result.samples;
+        if (result.reference) {
+          depthReference = result.reference;
+          setCalibrationStep(3);
+          setCalibrationStatus('Z READY', true);
+          $('depth-hint').textContent = 'Starting position set. Positive Z means farther away; negative Z means closer.';
+        } else {
+          setCalibrationStatus(`HOLD STILL ${calibrationSamples.length}/${CALIBRATION_FRAMES}`);
+        }
+      }
+      const speed = movementSpeed(previousPose, pose);
+      previousPose = pose;
+      path = appendPath(path, pose, isContinuous);
+      setStatus('MARKER FOUND', 'detected');
+      setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
+      $('position-x').textContent = Math.round(pose.x);
+      $('position-y').textContent = Math.round(pose.y);
+      const zPercent = depthReference?.markerId === pose.markerId
+        ? relativeDepthPercent(depthReference, pose.sizePx) : null;
+      const roundedZ = zPercent == null ? null : Math.round(zPercent);
+      $('position-z').textContent = roundedZ == null ? '—' : `${roundedZ > 0 ? '+' : ''}${roundedZ}%`;
+      $('marker-size').textContent = Math.round(pose.sizePx);
+      $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
+      $('speed').textContent = speed == null ? '—' : Math.round(speed);
+      $('marker-id').textContent = `#${pose.markerId}`;
+    } else {
+      missingFrames += 1;
+      if (!depthReference) {
+        calibrationSamples = [];
+        setCalibrationStatus('SHOW MARKER');
+        $('depth-hint').textContent = 'Keep the full marker visible and hold it still to set the starting position.';
+      }
+      if (missingFrames >= 3) {
+        previousPose = null;
+        setStatus('MARKER LOST', 'searching');
+        const hint = markers.length
+          ? dictionaryName === DICTIONARIES.SURGE_PREP
+            ? 'This marker does not match Surge Prep #0. Select the family shown by your marker generator, or use the marker from this page.'
+            : 'The square is not a reliable match. Check the exact marker family in your generator, then keep its white margin visible.'
+          : detector.candidates.length
+            ? 'A square is visible, but its code does not match. Check the marker family above.'
+            : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
+        setTracking('Looking for marker', hint);
+        clearMeasurements();
       }
     }
-    const speed = movementSpeed(previousPose, pose);
-    previousPose = pose;
-    path = appendPath(path, pose);
-    setStatus('MARKER FOUND', 'detected');
-    setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
-    $('position-x').textContent = Math.round(pose.x);
-    $('position-y').textContent = Math.round(pose.y);
-    const zPercent = depthReference?.markerId === pose.markerId
-      ? relativeDepthPercent(depthReference, pose.sizePx) : null;
-    const roundedZ = zPercent == null ? null : Math.round(zPercent);
-    $('position-z').textContent = roundedZ == null ? '—' : `${roundedZ > 0 ? '+' : ''}${roundedZ}%`;
-    $('marker-size').textContent = Math.round(pose.sizePx);
-    $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
-    $('speed').textContent = speed == null ? '—' : Math.round(speed);
-    $('marker-id').textContent = `#${pose.markerId}`;
-  } else {
-    missingFrames += 1;
-    if (!depthReference) {
-      calibrationSamples = [];
-      setCalibrationStatus('SHOW MARKER');
-      $('depth-hint').textContent = 'Keep the full marker visible and hold it still to set the starting position.';
-    }
-    if (missingFrames >= 3) {
-      previousPose = null;
-      setStatus('MARKER LOST', 'searching');
-      const hint = markers.length
-        ? dictionaryName === DICTIONARIES.SURGE_PREP
-          ? 'This marker does not match Surge Prep #0. Select the family shown by your marker generator, or use the marker from this page.'
-          : 'The square is not a reliable match. Check the exact marker family in your generator, then keep its white margin visible.'
-        : detector.candidates.length
-          ? 'A square is visible, but its code does not match. Check the marker family above.'
-          : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
-      setTracking('Looking for marker', hint);
-      clearMeasurements();
-    }
+    drawOverlay(pose);
+    drawPreview();
+  } finally {
+    isProcessing = false;
   }
-  drawOverlay(pose);
-  drawPreview();
 }
 
 function scheduleFrame() {

@@ -26,6 +26,11 @@ starts in a room orbit, then settles on that window. Right-drag orbits 360°
 horizontally, scroll zooms, middle mouse pans, `F` close-up, `O` room, `C`
 surgeon view.
 
+The scalpel visual uses the supplied Onshape/SolidWorks OBJ from
+`Runtime/Models/Scalpel`; its measured blade tip is registered to the unchanged
+SOFA collision proxy. The procedural scalpel is retained only as a missing-asset
+fallback.
+
 Pose-only tool control (hardware later):
 
 - `W/A/S/D` screen-relative movement

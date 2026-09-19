@@ -18,6 +18,8 @@ namespace SurgePrep.Editor
         private const string MaterialRoot = ShowcaseRoot + "/Materials";
         private const string GeneratedRoot = ShowcaseRoot + "/Generated";
         private const string SceneRoot = ShowcaseRoot + "/Scenes";
+        private const string ScalpelModelPath =
+            "Packages/com.surgeprep.runtime/Runtime/Models/Scalpel/scalepl.obj";
 
         private static readonly string[] AnatomyFiles =
         {
@@ -223,6 +225,13 @@ namespace SurgePrep.Editor
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
             simulation.transform.SetParent(window.transform, false);
             var renderer = simulation.AddComponent<SimulationSceneRenderer>();
+            var scalpelModel = AssetDatabase.LoadAssetAtPath<GameObject>(ScalpelModelPath);
+            if (scalpelModel == null)
+            {
+                throw new InvalidOperationException(
+                    "Unity could not import the supplied scalpel at " + ScalpelModelPath
+                );
+            }
             var stream = simulation.AddComponent<ScalpelStreamClient>();
             stream.enabled = false;
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
@@ -232,6 +241,7 @@ namespace SurgePrep.Editor
             SetObject(renderer, "muscleMaterial", muscle);
             SetObject(renderer, "pleuraMaterial", pleura);
             SetObject(renderer, "incisionMaterial", incision);
+            SetObject(renderer, "scalpelModel", scalpelModel);
             SetObject(renderer, "toolMaterial", tool);
             SetObject(renderer, "pressureIndicatorMaterial", pressure);
             SetObject(renderer, "incisionGuide", CreateTargetGuide(simulation.transform, target));

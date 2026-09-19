@@ -8,6 +8,7 @@ namespace SurgePrep
     {
         [SerializeField] private Transform toolTransform;
         [SerializeField, Min(1f)] private float interpolationSpeed = 20f;
+        [SerializeField] private GameObject scalpelModel;
         [SerializeField] private Material tissueMaterial;
         [SerializeField] private Material subcutaneousMaterial;
         [SerializeField] private Material muscleMaterial;
@@ -106,12 +107,28 @@ namespace SurgePrep
         {
             scalpelVisual = new GameObject("Scalpel visual");
             scalpelVisual.transform.SetParent(tip, false);
-            Primitive("Training blade handle", PrimitiveType.Capsule, scalpelVisual.transform,
-                new Vector3(0f, 0.065f, 0f), new Vector3(0.007f, 0.05f, 0.007f));
-            Primitive("Visible blunt training blade", PrimitiveType.Cube, scalpelVisual.transform,
-                new Vector3(0.002f, 0.012f, 0f), new Vector3(0.012f, 0.024f, 0.0018f));
-            Primitive("Training blade guard", PrimitiveType.Cube, scalpelVisual.transform,
-                new Vector3(0f, 0.029f, 0f), new Vector3(0.022f, 0.004f, 0.011f));
+            if (scalpelModel != null)
+            {
+                var imported = Instantiate(scalpelModel, scalpelVisual.transform);
+                imported.name = "Supplied SolidWorks scalpel";
+                // The OBJ is authored in metres along +X with its blade tip at
+                // X=-159.158 mm. Register that tip to SOFA's local origin and
+                // rotate the handle onto Unity's +Y tool axis.
+                imported.transform.localPosition = new Vector3(
+                    0.0016f, 0.159158f, -0.0055f
+                );
+                imported.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+                imported.transform.localScale = Vector3.one;
+            }
+            else
+            {
+                Primitive("Fallback blade handle", PrimitiveType.Capsule, scalpelVisual.transform,
+                    new Vector3(0f, 0.065f, 0f), new Vector3(0.007f, 0.05f, 0.007f));
+                Primitive("Fallback training blade", PrimitiveType.Cube, scalpelVisual.transform,
+                    new Vector3(0.002f, 0.012f, 0f), new Vector3(0.012f, 0.024f, 0.0018f));
+                Primitive("Fallback blade guard", PrimitiveType.Cube, scalpelVisual.transform,
+                    new Vector3(0f, 0.029f, 0f), new Vector3(0.022f, 0.004f, 0.011f));
+            }
 
             dissectorVisual = new GameObject("Blunt dissector visual");
             dissectorVisual.transform.SetParent(tip, false);

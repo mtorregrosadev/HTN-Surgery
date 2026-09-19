@@ -126,15 +126,41 @@ namespace SurgePrep
             if (ShowcaseInput.Held(KeyCode.E)) raise -= 1f;
 
             var world = Vector3.zero;
+            var speedMm = movementSpeedMmPerSecond;
             if (camera != null)
             {
-                var right = Vector3.ProjectOnPlane(camera.transform.right, Vector3.up).normalized;
-                var forward = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up).normalized;
-                if (right.sqrMagnitude < 0.01f) right = Vector3.right;
-                if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
-                world = (right * horizontal + forward * vertical) * (movementSpeedMmPerSecond * 0.001f) * Time.unscaledDeltaTime;
+                var right = Vector3.ProjectOnPlane(camera.transform.right, Vector3.up);
+                var forward = Vector3.ProjectOnPlane(camera.transform.forward, Vector3.up);
+                if (right.sqrMagnitude < 0.04f)
+                {
+                    right = Vector3.Cross(Vector3.up, forward);
+                }
+                if (forward.sqrMagnitude < 0.04f)
+                {
+                    forward = Vector3.Cross(right, Vector3.up);
+                }
+                if (right.sqrMagnitude < 0.04f) right = Vector3.right;
+                if (forward.sqrMagnitude < 0.04f) forward = Vector3.forward;
+                right.Normalize();
+                forward.Normalize();
+                if (!IsFinite(right) || !IsFinite(forward))
+                {
+                    right = Vector3.right;
+                    forward = Vector3.forward;
+                }
+                var viewMetres = Vector3.Distance(
+                    camera.transform.position, new Vector3(0.12f, 1.05f, 0.04f)
+                );
+                speedMm = movementSpeedMmPerSecond * Mathf.Clamp(viewMetres / 0.72f, 1f, 6f);
+                world = (right * horizontal + forward * vertical)
+                    * (speedMm * CoordinateFrame.MillimetresToMetres)
+                    * Time.unscaledDeltaTime;
             }
             var api = CoordinateFrame.InverseDeltaMetres(world);
+            if (!IsFinite(api))
+            {
+                api = Vector3.zero;
+            }
             lock (stateLock)
             {
                 xMm += api.x;
@@ -143,10 +169,16 @@ namespace SurgePrep
                 // the subtle surgical field is carvable.
                 xMm = Mathf.Clamp(xMm, -150f, 150f);
                 zMm = Mathf.Clamp(zMm, -260f, 260f);
-                yMm += raise * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
+                yMm += raise * speedMm * Time.unscaledDeltaTime;
                 // Keyboard sandbox only. Calibrated hardware pose is not clamped
                 // here; SOFA contact, ribs, and the tissue volume stop the tool.
                 yMm = Mathf.Clamp(yMm, -80f, 40f);
+                if (!IsFinite(xMm) || !IsFinite(yMm) || !IsFinite(zMm))
+                {
+                    xMm = 0f;
+                    yMm = 12f;
+                    zMm = 0f;
+                }
                 if (ShowcaseInput.Pressed(KeyCode.Alpha1)) toolId = "scalpel";
                 if (ShowcaseInput.Pressed(KeyCode.Alpha2)) toolId = "blunt-dissector";
                 if (ShowcaseInput.Pressed(KeyCode.Alpha3)) toolId = "chest-tube";
@@ -314,6 +346,16 @@ namespace SurgePrep
                 }
             } while (!result.EndOfMessage);
             return Encoding.UTF8.GetString(buffer, 0, count);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
         }
 
         private async void OnDisable()

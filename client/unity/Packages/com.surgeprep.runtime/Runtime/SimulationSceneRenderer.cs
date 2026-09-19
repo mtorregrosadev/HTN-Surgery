@@ -116,6 +116,10 @@ namespace SurgePrep
                 "Dissector stop", PrimitiveType.Sphere, dissectorVisual.transform,
                 new Vector3(0f, 0.006f, 0f), Vector3.one * 0.011f
             );
+            Primitive(
+                "Dissector handle", PrimitiveType.Cylinder, dissectorVisual.transform,
+                new Vector3(0f, 0.078f, 0f), new Vector3(0.007f, 0.018f, 0.007f)
+            );
 
             tubeVisual = new GameObject("Chest tube visual");
             tubeVisual.transform.SetParent(tip, false);
@@ -123,18 +127,27 @@ namespace SurgePrep
                 "Training chest tube", PrimitiveType.Cylinder, tubeVisual.transform,
                 new Vector3(0f, 0.055f, 0f), new Vector3(0.0064f, 0.055f, 0.0064f)
             );
+            Primitive(
+                "Tube hub", PrimitiveType.Cylinder, tubeVisual.transform,
+                new Vector3(0f, 0.108f, 0f), new Vector3(0.0095f, 0.008f, 0.0095f)
+            );
+            Primitive(
+                "Tube stripe", PrimitiveType.Cylinder, tubeVisual.transform,
+                new Vector3(0f, 0.04f, 0f), new Vector3(0.007f, 0.004f, 0.007f)
+            );
 
             if (toolMaterial != null)
             {
-                foreach (var renderer in tip.GetComponentsInChildren<MeshRenderer>())
+                foreach (var meshRenderer in tip.GetComponentsInChildren<MeshRenderer>())
                 {
-                    if (renderer.sharedMaterial != null && renderer.sharedMaterial.name == "ScalpelBlade")
+                    if (meshRenderer.sharedMaterial != null && meshRenderer.sharedMaterial.name == "ScalpelBlade")
                     {
                         continue;
                     }
-                    renderer.sharedMaterial = toolMaterial;
+                    meshRenderer.sharedMaterial = toolMaterial;
                 }
             }
+            PaintTools();
             UpdateToolVisual("scalpel");
 
         }
@@ -155,6 +168,14 @@ namespace SurgePrep
                 new Vector3(0f, 0.072f, 0f), new Vector3(0.011f, 0.048f, 0.011f)
             );
             Primitive(
+                "Grip ring A", PrimitiveType.Cube, parent,
+                new Vector3(0f, 0.058f, 0f), new Vector3(0.0124f, 0.006f, 0.0124f)
+            );
+            Primitive(
+                "Grip ring B", PrimitiveType.Cube, parent,
+                new Vector3(0f, 0.086f, 0f), new Vector3(0.0124f, 0.006f, 0.0124f)
+            );
+            Primitive(
                 "Scalpel guard", PrimitiveType.Cube, parent,
                 new Vector3(0f, 0.032f, 0f), new Vector3(0.018f, 0.006f, 0.012f)
             );
@@ -168,10 +189,38 @@ namespace SurgePrep
                 var bladeMaterial = new Material(renderer.sharedMaterial)
                 {
                     name = "ScalpelBlade",
-                    color = new Color(0.82f, 0.84f, 0.86f)
+                    color = new Color(0.86f, 0.88f, 0.90f)
                 };
                 renderer.sharedMaterial = bladeMaterial;
             }
+        }
+
+        private void PaintTools()
+        {
+            PaintNamed(scalpelVisual, "Scalpel handle", new Color(0.93f, 0.78f, 0.12f));
+            PaintNamed(scalpelVisual, "Grip ring A", new Color(0.10f, 0.10f, 0.11f));
+            PaintNamed(scalpelVisual, "Grip ring B", new Color(0.10f, 0.10f, 0.11f));
+            PaintNamed(scalpelVisual, "Scalpel guard", new Color(0.12f, 0.12f, 0.13f));
+            PaintNamed(dissectorVisual, "Left blunt jaw", new Color(0.72f, 0.74f, 0.76f));
+            PaintNamed(dissectorVisual, "Right blunt jaw", new Color(0.72f, 0.74f, 0.76f));
+            PaintNamed(dissectorVisual, "Dissector stop", new Color(0.18f, 0.42f, 0.70f));
+            PaintNamed(dissectorVisual, "Dissector handle", new Color(0.18f, 0.42f, 0.70f));
+            PaintNamed(tubeVisual, "Training chest tube", new Color(0.82f, 0.62f, 0.28f));
+            PaintNamed(tubeVisual, "Tube hub", new Color(0.18f, 0.42f, 0.70f));
+            PaintNamed(tubeVisual, "Tube stripe", new Color(0.93f, 0.94f, 0.95f));
+        }
+
+        private static void PaintNamed(GameObject root, string childName, Color color)
+        {
+            if (root == null) return;
+            var child = root.transform.Find(childName);
+            if (child == null) return;
+            var meshRenderer = child.GetComponent<MeshRenderer>();
+            if (meshRenderer == null) return;
+            var source = meshRenderer.sharedMaterial;
+            if (source == null) return;
+            var painted = new Material(source) { color = color };
+            meshRenderer.sharedMaterial = painted;
         }
 
         private static GameObject Primitive(

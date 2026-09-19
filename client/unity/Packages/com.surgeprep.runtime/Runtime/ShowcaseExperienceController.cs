@@ -13,11 +13,16 @@ namespace SurgePrep
         [SerializeField] private GameObject boneLayer;
         [SerializeField] private GameObject cartilageLayer;
         [SerializeField] private GameObject diaphragmLayer;
-        [SerializeField] private float orbitSensitivity = 0.18f;
-        [SerializeField] private float zoomSensitivity = 0.09f;
-        [SerializeField] private float panSensitivity = 0.0018f;
+        [SerializeField] private float orbitSensitivity = 0.42f;
+        [SerializeField] private float zoomSensitivity = 0.22f;
+        [SerializeField] private float panSensitivity = 0.0045f;
         [SerializeField] private float presetSeconds = 0.85f;
         [SerializeField] private float introOrbitSeconds = 3.2f;
+        private const float MinOrbitDistance = 0.42f;
+        private const float MaxOrbitDistanceCap = 3.55f;
+        private static readonly Bounds RoomBounds = new Bounds(
+            new Vector3(0f, 1.52f, 0f), new Vector3(7.5f, 2.7f, 7.5f)
+        );
 
         private Vector3 focus;
         private Vector3 targetFocusPoint;
@@ -32,6 +37,9 @@ namespace SurgePrep
 
         private void Awake()
         {
+            orbitSensitivity = 0.42f;
+            zoomSensitivity = 0.22f;
+            panSensitivity = 0.0045f;
             if (sceneCamera == null)
             {
                 sceneCamera = Camera.main;
@@ -72,13 +80,20 @@ namespace SurgePrep
             var scroll = ShowcaseInput.MouseScroll();
             if (Mathf.Abs(scroll) > 0.001f)
             {
-                targetDistance = Mathf.Clamp(targetDistance - scroll * zoomSensitivity, 0.18f, 4.8f);
+                targetDistance = Mathf.Clamp(
+                    targetDistance - scroll * zoomSensitivity,
+                    MinOrbitDistance,
+                    AllowedOrbitDistance(targetFocusPoint, targetPitch, targetYaw)
+                );
+                distance = targetDistance;
             }
-            if (ShowcaseInput.RightMouseHeld())
+            if (ShowcaseInput.OrbitMouseHeld())
             {
                 var delta = ShowcaseInput.MouseDelta();
                 targetYaw += delta.x * orbitSensitivity;
                 targetPitch = Mathf.Clamp(targetPitch - delta.y * orbitSensitivity, 8f, 82f);
+                yaw = targetYaw;
+                pitch = targetPitch;
             }
             if (ShowcaseInput.MiddleMouseHeld())
             {
@@ -86,6 +101,8 @@ namespace SurgePrep
                 var right = sceneCamera.transform.right;
                 var up = Vector3.up;
                 targetFocusPoint -= (right * delta.x + up * delta.y) * panSensitivity * targetDistance;
+                targetFocusPoint = ClampInsideRoom(targetFocusPoint);
+                focus = targetFocusPoint;
             }
         }
 
@@ -94,8 +111,10 @@ namespace SurgePrep
             var amount = 1f - Mathf.Exp(-8f * Time.unscaledDeltaTime / Mathf.Max(0.12f, presetSeconds));
             yaw = Mathf.LerpAngle(yaw, targetYaw, amount);
             pitch = Mathf.Lerp(pitch, targetPitch, amount);
-            distance = Mathf.Lerp(distance, targetDistance, amount);
-            focus = Vector3.Lerp(focus, targetFocusPoint, amount);
+            focus = Vector3.Lerp(focus, ClampInsideRoom(targetFocusPoint), amount);
+            var maxDistance = AllowedOrbitDistance(focus, pitch, yaw);
+            targetDistance = Mathf.Clamp(targetDistance, MinOrbitDistance, maxDistance);
+            distance = Mathf.Clamp(Mathf.Lerp(distance, targetDistance, amount), MinOrbitDistance, maxDistance);
             ApplyCamera(false);
         }
 
@@ -122,7 +141,7 @@ namespace SurgePrep
             targetFocusPoint = targetFocus != null
                 ? targetFocus.position
                 : new Vector3(0.12f, 1.03f, 0.04f);
-            targetDistance = 0.26f;
+            targetDistance = 0.48f;
             targetYaw = 8f;
             targetPitch = 62f;
             if (snap) Snap();
@@ -141,8 +160,66 @@ namespace SurgePrep
             if (immediate) Snap();
             if (sceneCamera == null) return;
             var orbit = Quaternion.Euler(pitch, yaw, 0f);
-            sceneCamera.transform.position = focus + orbit * (Vector3.back * distance);
-            sceneCamera.transform.LookAt(focus, Vector3.up);
+            var maxDistance = AllowedOrbitDistance(focus, pitch, yaw);
+            distance = Mathf.Clamp(distance, MinOrbitDistance, maxDistance);
+            var position = ClampInsideRoom(focus + orbit * (Vector3.back * distance));
+            if (Vector3.Distance(position, focus) < MinOrbitDistance)
+            {
+                position = ClampInsideRoom(focus + orbit * (Vector3.back * MinOrbitDistance));
+            }
+            sceneCamera.transform.position = position;
+            var toFocus = focus - position;
+            if (toFocus.sqrMagnitude > 0.0001f)
+            {
+                var up = Vector3.up;
+                if (Mathf.Abs(Vector3.Dot(toFocus.normalized, up)) > 0.96f)
+                {
+                    up = Vector3.forward;
+                }
+                sceneCamera.transform.rotation = Quaternion.LookRotation(toFocus, up);
+            }
+        }
+
+        private static Vector3 ClampInsideRoom(Vector3 point)
+        {
+            return new Vector3(
+                Mathf.Clamp(point.x, RoomBounds.min.x, RoomBounds.max.x),
+                Mathf.Clamp(point.y, RoomBounds.min.y, RoomBounds.max.y),
+                Mathf.Clamp(point.z, RoomBounds.min.z, RoomBounds.max.z)
+            );
+        }
+
+        private static float AllowedOrbitDistance(Vector3 from, float pitchDeg, float yawDeg)
+        {
+            var dir = Quaternion.Euler(pitchDeg, yawDeg, 0f) * Vector3.back;
+            return Mathf.Clamp(ExitDistance(from, dir) - 0.12f, MinOrbitDistance, MaxOrbitDistanceCap);
+        }
+
+        private static float ExitDistance(Vector3 origin, Vector3 dir)
+        {
+            if (dir.sqrMagnitude < 0.000001f)
+            {
+                return MinOrbitDistance;
+            }
+            dir.Normalize();
+            var farthest = float.PositiveInfinity;
+            for (var axis = 0; axis < 3; axis++)
+            {
+                var step = dir[axis];
+                var start = origin[axis];
+                var min = RoomBounds.min[axis];
+                var max = RoomBounds.max[axis];
+                if (Mathf.Abs(step) < 0.000001f)
+                {
+                    if (start < min || start > max)
+                    {
+                        return MinOrbitDistance;
+                    }
+                    continue;
+                }
+                farthest = Mathf.Min(farthest, Mathf.Max((min - start) / step, (max - start) / step));
+            }
+            return float.IsInfinity(farthest) ? MinOrbitDistance : Mathf.Max(MinOrbitDistance, farthest);
         }
 
         private void ApplyCutaway()

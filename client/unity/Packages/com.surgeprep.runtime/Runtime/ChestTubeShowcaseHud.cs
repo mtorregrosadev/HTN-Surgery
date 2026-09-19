@@ -62,7 +62,7 @@ namespace SurgePrep
             if (snapshot != null && snapshot.simulationBackend == "sofa-native") sofaNative = true;
             if (snapshot != null && snapshot.simulationBackend == "memory-development-only") sofaNative = false;
 
-            var panel = new Rect(16, 16, 420, completed ? 560 : 458);
+            var panel = new Rect(16, 16, 420, completed ? 582 : 480);
             DrawRect(panel, new Color(0.07f, 0.1f, 0.14f, 0.94f));
             DrawRect(new Rect(panel.x, panel.y, 4, panel.height), new Color(0.2f, 0.55f, 0.72f));
 
@@ -130,8 +130,9 @@ namespace SurgePrep
             y += 6f;
             GUI.Label(new Rect(38, y, 380, 18), "Controls", labelStyle);
             y += 20f;
-            DrawRect(new Rect(38, y, 360, 168), new Color(0.05f, 0.07f, 0.1f, 0.8f));
+            DrawRect(new Rect(38, y, 360, 190), new Color(0.05f, 0.07f, 0.1f, 0.8f));
             y += 8f;
+            ControlLine(ref y, "Drag", "look around the bay");
             ControlLine(ref y, "W A S D", "move on the chest");
             ControlLine(ref y, "Q / E", "raise / lower the tool");
             ControlLine(ref y, "1 / 2 / 3", "scalpel / dissector / tube");

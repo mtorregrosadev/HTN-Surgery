@@ -31,37 +31,63 @@ namespace SurgePrep
 #endif
         }
 
+        public static bool LeftMouseHeld()
+        {
+            var held = false;
+#if ENABLE_INPUT_SYSTEM
+            held = Mouse.current != null && Mouse.current.leftButton.isPressed;
+#endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+            held = held || Input.GetMouseButton(0);
+#endif
+            return held;
+        }
+
         public static bool MiddleMouseHeld()
         {
+            var held = false;
 #if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null && Mouse.current.middleButton.isPressed;
-#elif ENABLE_LEGACY_INPUT_MANAGER
-            return Input.GetMouseButton(2);
-#else
-            return false;
+            held = Mouse.current != null && Mouse.current.middleButton.isPressed;
 #endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+            held = held || Input.GetMouseButton(2);
+#endif
+            return held;
         }
 
         public static bool RightMouseHeld()
         {
+            var held = false;
 #if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null && Mouse.current.rightButton.isPressed;
-#elif ENABLE_LEGACY_INPUT_MANAGER
-            return Input.GetMouseButton(1);
-#else
-            return false;
+            held = Mouse.current != null && Mouse.current.rightButton.isPressed;
 #endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+            held = held || Input.GetMouseButton(1);
+#endif
+            return held;
+        }
+
+        public static bool OrbitMouseHeld()
+        {
+            return LeftMouseHeld() || RightMouseHeld();
         }
 
         public static Vector2 MouseDelta()
         {
+            var delta = Vector2.zero;
 #if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null ? Mouse.current.delta.ReadValue() * 0.1f : Vector2.zero;
-#elif ENABLE_LEGACY_INPUT_MANAGER
-            return new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
-#else
-            return Vector2.zero;
+            if (Mouse.current != null)
+            {
+                delta = Mouse.current.delta.ReadValue();
+            }
 #endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (delta.sqrMagnitude < 0.0001f)
+            {
+                delta = new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y")) * 14f;
+            }
+#endif
+            return delta;
         }
 
         public static float MouseScroll()

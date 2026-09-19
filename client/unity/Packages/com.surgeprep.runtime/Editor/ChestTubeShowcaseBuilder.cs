@@ -147,21 +147,35 @@ namespace SurgePrep.Editor
             var steel = Material("Stainless", new Color(0.75f, 0.76f, 0.78f), 0.9f, 0.62f);
             var plastic = Material("ClinicalPlastic", new Color(0.9f, 0.91f, 0.92f), 0.05f, 0.4f);
             var rubber = Material("Rubber", new Color(0.12f, 0.12f, 0.13f), 0.0f, 0.18f);
-            var wall = Material("OrWall", new Color(0.86f, 0.88f, 0.9f), 0.0f, 0.22f);
-            var floor = Material("OrFloor", new Color(0.55f, 0.6f, 0.63f), 0.15f, 0.35f);
+            var wall = Material("OrWall", new Color(0.88f, 0.90f, 0.91f), 0.0f, 0.22f);
+            var floor = Material("OrFloor", new Color(0.48f, 0.54f, 0.56f), 0.12f, 0.32f);
             var mattress = Material("Mattress", new Color(0.93f, 0.93f, 0.94f), 0.0f, 0.2f);
+            var teal = Material("ErTeal", new Color(0.07f, 0.40f, 0.46f), 0.04f, 0.28f);
+            var yellow = Material("SafetyYellow", new Color(0.93f, 0.76f, 0.14f), 0.05f, 0.38f);
+            var crashRed = Material("CrashRed", new Color(0.70f, 0.13f, 0.16f), 0.08f, 0.3f);
+            var oxygen = Material("OxygenGreen", new Color(0.16f, 0.52f, 0.30f), 0.08f, 0.34f);
+            var linen = Material("HospitalLinen", new Color(0.80f, 0.88f, 0.90f), 0.0f, 0.2f);
+            var gloveBlue = Material("GloveBlue", new Color(0.25f, 0.48f, 0.72f), 0.04f, 0.28f);
+            var screen = EmissiveMaterial("MonitorGlow", new Color(0.12f, 0.48f, 0.38f));
+            var exitGlow = EmissiveMaterial("ExitGlow", new Color(0.15f, 0.78f, 0.32f));
+            var scalpelYellow = Material("ScalpelHandle", new Color(0.93f, 0.78f, 0.12f), 0.05f, 0.4f);
+            var dissectorBlue = Material("DissectorHandle", new Color(0.18f, 0.42f, 0.70f), 0.05f, 0.35f);
+            var tubeAmber = Material("ChestTubeAmber", new Color(0.82f, 0.62f, 0.28f), 0.08f, 0.45f);
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            RenderSettings.ambientLight = new Color(0.22f, 0.24f, 0.27f);
+            RenderSettings.ambientLight = new Color(0.24f, 0.25f, 0.26f);
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.32f, 0.35f, 0.39f);
-            RenderSettings.ambientEquatorColor = new Color(0.22f, 0.24f, 0.27f);
-            RenderSettings.ambientGroundColor = new Color(0.1f, 0.11f, 0.13f);
+            RenderSettings.ambientSkyColor = new Color(0.36f, 0.38f, 0.40f);
+            RenderSettings.ambientEquatorColor = new Color(0.24f, 0.26f, 0.27f);
+            RenderSettings.ambientGroundColor = new Color(0.12f, 0.12f, 0.13f);
             RenderSettings.fog = false;
             RenderSettings.fogColor = new Color(0.72f, 0.75f, 0.78f);
             RenderSettings.fogDensity = 0.012f;
 
-            var room = CreateOperatingRoom(wall, floor, metal, steel, plastic, rubber, mattress, drape);
+            var room = CreateOperatingRoom(
+                wall, floor, metal, steel, plastic, rubber, mattress, drape,
+                teal, yellow, crashRed, oxygen, linen, gloveBlue, screen, exitGlow
+            );
             var tableTop = room.transform.Find("RegistrationAnchor_Table");
 
             var anatomy = new GameObject("Supine BodyParts3D training anatomy");
@@ -231,7 +245,7 @@ namespace SurgePrep.Editor
             SetObject(manualDemo, "sceneRenderer", renderer);
             SetObject(hud, "sceneRenderer", renderer);
             SetObject(hud, "manualDemo", manualDemo);
-            CreateInstrumentHome(room.transform, tool);
+            CreateInstrumentHome(room.transform, steel, scalpelYellow, dissectorBlue, tubeAmber);
 
             var camera = CreateCamera();
             CreateLighting(window.transform);
@@ -263,18 +277,28 @@ namespace SurgePrep.Editor
 
         private static GameObject CreateOperatingRoom(
             Material wall, Material floor, Material metal, Material steel,
-            Material plastic, Material rubber, Material mattress, Material drape
+            Material plastic, Material rubber, Material mattress, Material drape,
+            Material teal, Material yellow, Material crashRed, Material oxygen,
+            Material linen, Material gloveBlue, Material screen, Material exitGlow
         )
         {
-            var room = new GameObject("Modern Operating Room");
+            var room = new GameObject("Emergency bay");
             Cube("Floor", room.transform, new Vector3(0f, 0f, 0f), new Vector3(8f, 0.08f, 8f), floor);
+            Cube("Aisle stripe", room.transform, new Vector3(1.65f, 0.045f, 0f), new Vector3(0.12f, 0.01f, 6.4f), yellow);
+            Cube("Vinyl inset", room.transform, new Vector3(0f, 0.042f, 0f), new Vector3(2.4f, 0.008f, 3.2f), plastic);
             Cube("Ceiling", room.transform, new Vector3(0f, 3.05f, 0f), new Vector3(8f, 0.08f, 8f), wall);
             Cube("Back wall", room.transform, new Vector3(0f, 1.5f, -4f), new Vector3(8f, 3f, 0.1f), wall);
             Cube("Front wall", room.transform, new Vector3(0f, 1.5f, 4f), new Vector3(8f, 3f, 0.1f), wall);
             Cube("Left wall", room.transform, new Vector3(-4f, 1.5f, 0f), new Vector3(0.1f, 3f, 8f), wall);
             Cube("Right wall", room.transform, new Vector3(4f, 1.5f, 0f), new Vector3(0.1f, 3f, 8f), wall);
-            Cube("Wall panel", room.transform, new Vector3(-3.9f, 1.4f, 0f), new Vector3(0.04f, 1.6f, 2.4f), plastic);
+            Cube("Teal dado L", room.transform, new Vector3(-3.94f, 0.72f, 0f), new Vector3(0.04f, 1.28f, 7.6f), teal);
+            Cube("Teal dado R", room.transform, new Vector3(3.94f, 0.72f, 0f), new Vector3(0.04f, 1.28f, 7.6f), teal);
+            Cube("Crash rail L", room.transform, new Vector3(-3.91f, 0.42f, 0f), new Vector3(0.05f, 0.08f, 7.4f), yellow);
+            Cube("Crash rail R", room.transform, new Vector3(3.91f, 0.42f, 0f), new Vector3(0.05f, 0.08f, 7.4f), yellow);
             Cube("Outlet bank", room.transform, new Vector3(-3.88f, 0.9f, 1.4f), new Vector3(0.04f, 0.18f, 0.4f), metal);
+            Cube("O2 port", room.transform, new Vector3(-3.86f, 0.9f, 1.28f), new Vector3(0.03f, 0.05f, 0.05f), oxygen);
+            Cube("Air port", room.transform, new Vector3(-3.86f, 0.9f, 1.4f), new Vector3(0.03f, 0.05f, 0.05f), yellow);
+            Cube("Vac port", room.transform, new Vector3(-3.86f, 0.9f, 1.52f), new Vector3(0.03f, 0.05f, 0.05f), plastic);
 
             var table = new GameObject("RegistrationAnchor_Table");
             table.transform.SetParent(room.transform, false);
@@ -292,11 +316,79 @@ namespace SurgePrep.Editor
             Cube("Trolley leg B", room.transform, new Vector3(1.35f, 0.35f, 0.5f), new Vector3(0.04f, 0.7f, 0.04f), metal);
             Cube("Anesthesia cart", room.transform, new Vector3(-1.35f, 0.7f, -0.4f), new Vector3(0.5f, 1.2f, 0.42f), plastic);
             Cube("Monitor", room.transform, new Vector3(-1.15f, 1.55f, -0.15f), new Vector3(0.42f, 0.28f, 0.06f), metal);
-            Cube("Monitor screen", room.transform, new Vector3(-1.15f, 1.55f, -0.12f), new Vector3(0.38f, 0.24f, 0.01f), rubber);
+            Cube("Monitor screen", room.transform, new Vector3(-1.15f, 1.55f, -0.12f), new Vector3(0.38f, 0.24f, 0.01f), screen);
             Cube("Cabinet", room.transform, new Vector3(3.4f, 0.9f, -2.4f), new Vector3(0.9f, 1.8f, 1.4f), wall);
             Cube("Work surface", room.transform, new Vector3(2.4f, 0.9f, -3.4f), new Vector3(1.8f, 0.06f, 0.55f), steel);
             Cube("Boom arm", room.transform, new Vector3(0.2f, 2.55f, 0.1f), new Vector3(1.8f, 0.05f, 0.05f), metal);
+            DressEmergencyBay(
+                room.transform, metal, steel, plastic, rubber, teal, yellow,
+                crashRed, oxygen, linen, gloveBlue, drape, exitGlow
+            );
             return room;
+        }
+
+        private static void DressEmergencyBay(
+            Transform room, Material metal, Material steel, Material plastic,
+            Material rubber, Material teal, Material yellow, Material crashRed,
+            Material oxygen, Material linen, Material gloveBlue, Material drape,
+            Material exitGlow
+        )
+        {
+            Cube("Crash cart body", room, new Vector3(-2.35f, 0.62f, 1.15f), new Vector3(0.48f, 1.05f, 0.62f), crashRed);
+            Cube("Crash cart stripe", room, new Vector3(-2.35f, 1.08f, 1.15f), new Vector3(0.50f, 0.04f, 0.64f), yellow);
+            Cube("Crash drawer 1", room, new Vector3(-2.10f, 0.88f, 1.15f), new Vector3(0.02f, 0.12f, 0.52f), steel);
+            Cube("Crash drawer 2", room, new Vector3(-2.10f, 0.68f, 1.15f), new Vector3(0.02f, 0.12f, 0.52f), steel);
+            Cube("Crash drawer 3", room, new Vector3(-2.10f, 0.48f, 1.15f), new Vector3(0.02f, 0.12f, 0.52f), yellow);
+            Cube("Defibrillator", room, new Vector3(-2.35f, 1.22f, 1.15f), new Vector3(0.28f, 0.12f, 0.36f), rubber);
+            Cube("Defib paddle L", room, new Vector3(-2.46f, 1.30f, 1.02f), new Vector3(0.08f, 0.04f, 0.12f), yellow);
+            Cube("Defib paddle R", room, new Vector3(-2.24f, 1.30f, 1.28f), new Vector3(0.08f, 0.04f, 0.12f), yellow);
+
+            Capsule(
+                "IV pole", room, new Vector3(-1.85f, 1.15f, 0.55f),
+                new Vector3(0.03f, 1.05f, 0.03f), Quaternion.identity, steel
+            );
+            Cube("IV hook", room, new Vector3(-1.85f, 2.18f, 0.55f), new Vector3(0.28f, 0.02f, 0.02f), steel);
+            Cube("IV bag", room, new Vector3(-1.72f, 1.92f, 0.55f), new Vector3(0.10f, 0.22f, 0.04f), linen);
+            Cube("IV drip", room, new Vector3(-1.72f, 1.78f, 0.55f), new Vector3(0.03f, 0.06f, 0.03f), oxygen);
+
+            Cube("Curtain rail", room, new Vector3(2.35f, 2.42f, 2.35f), new Vector3(2.4f, 0.03f, 0.04f), metal);
+            var curtain = ClothPanel(
+                "Privacy curtain", room, new Vector3(2.35f, 1.55f, 2.35f),
+                new Vector2(2.2f, 1.7f), 0.05f, drape, 1.4f
+            );
+            curtain.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
+            Cube("Biohazard bin", room, new Vector3(1.55f, 0.28f, -0.55f), new Vector3(0.28f, 0.42f, 0.28f), crashRed);
+            Cube("Biohazard lid", room, new Vector3(1.55f, 0.50f, -0.55f), new Vector3(0.30f, 0.04f, 0.30f), yellow);
+            Cube("Sharps container", room, new Vector3(1.42f, 0.86f, 0.18f), new Vector3(0.12f, 0.18f, 0.10f), yellow);
+            Cube("Sharps lid", room, new Vector3(1.42f, 0.96f, 0.18f), new Vector3(0.13f, 0.02f, 0.11f), rubber);
+
+            Cube("Linen hamper", room, new Vector3(2.85f, 0.38f, 0.85f), new Vector3(0.42f, 0.62f, 0.42f), teal);
+            Cube("Linen bag", room, new Vector3(2.85f, 0.62f, 0.85f), new Vector3(0.38f, 0.22f, 0.38f), linen);
+
+            Cube("Glove box blue", room, new Vector3(-3.82f, 1.22f, 0.55f), new Vector3(0.08f, 0.12f, 0.22f), gloveBlue);
+            Cube("Glove box yellow", room, new Vector3(-3.82f, 1.22f, 0.80f), new Vector3(0.08f, 0.12f, 0.22f), yellow);
+            Cube("Glove box white", room, new Vector3(-3.82f, 1.22f, 0.30f), new Vector3(0.08f, 0.12f, 0.22f), plastic);
+
+            Cube("Stool base", room, new Vector3(0.95f, 0.08f, -0.55f), new Vector3(0.32f, 0.04f, 0.32f), steel);
+            Capsule(
+                "Stool column", room, new Vector3(0.95f, 0.28f, -0.55f),
+                new Vector3(0.05f, 0.22f, 0.05f), Quaternion.identity, metal
+            );
+            Cube("Stool seat", room, new Vector3(0.95f, 0.50f, -0.55f), new Vector3(0.34f, 0.05f, 0.34f), teal);
+
+            Cube("Extinguisher", room, new Vector3(3.78f, 0.72f, 2.6f), new Vector3(0.12f, 0.55f, 0.12f), crashRed);
+            Cube("Extinguisher band", room, new Vector3(3.78f, 0.92f, 2.6f), new Vector3(0.13f, 0.04f, 0.13f), yellow);
+            Cube("Extinguisher head", room, new Vector3(3.78f, 1.02f, 2.6f), new Vector3(0.08f, 0.08f, 0.08f), steel);
+
+            Cube("Exit sign", room, new Vector3(-0.1f, 2.62f, 3.88f), new Vector3(0.42f, 0.16f, 0.04f), exitGlow);
+            Cube("Chart board", room, new Vector3(3.88f, 1.55f, -0.4f), new Vector3(0.03f, 0.55f, 0.70f), plastic);
+            Cube("Chart stripe", room, new Vector3(3.86f, 1.78f, -0.4f), new Vector3(0.02f, 0.06f, 0.70f), teal);
+            Cube("Supply bin teal", room, new Vector3(2.55f, 1.02f, -3.22f), new Vector3(0.28f, 0.16f, 0.22f), teal);
+            Cube("Supply bin yellow", room, new Vector3(2.90f, 1.02f, -3.22f), new Vector3(0.28f, 0.16f, 0.22f), yellow);
+            Cube("Lamp disc A", room, new Vector3(0.35f, 2.48f, 0.22f), new Vector3(0.42f, 0.04f, 0.42f), steel);
+            Cube("Lamp disc B", room, new Vector3(-0.15f, 2.48f, 0.05f), new Vector3(0.34f, 0.04f, 0.34f), metal);
+            Cube("Cart accent", room, new Vector3(-1.35f, 1.18f, -0.4f), new Vector3(0.52f, 0.04f, 0.44f), teal);
         }
 
         private static void CreateModestyCover(Transform table, Material drape)
@@ -310,18 +402,25 @@ namespace SurgePrep.Editor
             );
         }
 
-        private static void CreateInstrumentHome(Transform parent, Material tool)
+        private static void CreateInstrumentHome(
+            Transform parent, Material steel, Material scalpelYellow,
+            Material dissectorBlue, Material tubeAmber
+        )
         {
             var home = new GameObject("RegistrationAnchor_InstrumentHome");
             home.transform.SetParent(parent, false);
             home.transform.localPosition = new Vector3(1.15f, 0.77f, 0.35f);
-            Cube("Tray scalpel", home.transform, new Vector3(-0.12f, 0.02f, 0f), new Vector3(0.18f, 0.012f, 0.025f), tool);
-            Cube("Tray dissector", home.transform, new Vector3(0.08f, 0.02f, 0f), new Vector3(0.18f, 0.012f, 0.025f), tool);
+            Cube("Tray", home.transform, new Vector3(0f, 0f, 0.02f), new Vector3(0.46f, 0.01f, 0.28f), steel);
+            Cube("Tray scalpel handle", home.transform, new Vector3(-0.14f, 0.018f, -0.04f), new Vector3(0.12f, 0.014f, 0.022f), scalpelYellow);
+            Cube("Tray scalpel blade", home.transform, new Vector3(-0.04f, 0.016f, -0.04f), new Vector3(0.08f, 0.006f, 0.014f), steel);
+            Cube("Tray dissector", home.transform, new Vector3(0.10f, 0.018f, -0.04f), new Vector3(0.16f, 0.014f, 0.022f), dissectorBlue);
+            Cube("Tray dissector tip", home.transform, new Vector3(0.20f, 0.016f, -0.04f), new Vector3(0.04f, 0.008f, 0.012f), steel);
             Capsule(
                 "Tray tube", home.transform,
-                new Vector3(0f, 0.025f, 0.10f), new Vector3(0.025f, 0.20f, 0.025f),
-                Quaternion.Euler(0f, 0f, 90f), tool
+                new Vector3(-0.02f, 0.022f, 0.08f), new Vector3(0.018f, 0.16f, 0.018f),
+                Quaternion.Euler(0f, 0f, 90f), tubeAmber
             );
+            Cube("Tray tube hub", home.transform, new Vector3(0.14f, 0.022f, 0.08f), new Vector3(0.03f, 0.028f, 0.028f), dissectorBlue);
         }
 
         private static Camera CreateCamera()
@@ -330,7 +429,7 @@ namespace SurgePrep.Editor
             cameraObject.tag = "MainCamera";
             var camera = cameraObject.AddComponent<Camera>();
             camera.clearFlags = CameraClearFlags.Skybox;
-            camera.backgroundColor = new Color(0.62f, 0.66f, 0.7f);
+            camera.backgroundColor = new Color(0.58f, 0.64f, 0.66f);
             camera.fieldOfView = 42f;
             camera.nearClipPlane = 0.02f;
             camera.farClipPlane = 18f;
@@ -350,10 +449,10 @@ namespace SurgePrep.Editor
             var key = new GameObject("Surgical lamp A");
             var keyLight = key.AddComponent<Light>();
             keyLight.type = LightType.Spot;
-            keyLight.intensity = 1.35f;
+            keyLight.intensity = 1.42f;
             keyLight.range = 6f;
             keyLight.spotAngle = 42f;
-            keyLight.color = new Color(0.98f, 0.97f, 0.94f);
+            keyLight.color = new Color(1f, 0.96f, 0.88f);
             keyLight.shadows = LightShadows.Soft;
             key.transform.position = window.position + new Vector3(0.15f, 1.35f, 0.35f);
             key.transform.LookAt(window.position);
@@ -361,10 +460,10 @@ namespace SurgePrep.Editor
             var lampB = new GameObject("Surgical lamp B");
             var fill = lampB.AddComponent<Light>();
             fill.type = LightType.Spot;
-            fill.intensity = 0.85f;
+            fill.intensity = 0.88f;
             fill.range = 6f;
             fill.spotAngle = 48f;
-            fill.color = new Color(0.95f, 0.96f, 1f);
+            fill.color = new Color(0.90f, 0.95f, 1f);
             fill.shadows = LightShadows.Soft;
             lampB.transform.position = window.position + new Vector3(-0.45f, 1.4f, 0.2f);
             lampB.transform.LookAt(window.position);
@@ -372,8 +471,17 @@ namespace SurgePrep.Editor
             var ambient = new GameObject("OR ambient");
             var ambientLight = ambient.AddComponent<Light>();
             ambientLight.type = LightType.Directional;
-            ambientLight.intensity = 0.22f;
-            ambientLight.color = new Color(0.82f, 0.86f, 0.9f);
+            ambientLight.intensity = 0.28f;
+            ambientLight.color = new Color(0.86f, 0.88f, 0.90f);
+
+            var wash = new GameObject("Bay wash");
+            var washLight = wash.AddComponent<Light>();
+            washLight.type = LightType.Point;
+            washLight.intensity = 0.55f;
+            washLight.range = 8f;
+            washLight.color = new Color(0.72f, 0.88f, 0.86f);
+            washLight.shadows = LightShadows.None;
+            wash.transform.position = new Vector3(0.4f, 2.4f, 1.2f);
             ambientLight.shadows = LightShadows.Soft;
             ambient.transform.rotation = Quaternion.Euler(50f, -20f, 0f);
         }

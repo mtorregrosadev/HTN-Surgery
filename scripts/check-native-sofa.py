@@ -104,28 +104,50 @@ def smoke_test() -> None:
     spec_ns: dict = {}
     exec(scene_path.read_text(), spec_ns)
     root = Sofa.Core.Node("smoke")
-    # Loading and initializing the real CarvingManager verifies SofaCarving.
-    # Keep it inactive while gravity drives the FEM smoke test: activating
-    # carving while the tool is teleported into tissue can crash native SOFA.
+    # First verify stable constraint contact and solver-derived deformation.
     spec_ns["createScene"](root, carving_active=False)
-    root.gravity = [0.0, -9810.0, 0.0]
     Sofa.Simulation.init(root)
-    root.tool.dofs.position.value = [[0.0, -1.2, 0.0, 0.0, 0.0, 0.0, 1.0]]
-    for _ in range(12):
+    rest = [list(point) for point in root.tissue.dofs.rest_position.value]
+    root.tool.dofs.position.value = [[0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 1.0]]
+    for _ in range(3):
         Sofa.Simulation.animate(root, 0.01)
-    skin = root.skin.dofs.position.value
-    rest = root.skin.dofs.rest_position.value
+    for y_mm in (2.5, 1.8, 1.0, 0.0):
+        root.tool.dofs.position.value = [
+            [0.0, y_mm, 0.0, 0.0, 0.0, 0.0, 1.0]
+        ]
+        for _ in range(4):
+            Sofa.Simulation.animate(root, 0.01)
+    current = root.tissue.dofs.position.value
     deformation = max(
-        sum((float(point[i]) - float(rest[i])) ** 2 for i in range(3)) ** 0.5
-        for point, rest in zip(skin, rest)
+        sum((float(point[i]) - rest_point[i]) ** 2 for i in range(3)) ** 0.5
+        for point, rest_point in zip(current, rest)
     )
-    has_carving = root.getObject("CarvingManager") is not None
+    reaction_n = abs(
+        sum(float(force[1]) for force in root.tissue.dofs.getData("lambda").value)
+    )
+    constraint_count = len(root.contactSolver.constraintForces.value)
+
+    # Then verify that the exact mapped tetrahedral topology used by the API
+    # can be carved without corrupting or crashing the graph.
+    before = len(root.tissue.topology.tetrahedra.value)
+    root.carvingManager.active.value = True
+    for x_mm in range(-10, 11, 2):
+        root.tool.dofs.position.value = [
+            [float(x_mm), -1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+        ]
+        Sofa.Simulation.animate(root, 0.01)
+    after = len(root.tissue.topology.tetrahedra.value)
     Sofa.Simulation.unload(root)
-    if not has_carving:
-        fail("CarvingManager was not created.")
-    if deformation <= 0.0:
-        fail("Headless smoke test did not produce skin deformation.")
-    print(f"Headless deformation-and-carving smoke test passed ({deformation:.3f} mm).")
+    if deformation < 0.5:
+        fail(f"SOFA contact deformation was too small ({deformation:.3f} mm).")
+    if reaction_n <= 0.0 or constraint_count == 0:
+        fail("SOFA did not produce solver-derived contact force.")
+    if after >= before:
+        fail("SofaCarving did not remove tetrahedra from the mapped tissue topology.")
+    print(
+        "Headless contact/deformation/carving smoke test passed "
+        f"({deformation:.3f} mm, {reaction_n:.3f} N, {before-after} tetrahedra removed)."
+    )
 
 
 def print_exports(root: Path) -> None:

@@ -1,19 +1,25 @@
-"""Native SOFA scene for the localized chest-tube training region.
+#!/usr/bin/env python3
+"""Headless native-SOFA probe for deformable tool contact and force extraction."""
 
-The region uses one connected tetrahedral continuum so contact propagates
-through its full 16 mm depth. The mapped triangle boundary is simultaneously
-the collision surface and the topology updated by SofaCarving. Coordinates are
-millimetres; elastic modulus is N/mm² (MPa), and reported contact lambda is N.
-"""
+from __future__ import annotations
 
-PATCH_HALF_MM = 40.0
-PATCH_DEPTH_MM = 16.0
-GRID_RESOLUTION = [13, 7, 13]
-TISSUE_YOUNG_MODULUS_MPA = 0.35
-TISSUE_POISSON_RATIO = 0.45
+import argparse
+import importlib.util
+from pathlib import Path
 
 
-def createScene(root, carving_active=False):
+def configure_sofa() -> None:
+    checker_path = Path(__file__).with_name("check-native-sofa.py")
+    spec = importlib.util.spec_from_file_location("check_native_sofa", checker_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load {checker_path}")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    checker.configure_paths(checker.find_sofa_root())
+    checker.import_plugins()
+
+
+def create_scene(root):
     root.dt = 0.01
     root.gravity = [0.0, 0.0, 0.0]
     root.addObject(
@@ -50,7 +56,7 @@ def createScene(root, carving_active=False):
         tolerance=1e-7,
         computeConstraintForces=True,
     )
-    root.addObject("CollisionPipeline", verbose=False)
+    root.addObject("CollisionPipeline")
     root.addObject("BruteForceBroadPhase")
     root.addObject("BVHNarrowPhase", name="narrowPhase")
     root.addObject(
@@ -65,15 +71,13 @@ def createScene(root, carving_active=False):
         responseParams="mu=0.05",
     )
 
-    # Generate a regular hexahedral lattice, then use SOFA's supported
-    # Hexa2Tetra mapping so dynamic tetra removal updates downstream topology.
     source = root.addChild("topologySource")
     source.addObject(
         "RegularGridTopology",
         name="hexaGrid",
-        n=GRID_RESOLUTION,
-        min=[-PATCH_HALF_MM, -PATCH_DEPTH_MM, -PATCH_HALF_MM],
-        max=[PATCH_HALF_MM, 0.0, PATCH_HALF_MM],
+        n=[11, 4, 11],
+        min=[-40.0, -16.0, -40.0],
+        max=[40.0, 0.0, 40.0],
     )
     tetra_source = source.addChild("tetraSource")
     tetra_source.addObject(
@@ -116,14 +120,7 @@ def createScene(root, carving_active=False):
     tissue.addObject(
         "BoxROI",
         name="fixedBottom",
-        box=[
-            -PATCH_HALF_MM - 1.0,
-            -PATCH_DEPTH_MM - 1.0,
-            -PATCH_HALF_MM - 1.0,
-            PATCH_HALF_MM + 1.0,
-            -PATCH_DEPTH_MM + 0.5,
-            PATCH_HALF_MM + 1.0,
-        ],
+        box=[-41.0, -17.0, -41.0, 41.0, -15.5, 41.0],
     )
     tissue.addObject(
         "FixedProjectiveConstraint",
@@ -132,8 +129,8 @@ def createScene(root, carving_active=False):
     tissue.addObject(
         "TetrahedralCorotationalFEMForceField",
         name="fem",
-        youngModulus=TISSUE_YOUNG_MODULUS_MPA,
-        poissonRatio=TISSUE_POISSON_RATIO,
+        youngModulus=0.35,
+        poissonRatio=0.45,
         method="large",
     )
     tissue.addObject("LinearSolverConstraintCorrection")
@@ -165,7 +162,7 @@ def createScene(root, carving_active=False):
         "MechanicalObject",
         template="Rigid3d",
         name="dofs",
-        position=[[0.0, 18.0, 0.0, 0.0, 0.0, 0.0, 1.0]],
+        position=[[0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 1.0]],
     )
     collision = tool.addChild("collision")
     collision.addObject(
@@ -177,19 +174,72 @@ def createScene(root, carving_active=False):
     collision.addObject(
         "SphereCollisionModel",
         name="sphere",
-        radius=1.6,
+        radius=2.0,
         simulated=False,
         moving=True,
         tags="CarvingTool",
     )
     collision.addObject("RigidMapping", input="@../dofs", output="@particle")
-
     root.addObject(
         "CarvingManager",
         name="carvingManager",
-        active=carving_active,
+        active=False,
         carvingDistance=-0.05,
         narrowPhaseDetection="@narrowPhase",
         toolModel="@tool/collision/sphere",
     )
     return root
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--carve", action="store_true")
+    args = parser.parse_args()
+    configure_sofa()
+    import Sofa
+    import Sofa.Simulation
+
+    root = Sofa.Core.Node("contact_probe")
+    create_scene(root)
+    Sofa.Simulation.init(root)
+    surface_positions = root.tissue.surface.topology.position.value
+    surface_triangles = root.tissue.surface.topology.triangles.value
+    print(
+        f"surface topology: vertices={len(surface_positions)} "
+        f"triangles={len(surface_triangles)}"
+    )
+    rest = [list(point) for point in root.tissue.dofs.rest_position.value]
+    for tool_y in [5.0, 2.5, 1.8, 1.0, 0.0, -1.0, 5.0]:
+        root.tool.dofs.position.value = [
+            [0.0, tool_y, 0.0, 0.0, 0.0, 0.0, 1.0]
+        ]
+        for _ in range(12):
+            Sofa.Simulation.animate(root, 0.01)
+        current = root.tissue.dofs.position.value
+        deformation = max(
+            sum((float(point[index]) - rest_i[index]) ** 2 for index in range(3)) ** 0.5
+            for point, rest_i in zip(current, rest)
+        )
+        nodal_contact = root.tissue.dofs.getData("lambda").value
+        reaction_y = abs(sum(float(force[1]) for force in nodal_contact))
+        constraints = root.contactSolver.constraintForces.value
+        print(
+            f"toolY={tool_y:5.1f} mm  deformation={deformation:8.4f} mm  "
+            f"reactionY={reaction_y:10.6f}  constraints={len(constraints)}"
+        )
+    if args.carve:
+        before = len(root.tissue.topology.tetrahedra.value)
+        root.carvingManager.active.value = True
+        for tool_x in range(-12, 13, 2):
+            root.tool.dofs.position.value = [
+                [float(tool_x), -1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+            ]
+            for _ in range(3):
+                Sofa.Simulation.animate(root, 0.01)
+        after = len(root.tissue.topology.tetrahedra.value)
+        print(f"carving tetrahedra: before={before} after={after} removed={before-after}")
+    Sofa.Simulation.unload(root)
+
+
+if __name__ == "__main__":
+    main()

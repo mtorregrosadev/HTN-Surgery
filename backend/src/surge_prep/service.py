@@ -78,6 +78,9 @@ class TrainingService:
         last = self._last_valid.get(session_id)
         unhealthy = not sample.source_healthy or sample.quality < 0.2
         degraded = False
+        recovered = False
+        was_frozen = self._frozen.get(session_id, False)
+        gap = 0
         if last is not None:
             gap = sample.timestamp_ms - last.timestamp_ms
             if gap > DEGRADE_TIMEOUT_MS:
@@ -86,8 +89,13 @@ class TrainingService:
         if unhealthy and last is not None and not self._frozen.get(session_id):
             sample = last.model_copy(update={"sequence": sample.sequence, "timestamp_ms": sample.timestamp_ms})
         elif self._frozen.get(session_id) and last is not None:
-            sample = last.model_copy(update={"sequence": sample.sequence, "timestamp_ms": sample.timestamp_ms})
-            degraded = True
+            if was_frozen and not unhealthy and gap <= DEGRADE_TIMEOUT_MS:
+                self._frozen[session_id] = False
+                degraded = False
+                recovered = True
+            else:
+                sample = last.model_copy(update={"sequence": sample.sequence, "timestamp_ms": sample.timestamp_ms})
+                degraded = True
 
         sample.received_at_ms = int(time.time() * 1000)
         snapshot = await self.simulator.step(sample)
@@ -96,6 +104,8 @@ class TrainingService:
             snapshot.procedure_stage = "degraded"
             if "session-degraded" not in snapshot.events:
                 snapshot.events = [*snapshot.events, "session-degraded"]
+        elif recovered:
+            snapshot.events = [*snapshot.events, "session-recovered"]
         if not unhealthy:
             self._last_valid[session_id] = sample
         session.last_sequence = sample.sequence

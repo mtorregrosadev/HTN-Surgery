@@ -42,7 +42,6 @@ namespace SurgePrep
         private string sessionId;
         private Stopwatch clock;
         private float resetArmedUntil;
-        private bool frozen;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
         public string SessionId => sessionId;
@@ -98,8 +97,7 @@ namespace SurgePrep
                 }
                 if (snapshot.sessionDegraded)
                 {
-                    frozen = true;
-                    Status = "SOFA session degraded";
+                    Status = "SOFA stream recovering…";
                 }
                 sceneRenderer.SetTarget(snapshot);
             }
@@ -132,6 +130,8 @@ namespace SurgePrep
             {
                 xMm += api.x;
                 zMm += api.z;
+                xMm = Mathf.Clamp(xMm, -36f, 36f);
+                zMm = Mathf.Clamp(zMm, -36f, 36f);
                 yMm += raise * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
                 // The localized FEM volume ends at -16 mm. Keep the collision
                 // tool above its fixed boundary to prevent invalid inversion.
@@ -147,7 +147,6 @@ namespace SurgePrep
                         yMm = 12f;
                         zMm = 0f;
                         toolId = "scalpel";
-                        frozen = false;
                         resetArmedUntil = 0f;
                         Status = "Attempt reset";
                     }
@@ -261,7 +260,7 @@ namespace SurgePrep
             lock (stateLock)
             {
                 sampleX = xMm;
-                sampleY = frozen ? yMm : yMm;
+                sampleY = yMm;
                 sampleZ = zMm;
                 sampleTool = toolId;
             }
@@ -278,8 +277,8 @@ namespace SurgePrep
                 orientation = new QuaternionDto { qx = 0f, qy = 0f, qz = 0f, qw = 1f },
                 forceN = 0f,
                 contact = false,
-                quality = frozen ? 0.1f : 1f,
-                sourceHealthy = !frozen,
+                quality = 1f,
+                sourceHealthy = true,
                 inputMode = "pose-only",
                 forceMeasurementValid = false
             };

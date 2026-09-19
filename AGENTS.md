@@ -1,5 +1,7 @@
 # AGENTS.md
 
+## MAKE FREQUENT COMMIS AND KEEP THE COMMIT MESSAGE CLEAN ENGLISH AND EASY TO UNDERSTAND THE FIX 
+
 ## Mission
 
 Build **Surge Prep**, a safe physical-digital surgical-skills training prototype. The required live loop is **VR/XR <-> client <-> Scalpel controller <-> Go/Python API <-> SOFA**, with the **embedded/hardware subsystem connected to the controller** and MongoDB connected only to the API. SOFA is the authoritative dynamic 3D simulation, not an offline processor or static-asset source. The system records an attempt, calculates objective metrics, supports replay, and produces rubric-grounded coaching.

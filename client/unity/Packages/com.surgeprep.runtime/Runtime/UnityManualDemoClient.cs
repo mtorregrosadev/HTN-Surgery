@@ -133,7 +133,9 @@ namespace SurgePrep
                 xMm += api.x;
                 zMm += api.z;
                 yMm += raise * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
-                yMm = Mathf.Clamp(yMm, -16f, 28f);
+                // The localized FEM volume ends at -16 mm. Keep the collision
+                // tool above its fixed boundary to prevent invalid inversion.
+                yMm = Mathf.Clamp(yMm, -14f, 28f);
                 if (ShowcaseInput.Pressed(KeyCode.Alpha1)) toolId = "scalpel";
                 if (ShowcaseInput.Pressed(KeyCode.Alpha2)) toolId = "blunt-dissector";
                 if (ShowcaseInput.Pressed(KeyCode.Alpha3)) toolId = "chest-tube";

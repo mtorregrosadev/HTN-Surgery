@@ -365,6 +365,7 @@ def tool_state_from_pose(
     sample: ToolSample, contact: bool, penetration_mm: float, reaction_n: float, contact_point: Vector3
 ) -> ToolState:
     return ToolState(
+        tool_id=sample.tool_id,
         position_mm=sample.position_mm,
         orientation=sample.orientation,
         force_n=reaction_n,

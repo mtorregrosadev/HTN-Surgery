@@ -24,6 +24,9 @@ namespace SurgePrep
         private Transform contactMarker;
         private Transform toolShadow;
         private Transform bloodDecal;
+        private GameObject scalpelVisual;
+        private GameObject dissectorVisual;
+        private GameObject tubeVisual;
         private Material pressureIndicatorInstance;
 
         public SimulationSnapshotDto LatestSnapshot { get; private set; }
@@ -36,6 +39,7 @@ namespace SurgePrep
             {
                 toolTargetPosition = CoordinateFrame.Position(snapshot.tool.positionMm);
                 toolTargetRotation = CoordinateFrame.Rotation(snapshot.tool.orientation);
+                UpdateToolVisual(snapshot.tool.toolId);
                 if (CoordinateFrame.ShouldSnap(toolTransform.localPosition, toolTargetPosition))
                 {
                     toolTransform.localPosition = toolTargetPosition;
@@ -83,18 +87,45 @@ namespace SurgePrep
                 var tip = new GameObject("Authoritative SOFA Tool Tip");
                 tip.transform.SetParent(transform, false);
                 toolTransform = tip.transform;
-                CreateBladeVisuals(tip.transform);
+                CreateToolVisuals(tip.transform);
             }
         }
 
-        private void CreateBladeVisuals(Transform tip)
+        private void CreateToolVisuals(Transform tip)
         {
-            var shaft = Primitive("Training blade handle", PrimitiveType.Capsule, tip,
+            scalpelVisual = new GameObject("Scalpel visual");
+            scalpelVisual.transform.SetParent(tip, false);
+            Primitive("Training blade handle", PrimitiveType.Capsule, scalpelVisual.transform,
                 new Vector3(0f, 0.065f, 0f), new Vector3(0.007f, 0.05f, 0.007f));
-            var blade = Primitive("Visible blunt training blade", PrimitiveType.Cube, tip,
+            Primitive("Visible blunt training blade", PrimitiveType.Cube, scalpelVisual.transform,
                 new Vector3(0.002f, 0.012f, 0f), new Vector3(0.012f, 0.024f, 0.0018f));
-            Primitive("Training blade guard", PrimitiveType.Cube, tip,
+            Primitive("Training blade guard", PrimitiveType.Cube, scalpelVisual.transform,
                 new Vector3(0f, 0.029f, 0f), new Vector3(0.022f, 0.004f, 0.011f));
+
+            dissectorVisual = new GameObject("Blunt dissector visual");
+            dissectorVisual.transform.SetParent(tip, false);
+            var leftJaw = Primitive(
+                "Left blunt jaw", PrimitiveType.Capsule, dissectorVisual.transform,
+                new Vector3(-0.004f, 0.048f, 0f), new Vector3(0.0035f, 0.04f, 0.0035f)
+            );
+            leftJaw.transform.localRotation = Quaternion.Euler(0f, 0f, -4f);
+            var rightJaw = Primitive(
+                "Right blunt jaw", PrimitiveType.Capsule, dissectorVisual.transform,
+                new Vector3(0.004f, 0.048f, 0f), new Vector3(0.0035f, 0.04f, 0.0035f)
+            );
+            rightJaw.transform.localRotation = Quaternion.Euler(0f, 0f, 4f);
+            Primitive(
+                "Dissector stop", PrimitiveType.Sphere, dissectorVisual.transform,
+                new Vector3(0f, 0.006f, 0f), Vector3.one * 0.011f
+            );
+
+            tubeVisual = new GameObject("Chest tube visual");
+            tubeVisual.transform.SetParent(tip, false);
+            Primitive(
+                "Training chest tube", PrimitiveType.Cylinder, tubeVisual.transform,
+                new Vector3(0f, 0.055f, 0f), new Vector3(0.0064f, 0.055f, 0.0064f)
+            );
+
             if (toolMaterial != null)
             {
                 foreach (var renderer in tip.GetComponentsInChildren<MeshRenderer>())
@@ -102,6 +133,7 @@ namespace SurgePrep
                     renderer.sharedMaterial = toolMaterial;
                 }
             }
+            UpdateToolVisual("scalpel");
 
             var indicator = Primitive("Contact pressure indicator", PrimitiveType.Sphere, tip,
                 Vector3.zero, Vector3.one * 0.008f);
@@ -131,6 +163,15 @@ namespace SurgePrep
                 blood.GetComponent<MeshRenderer>().sharedMaterial = bloodMaterial;
             }
             blood.SetActive(false);
+        }
+
+        private void UpdateToolVisual(string toolId)
+        {
+            if (scalpelVisual != null) scalpelVisual.SetActive(
+                string.IsNullOrEmpty(toolId) || toolId == "scalpel"
+            );
+            if (dissectorVisual != null) dissectorVisual.SetActive(toolId == "blunt-dissector");
+            if (tubeVisual != null) tubeVisual.SetActive(toolId == "chest-tube");
         }
 
         private static GameObject Primitive(

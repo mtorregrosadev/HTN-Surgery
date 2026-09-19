@@ -96,6 +96,7 @@ class ToolSample(ApiModel):
 
 
 class ToolState(ApiModel):
+    tool_id: str = "scalpel"
     position_mm: Vector3
     orientation: Quaternion
     force_n: float = Field(ge=0)

@@ -21,6 +21,7 @@ namespace SurgePrep.Editor
 
         private static readonly string[] AnatomyFiles =
         {
+            "FJ2810_BP22617_FMA7163_Skin.obj",
             "FJ3178_BP22232_FMA7487_Body of sternum.obj",
             "FJ3290_BP22794_FMA7486_Manubrium.obj",
             "FJ3153_BP22299_FMA7488_Xiphoid process.obj",
@@ -144,7 +145,7 @@ namespace SurgePrep.Editor
             var cartilage = Material("Cartilage", new Color(0.72f, 0.78f, 0.74f), 0.0f, 0.42f);
             var muscle = Material("Muscle", new Color(0.42f, 0.12f, 0.14f), 0.0f, 0.34f);
             var diaphragm = Material("Diaphragm", new Color(0.4f, 0.16f, 0.22f), 0.0f, 0.34f);
-            var skin = Material("SiliconeSkin", new Color(0.83f, 0.66f, 0.56f), 0.0f, 0.38f);
+            var skin = Material("SiliconeSkin", new Color(0.62f, 0.40f, 0.31f), 0.0f, 0.3f);
             var target = Material("Target", new Color(0.2f, 0.55f, 0.62f), 0.0f, 0.45f);
             var tissue = Material("InteractiveTissue", new Color(0.78f, 0.48f, 0.42f), 0.0f, 0.28f);
             var fat = Material("Subcutaneous", new Color(0.9f, 0.78f, 0.55f), 0.0f, 0.22f);
@@ -153,7 +154,7 @@ namespace SurgePrep.Editor
             var blood = TransparentMaterial("BloodDecal", new Color(0.35f, 0.04f, 0.05f, 0.55f));
             var pressure = TransparentMaterial("PressureIndicator", new Color(0.05f, 1f, 0.65f, 0.7f));
             var tool = Material("TrainingTool", new Color(0.72f, 0.74f, 0.76f), 0.7f, 0.55f);
-            var drape = Material("SurgicalDrape", new Color(0.16f, 0.32f, 0.55f), 0.0f, 0.18f);
+            var drape = Material("SurgicalDrape", new Color(0.055f, 0.24f, 0.32f), 0.0f, 0.24f);
             var metal = Material("BrushedMetal", new Color(0.62f, 0.64f, 0.66f), 0.85f, 0.55f);
             var steel = Material("Stainless", new Color(0.75f, 0.76f, 0.78f), 0.9f, 0.62f);
             var plastic = Material("ClinicalPlastic", new Color(0.9f, 0.91f, 0.92f), 0.05f, 0.4f);
@@ -163,29 +164,25 @@ namespace SurgePrep.Editor
             var mattress = Material("Mattress", new Color(0.93f, 0.93f, 0.94f), 0.0f, 0.2f);
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            RenderSettings.ambientLight = new Color(0.42f, 0.44f, 0.48f);
+            RenderSettings.ambientLight = new Color(0.22f, 0.24f, 0.27f);
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.55f, 0.58f, 0.62f);
-            RenderSettings.ambientEquatorColor = new Color(0.4f, 0.42f, 0.44f);
-            RenderSettings.ambientGroundColor = new Color(0.22f, 0.22f, 0.24f);
-            RenderSettings.fog = true;
+            RenderSettings.ambientSkyColor = new Color(0.32f, 0.35f, 0.39f);
+            RenderSettings.ambientEquatorColor = new Color(0.22f, 0.24f, 0.27f);
+            RenderSettings.ambientGroundColor = new Color(0.1f, 0.11f, 0.13f);
+            RenderSettings.fog = false;
             RenderSettings.fogColor = new Color(0.72f, 0.75f, 0.78f);
             RenderSettings.fogDensity = 0.012f;
 
             var room = CreateOperatingRoom(wall, floor, metal, steel, plastic, rubber, mattress, drape);
             var tableTop = room.transform.Find("RegistrationAnchor_Table");
 
-            var mannequin = new GameObject("Supine training mannequin");
-            mannequin.transform.SetParent(tableTop, false);
-            var skinLayer = Layer("Silicone mannequin shell", mannequin.transform);
-            CreateMannequinShell(skinLayer, skin);
-
-            var anatomy = new GameObject("Registered internal anatomy");
-            anatomy.transform.SetParent(mannequin.transform, false);
+            var anatomy = new GameObject("Supine BodyParts3D training anatomy");
+            anatomy.transform.SetParent(tableTop, false);
             // BodyParts3D is Z-up. Keep anatomical Z along the table and flip
             // anterior Y upward, with the feet near the table's negative end.
             anatomy.transform.localRotation = Quaternion.Euler(0f, 0f, 180f);
-            anatomy.transform.localPosition = new Vector3(0f, 0.13f, -0.82f);
+            anatomy.transform.localPosition = new Vector3(0f, 0.14f, -0.82f);
+            var skinLayer = Layer("High-resolution skin", anatomy.transform);
             var muscleLayer = Layer("Muscle layer", anatomy.transform);
             var boneLayer = Layer("Bone layer", anatomy.transform);
             var cartilageLayer = Layer("Cartilage layer", anatomy.transform);
@@ -214,7 +211,7 @@ namespace SurgePrep.Editor
 
             var window = new GameObject("RegistrationAnchor_ProcedureWindow");
             window.transform.SetParent(tableTop, false);
-            window.transform.localPosition = new Vector3(0.205f, 0.31f, 0.18f);
+            window.transform.localPosition = new Vector3(0.12f, 0.31f, 0.18f);
             window.transform.localRotation = Quaternion.identity;
 
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
@@ -287,10 +284,10 @@ namespace SurgePrep.Editor
             table.transform.localPosition = new Vector3(0f, 0.92f, 0f);
             Cube("Table base", table.transform, new Vector3(0f, -0.55f, 0f), new Vector3(0.42f, 0.7f, 0.42f), metal);
             Cube("Table column", table.transform, new Vector3(0f, -0.22f, 0f), new Vector3(0.16f, 0.4f, 0.16f), steel);
-            Cube("Table top", table.transform, new Vector3(0f, 0f, 0f), new Vector3(0.55f, 0.06f, 1.9f), steel);
-            Cube("Mattress", table.transform, new Vector3(0f, 0.06f, 0f), new Vector3(0.5f, 0.07f, 1.85f), mattress);
-            Cube("Side rail L", table.transform, new Vector3(-0.28f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
-            Cube("Side rail R", table.transform, new Vector3(0.28f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
+            Cube("Table top", table.transform, new Vector3(0f, 0f, 0f), new Vector3(0.78f, 0.06f, 1.9f), steel);
+            Cube("Mattress", table.transform, new Vector3(0f, 0.06f, 0f), new Vector3(0.72f, 0.07f, 1.85f), mattress);
+            Cube("Side rail L", table.transform, new Vector3(-0.405f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
+            Cube("Side rail R", table.transform, new Vector3(0.405f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
             Cube("Table control", table.transform, new Vector3(0.22f, -0.18f, 0.55f), new Vector3(0.12f, 0.04f, 0.18f), plastic);
 
             Cube("Instrument trolley", room.transform, new Vector3(1.15f, 0.72f, 0.35f), new Vector3(0.55f, 0.04f, 0.4f), steel);
@@ -305,71 +302,31 @@ namespace SurgePrep.Editor
             return room;
         }
 
-        private static void CreateMannequinShell(Transform parent, Material skin)
-        {
-            Capsule(
-                "Silicone torso", parent,
-                new Vector3(0f, 0.20f, 0.18f),
-                new Vector3(0.48f, 0.54f, 0.31f),
-                Quaternion.Euler(90f, 0f, 0f), skin
-            );
-            Sphere(
-                "Silicone head", parent,
-                new Vector3(0f, 0.19f, 0.79f),
-                new Vector3(0.25f, 0.22f, 0.29f), skin
-            );
-            Capsule(
-                "Left arm", parent,
-                new Vector3(-0.31f, 0.15f, 0.08f),
-                new Vector3(0.12f, 0.40f, 0.12f),
-                Quaternion.Euler(90f, 0f, 0f), skin
-            );
-            Capsule(
-                "Right arm", parent,
-                new Vector3(0.31f, 0.15f, 0.08f),
-                new Vector3(0.12f, 0.40f, 0.12f),
-                Quaternion.Euler(90f, 0f, 0f), skin
-            );
-            Capsule(
-                "Left leg", parent,
-                new Vector3(-0.13f, 0.14f, -0.52f),
-                new Vector3(0.17f, 0.48f, 0.17f),
-                Quaternion.Euler(90f, 0f, 0f), skin
-            );
-            Capsule(
-                "Right leg", parent,
-                new Vector3(0.13f, 0.14f, -0.52f),
-                new Vector3(0.17f, 0.48f, 0.17f),
-                Quaternion.Euler(90f, 0f, 0f), skin
-            );
-        }
-
         private static void CreateDrapes(Transform table, Material drape)
         {
             var root = new GameObject("Fitted surgical drapes");
             root.transform.SetParent(table, false);
-            const float y = 0.305f;
-            // Lower-body blanket plus four fitted pieces around a
-            // 120 x 110 mm right lateral-chest procedure window.
-            Cube(
-                "Lower body drape", root.transform,
-                new Vector3(0f, y, -0.48f), new Vector3(0.70f, 0.018f, 0.72f), drape
+            // Separate softly folded panels leave a 140 x 180 mm working
+            // window over the right lateral chest without hiding the patient.
+            ClothPanel(
+                "Lower-body drape", root.transform,
+                new Vector3(0f, 0.255f, -0.49f), new Vector2(0.79f, 0.72f), 0.018f, drape, 0.4f
             );
-            Cube(
+            ClothPanel(
                 "Medial chest drape", root.transform,
-                new Vector3(-0.105f, y, 0.24f), new Vector3(0.47f, 0.018f, 0.48f), drape
+                new Vector3(-0.15f, 0.335f, 0.25f), new Vector2(0.40f, 0.52f), 0.012f, drape, 1.7f
             );
-            Cube(
-                "Lateral outer drape", root.transform,
-                new Vector3(0.335f, y, 0.24f), new Vector3(0.13f, 0.018f, 0.48f), drape
+            ClothPanel(
+                "Lateral chest drape", root.transform,
+                new Vector3(0.29f, 0.305f, 0.25f), new Vector2(0.20f, 0.52f), 0.01f, drape, 3.1f
             );
-            Cube(
-                "Window cranial drape", root.transform,
-                new Vector3(0.215f, y, 0.395f), new Vector3(0.11f, 0.018f, 0.17f), drape
+            ClothPanel(
+                "Cranial window drape", root.transform,
+                new Vector3(0.12f, 0.31f, 0.445f), new Vector2(0.13f, 0.13f), 0.007f, drape, 4.6f
             );
-            Cube(
-                "Window caudal drape", root.transform,
-                new Vector3(0.215f, y, 0.065f), new Vector3(0.11f, 0.018f, 0.17f), drape
+            ClothPanel(
+                "Caudal window drape", root.transform,
+                new Vector3(0.12f, 0.30f, 0.055f), new Vector2(0.13f, 0.13f), 0.007f, drape, 5.4f
             );
         }
 
@@ -397,6 +354,11 @@ namespace SurgePrep.Editor
             camera.fieldOfView = 42f;
             camera.nearClipPlane = 0.02f;
             camera.farClipPlane = 18f;
+            camera.allowHDR = true;
+            camera.allowMSAA = true;
+            QualitySettings.antiAliasing = 4;
+            QualitySettings.shadows = ShadowQuality.All;
+            QualitySettings.shadowResolution = ShadowResolution.High;
             cameraObject.transform.position = new Vector3(0.9f, 2.1f, 1.6f);
             cameraObject.transform.LookAt(new Vector3(0.12f, 1.05f, 0.04f));
             cameraObject.AddComponent<AudioListener>();
@@ -408,7 +370,7 @@ namespace SurgePrep.Editor
             var key = new GameObject("Surgical lamp A");
             var keyLight = key.AddComponent<Light>();
             keyLight.type = LightType.Spot;
-            keyLight.intensity = 3.4f;
+            keyLight.intensity = 1.35f;
             keyLight.range = 6f;
             keyLight.spotAngle = 42f;
             keyLight.color = new Color(0.98f, 0.97f, 0.94f);
@@ -419,7 +381,7 @@ namespace SurgePrep.Editor
             var lampB = new GameObject("Surgical lamp B");
             var fill = lampB.AddComponent<Light>();
             fill.type = LightType.Spot;
-            fill.intensity = 2.2f;
+            fill.intensity = 0.85f;
             fill.range = 6f;
             fill.spotAngle = 48f;
             fill.color = new Color(0.95f, 0.96f, 1f);
@@ -430,7 +392,7 @@ namespace SurgePrep.Editor
             var ambient = new GameObject("OR ambient");
             var ambientLight = ambient.AddComponent<Light>();
             ambientLight.type = LightType.Directional;
-            ambientLight.intensity = 0.35f;
+            ambientLight.intensity = 0.22f;
             ambientLight.color = new Color(0.82f, 0.86f, 0.9f);
             ambientLight.shadows = LightShadows.Soft;
             ambient.transform.rotation = Quaternion.Euler(50f, -20f, 0f);
@@ -480,6 +442,96 @@ namespace SurgePrep.Editor
                 UnityEngine.Object.DestroyImmediate(collider);
             }
             return cube;
+        }
+
+        private static GameObject ClothPanel(
+            string name,
+            Transform parent,
+            Vector3 position,
+            Vector2 size,
+            float foldAmplitude,
+            Material material,
+            float phase
+        )
+        {
+            const int segmentsX = 12;
+            const int segmentsZ = 12;
+            var vertices = new Vector3[(segmentsX + 1) * (segmentsZ + 1)];
+            var uv = new Vector2[vertices.Length];
+            var triangles = new int[segmentsX * segmentsZ * 6];
+
+            for (var z = 0; z <= segmentsZ; z++)
+            {
+                var z01 = z / (float)segmentsZ;
+                var nz = z01 * 2f - 1f;
+                for (var x = 0; x <= segmentsX; x++)
+                {
+                    var x01 = x / (float)segmentsX;
+                    var nx = x01 * 2f - 1f;
+                    var edge = Mathf.Max(Mathf.Abs(nx), Mathf.Abs(nz));
+                    var folds =
+                        Mathf.Sin(nx * 8f + phase) * foldAmplitude * 0.45f +
+                        Mathf.Sin(nz * 5f - phase) * foldAmplitude * 0.25f;
+                    var edgeDrape = -Mathf.Pow(edge, 5f) * foldAmplitude * 0.45f;
+                    var index = z * (segmentsX + 1) + x;
+                    vertices[index] = new Vector3(
+                        nx * size.x * 0.5f,
+                        folds + edgeDrape,
+                        nz * size.y * 0.5f
+                    );
+                    uv[index] = new Vector2(x01, z01);
+                }
+            }
+
+            var triangle = 0;
+            for (var z = 0; z < segmentsZ; z++)
+            {
+                for (var x = 0; x < segmentsX; x++)
+                {
+                    var a = z * (segmentsX + 1) + x;
+                    var b = a + 1;
+                    var c = a + segmentsX + 1;
+                    var d = c + 1;
+                    triangles[triangle++] = a;
+                    triangles[triangle++] = c;
+                    triangles[triangle++] = b;
+                    triangles[triangle++] = b;
+                    triangles[triangle++] = c;
+                    triangles[triangle++] = d;
+                }
+            }
+
+            var generated = new Mesh
+            {
+                name = name + " mesh",
+                vertices = vertices,
+                uv = uv,
+                triangles = triangles
+            };
+            generated.RecalculateNormals();
+            generated.RecalculateTangents();
+            generated.RecalculateBounds();
+
+            var meshPath = $"{GeneratedRoot}/{name.Replace(" ", string.Empty)}.asset";
+            var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            if (mesh == null)
+            {
+                AssetDatabase.CreateAsset(generated, meshPath);
+                mesh = generated;
+            }
+            else
+            {
+                EditorUtility.CopySerialized(generated, mesh);
+                UnityEngine.Object.DestroyImmediate(generated);
+                EditorUtility.SetDirty(mesh);
+            }
+
+            var panel = new GameObject(name);
+            panel.transform.SetParent(parent, false);
+            panel.transform.localPosition = position;
+            panel.AddComponent<MeshFilter>().sharedMesh = mesh;
+            panel.AddComponent<MeshRenderer>().sharedMaterial = material;
+            return panel;
         }
 
         private static GameObject Capsule(

@@ -28,5 +28,12 @@ Pose-only tool control (hardware later):
 - `R` twice to reset
 - Contact and force come from SOFA, not Space or `[` `]`
 
+Rejected tracking samples are reported through the controller to both the
+hardware sender and subscribed clients. The Unity clients latch the failure
+instead of interpreting the error as a simulation snapshot. For the manual
+showcase, leave and re-enter Play Mode to start a fresh session after a tracking
+failure; `R` only resets the tool pose during a healthy attempt. A physical
+tracker must revalidate its source/calibration before starting a new attempt.
+
 This is a training prototype. Do not use it on people or with real clinical
 instruments.

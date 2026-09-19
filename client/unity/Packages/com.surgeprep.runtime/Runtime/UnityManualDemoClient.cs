@@ -43,6 +43,7 @@ namespace SurgePrep
         private Stopwatch clock;
         private float resetArmedUntil;
         private bool frozen;
+        private bool trackingFailed;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
         public string SessionId => sessionId;
@@ -50,9 +51,14 @@ namespace SurgePrep
         public string SimulationBackend { get; private set; } = "unknown";
         public string ToolId => toolId;
         public bool SofaNative => SimulationBackend == "sofa-native";
+        public bool TrackingHealthy => !trackingFailed;
 
         private async void OnEnable()
         {
+            trackingFailed = false;
+            frozen = false;
+            ClearReceived();
+            Status = "Starting controller session…";
             cancellation = new CancellationTokenSource();
             http = new HttpClient { BaseAddress = new Uri(controllerUrl.TrimEnd('/') + "/") };
             try
@@ -79,9 +85,19 @@ namespace SurgePrep
             string latest = null;
             while (received.TryDequeue(out var payload))
             {
+                if (ContractCompatibility.TryReadError(payload, out var error))
+                {
+                    HandleTrackingError(error);
+                    continue;
+                }
+                if (trackingFailed)
+                {
+                    // A rejected sample freezes the attempt until this component reconnects.
+                    continue;
+                }
                 latest = payload;
             }
-            if (latest == null || sceneRenderer == null)
+            if (latest == null || sceneRenderer == null || trackingFailed)
             {
                 return;
             }
@@ -145,16 +161,41 @@ namespace SurgePrep
                         yMm = 12f;
                         zMm = 0f;
                         toolId = "scalpel";
-                        frozen = false;
+                        if (!trackingFailed)
+                        {
+                            frozen = false;
+                        }
                         resetArmedUntil = 0f;
-                        Status = "Attempt reset";
+                        Status = trackingFailed
+                            ? "Tracking failed — restart the attempt"
+                            : "Attempt reset";
                     }
                     else
                     {
                         resetArmedUntil = Time.unscaledTime + 2f;
-                        Status = "Press R again to reset";
+                        Status = trackingFailed
+                            ? "Tracking failed — restart the attempt"
+                            : "Press R again to reset";
                     }
                 }
+            }
+        }
+
+        private void HandleTrackingError(StreamErrorDto error)
+        {
+            if (trackingFailed) return;
+            trackingFailed = true;
+            frozen = true;
+            var message = ContractCompatibility.DescribeError(error);
+            Status = $"TRACKING FAILED: {message}. Restart the attempt to recover.";
+            UnityEngine.Debug.LogError($"Scalpel tracking rejected: {message}");
+        }
+
+        private void ClearReceived()
+        {
+            string ignored;
+            while (received.TryDequeue(out ignored))
+            {
             }
         }
 
@@ -240,6 +281,11 @@ namespace SurgePrep
 
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
+                if (trackingFailed)
+                {
+                    await Task.Delay(33, token);
+                    continue;
+                }
                 var sample = NextSample();
                 var bytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(sample));
                 await socket.SendAsync(
@@ -305,6 +351,7 @@ namespace SurgePrep
         private async void OnDisable()
         {
             cancellation?.Cancel();
+            ClearReceived();
             socket?.Dispose();
             socket = null;
             if (http != null && !string.IsNullOrEmpty(sessionId))

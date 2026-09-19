@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 
 namespace SurgePrep
 {
@@ -123,6 +124,27 @@ namespace SurgePrep
     }
 
     [Serializable]
+    public sealed class StreamEnvelopeDto
+    {
+        public string type;
+    }
+
+    [Serializable]
+    public sealed class StreamErrorDetailDto
+    {
+        public string detail;
+    }
+
+    [Serializable]
+    public sealed class StreamErrorDto
+    {
+        public string type;
+        public string sessionId;
+        public int status;
+        public StreamErrorDetailDto detail;
+    }
+
+    [Serializable]
     public sealed class ToolSampleDto
     {
         public string contractVersion;
@@ -148,6 +170,37 @@ namespace SurgePrep
         {
             return contractVersion == "1.0" || contractVersion == "1.1" ||
                    string.IsNullOrEmpty(contractVersion);
+        }
+
+        public static bool TryReadError(string payload, out StreamErrorDto error)
+        {
+            error = null;
+            if (string.IsNullOrEmpty(payload)) return false;
+            try
+            {
+                var envelope = JsonUtility.FromJson<StreamEnvelopeDto>(payload);
+                if (envelope == null || envelope.type != "error") return false;
+                error = JsonUtility.FromJson<StreamErrorDto>(payload);
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                // The error envelope is still an error even when its detail is not
+                // representable by Unity's small DTO model.
+                error = new StreamErrorDto { type = "error" };
+                return true;
+            }
+        }
+
+        public static string DescribeError(StreamErrorDto error)
+        {
+            var reason = error != null && error.detail != null ? error.detail.detail : null;
+            if (string.IsNullOrEmpty(reason)) reason = "Controller rejected tracking data";
+            if (error != null && error.status > 0)
+            {
+                return $"{reason} (HTTP {error.status})";
+            }
+            return reason;
         }
     }
 }

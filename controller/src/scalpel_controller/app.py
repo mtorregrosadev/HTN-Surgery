@@ -67,9 +67,14 @@ class SessionHub:
                     "POST", f"/v1/sessions/{session_id}/samples", sample
                 )
                 if status_code >= 400:
-                    await socket.send_json(
-                        {"type": "error", "status": status_code, "detail": snapshot}
-                    )
+                    error = {
+                        "type": "error",
+                        "sessionId": session_id,
+                        "status": status_code,
+                        "detail": snapshot,
+                    }
+                    await socket.send_json(error)
+                    await self.broadcast(session_id, error)
                     continue
                 await socket.send_json(snapshot)
                 await self.broadcast(session_id, snapshot)

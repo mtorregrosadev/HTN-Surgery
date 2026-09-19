@@ -17,12 +17,18 @@ namespace SurgePrep
         private readonly ConcurrentQueue<string> received = new ConcurrentQueue<string>();
         private ClientWebSocket socket;
         private CancellationTokenSource cancellation;
+        private bool trackingFailed;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
+        public bool TrackingHealthy => !trackingFailed;
+        public string Status { get; private set; } = "Starting Scalpel controller stream…";
 
         private async void OnEnable()
         {
             cancellation = new CancellationTokenSource();
+            trackingFailed = false;
+            ClearReceived();
+            Status = "Connecting to Scalpel controller…";
             try
             {
                 await ConnectAndReceive(cancellation.Token);
@@ -33,6 +39,8 @@ namespace SurgePrep
             }
             catch (Exception error)
             {
+                trackingFailed = true;
+                Status = $"Tracking failed: {error.Message}";
                 Debug.LogError($"Scalpel controller stream failed: {error.Message}");
             }
         }
@@ -42,6 +50,16 @@ namespace SurgePrep
             string latest = null;
             while (received.TryDequeue(out var payload))
             {
+                if (ContractCompatibility.TryReadError(payload, out var error))
+                {
+                    HandleTrackingError(error);
+                    continue;
+                }
+                if (trackingFailed)
+                {
+                    // Do not let a queued snapshot silently recover a failed stream; reconnect.
+                    continue;
+                }
                 latest = payload;
             }
             if (latest == null || sceneRenderer == null)
@@ -49,9 +67,26 @@ namespace SurgePrep
                 return;
             }
             var snapshot = JsonUtility.FromJson<SimulationSnapshotDto>(latest);
-            if (snapshot != null && ContractCompatibility.Accepts(snapshot.contractVersion))
+            if (!trackingFailed && snapshot != null && ContractCompatibility.Accepts(snapshot.contractVersion))
             {
                 sceneRenderer.SetTarget(snapshot);
+            }
+        }
+
+        private void HandleTrackingError(StreamErrorDto error)
+        {
+            if (trackingFailed) return;
+            trackingFailed = true;
+            var message = ContractCompatibility.DescribeError(error);
+            Status = $"Tracking failed: {message}";
+            Debug.LogError($"Scalpel controller tracking rejected: {message}");
+        }
+
+        private void ClearReceived()
+        {
+            string ignored;
+            while (received.TryDequeue(out ignored))
+            {
             }
         }
 
@@ -62,6 +97,7 @@ namespace SurgePrep
                 $"{controllerUrl.TrimEnd('/')}/v1/sessions/{sessionId}/client-stream"
             );
             await socket.ConnectAsync(uri, token);
+            Status = "Connected — awaiting authoritative tracking";
             var buffer = new byte[1024 * 256];
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
@@ -84,11 +120,18 @@ namespace SurgePrep
                 }
                 received.Enqueue(Encoding.UTF8.GetString(buffer, 0, count));
             }
+            if (!token.IsCancellationRequested)
+            {
+                trackingFailed = true;
+                Status = "Tracking failed: controller stream closed";
+                Debug.LogError("Scalpel controller stream closed before tracking recovered");
+            }
         }
 
         private void OnDisable()
         {
             cancellation?.Cancel();
+            ClearReceived();
             if (socket != null)
             {
                 socket.Dispose();

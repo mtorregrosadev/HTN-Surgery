@@ -226,30 +226,32 @@ void applyPullMode() {
   }
 }
 
+int contactCandidateCount = 0;
+int releaseCandidateCount = 0;
+
 void calibrateAdcZero() {
   if (!pressure.isAdc) return;
-  delay(120); // Allow voltage divider to settle completely
+  delay(150); // Allow circuit to settle
   long sum = 0;
-  const int samples = 30;
+  const int samples = 40;
   for (int i = 0; i < samples; i++) {
     sum += analogRead(activePressurePin);
     delay(4);
   }
   adcZeroBaseline = (int)(sum / samples);
-  contactThresholdHigh = adcZeroBaseline + 120;
-  contactThresholdLow = adcZeroBaseline + 60;
+  // Wide deadband: touch requires baseline + 300 (min 400), release is baseline + 150 (min 200)
+  contactThresholdHigh = max(400, adcZeroBaseline + 300);
+  contactThresholdLow  = max(200, adcZeroBaseline + 150);
   smoothedRaw = (float)adcZeroBaseline;
-  Serial.printf("\n[Calibrated] FSR-402 zero baseline: %d (Active above: %d)\n\n",
-                adcZeroBaseline, contactThresholdHigh);
+  Serial.printf("\n[Calibrated] FSR-402 baseline: %d (Touch threshold: %d, Release: %d)\n\n",
+                adcZeroBaseline, contactThresholdHigh, contactThresholdLow);
 }
 
 void initPressureSensor() {
+  applyPullMode(); // Anchors pin with internal pull-down to GND when unpressed
   pressure.isAdc = (digitalPinToAnalogChannel(activePressurePin) >= 0);
   if (pressure.isAdc) {
-    pinMode(activePressurePin, INPUT); // Disable internal pull resistors so external FSR divider isn't distorted
     calibrateAdcZero();
-  } else {
-    applyPullMode();
   }
   Serial.printf("[Sensor] Pressure Sensor configured on GPIO %d (%s, Mode: %s)\n",
                 activePressurePin,
@@ -266,20 +268,42 @@ bool updatePressureSensor() {
   bool contact = pressure.isContact;
 
   if (pressure.isAdc) {
-    raw = analogRead(activePressurePin);
-    // Smooth reading with exponential moving average to filter electrical noise
-    smoothedRaw = 0.70f * smoothedRaw + 0.30f * (float)raw;
+    // 16x oversampling to reject AC mains noise & electrical ripple
+    long sum = 0;
+    for (int i = 0; i < 16; i++) {
+      sum += analogRead(activePressurePin);
+    }
+    raw = (int)(sum / 16);
+
+    // Low-pass exponential moving average filter
+    smoothedRaw = 0.85f * smoothedRaw + 0.15f * (float)raw;
     int currentRaw = (int)smoothedRaw;
 
-    // Hysteresis: prevent jittering near boundary
-    if (!pressure.isContact && (currentRaw > contactThresholdHigh)) {
-      contact = true;
-    } else if (pressure.isContact && (currentRaw < contactThresholdLow)) {
-      contact = false;
+    // Multi-cycle persistence filter (must sustain for 4 cycles = ~80ms)
+    if (!pressure.isContact) {
+      if (currentRaw >= contactThresholdHigh) {
+        contactCandidateCount++;
+        releaseCandidateCount = 0;
+        if (contactCandidateCount >= 4) {
+          contact = true;
+        }
+      } else {
+        contactCandidateCount = 0;
+      }
+    } else {
+      if (currentRaw <= contactThresholdLow) {
+        releaseCandidateCount++;
+        contactCandidateCount = 0;
+        if (releaseCandidateCount >= 4) {
+          contact = false;
+        }
+      } else {
+        releaseCandidateCount = 0;
+      }
     }
 
     int delta = max(0, currentRaw - adcZeroBaseline);
-    int span = max(100, 4095 - adcZeroBaseline);
+    int span = max(200, 4095 - adcZeroBaseline);
     pressure.forceEstimateN = contact ? ((float)delta / (float)span * 10.0f) : 0.0f;
   } else {
     raw = digitalRead(activePressurePin);
@@ -291,9 +315,9 @@ bool updatePressureSensor() {
   pressure.sampleCount++;
   pressure.lastSampleMs = now;
 
-  // Debounced state transition (~20ms)
+  // Debounced state transition (at least 60ms between toggles)
   bool stateChanged = false;
-  if (contact != pressure.isContact && (now - pressure.lastChangeMs > 20)) {
+  if (contact != pressure.isContact && (now - pressure.lastChangeMs > 60)) {
     pressure.isContact = contact;
     pressure.lastChangeMs = now;
     stateChanged = true;

@@ -59,7 +59,7 @@ async def main() -> None:
             (-15.0, 1.0),
             (-15.0, 0.0),
             (-15.0, -1.0),
-            *[(float(x), -1.0) for x in range(-15, 16, 2)],
+            *[(float(x), -2.0) for x in range(-15, 16, 2)],
         ]
         async with websockets.connect(uri, max_size=1_048_576) as socket:
             for x_mm, y_mm in trajectory:

@@ -16,7 +16,7 @@ from .models import (
     ToolSample,
 )
 from .service import TrainingService
-from .simulation import MemorySimulator, Simulator
+from .simulation import MemorySimulator, Simulator, SofaSimulator
 from .store import MemoryStore, MongoStore, Store
 
 
@@ -27,9 +27,11 @@ def build_store(settings: Settings) -> Store:
 
 
 def build_simulator(settings: Settings) -> Simulator:
-    if settings.simulation_backend != "memory":
-        raise RuntimeError(f"Unsupported simulation backend: {settings.simulation_backend}")
-    return MemorySimulator()
+    if settings.simulation_backend == "memory":
+        return MemorySimulator()
+    if settings.simulation_backend == "sofa":
+        return SofaSimulator(settings.sofa_scene_path)
+    raise RuntimeError(f"Unsupported simulation backend: {settings.simulation_backend}")
 
 
 def create_app(store: Store | None = None, simulator: Simulator | None = None) -> FastAPI:
@@ -92,4 +94,3 @@ def create_app(store: Store | None = None, simulator: Simulator | None = None) -
 
 
 app = create_app()
-

@@ -214,7 +214,7 @@ namespace SurgePrep.Editor
             boneLayer.gameObject.SetActive(false);
             cartilageLayer.gameObject.SetActive(false);
             diaphragmLayer.gameObject.SetActive(false);
-            CreateDrapes(tableTop, drape);
+            CreateModestyCover(tableTop, drape);
 
             var window = new GameObject("RegistrationAnchor_ProcedureWindow");
             window.transform.SetParent(tableTop, false);
@@ -309,31 +309,14 @@ namespace SurgePrep.Editor
             return room;
         }
 
-        private static void CreateDrapes(Transform table, Material drape)
+        private static void CreateModestyCover(Transform table, Material drape)
         {
-            var root = new GameObject("Fitted surgical drapes");
+            var root = new GameObject("Pelvic modesty cover");
             root.transform.SetParent(table, false);
-            // Separate softly folded panels leave a 140 x 180 mm working
-            // window over the right lateral chest without hiding the patient.
             ClothPanel(
-                "Lower-body drape", root.transform,
-                new Vector3(0f, 0.255f, -0.49f), new Vector2(0.79f, 0.72f), 0.018f, drape, 0.4f
-            );
-            ClothPanel(
-                "Medial chest drape", root.transform,
-                new Vector3(-0.15f, 0.365f, 0.38f), new Vector2(0.40f, 0.52f), 0.012f, drape, 1.7f
-            );
-            ClothPanel(
-                "Lateral chest drape", root.transform,
-                new Vector3(0.29f, 0.34f, 0.38f), new Vector2(0.20f, 0.52f), 0.01f, drape, 3.1f
-            );
-            ClothPanel(
-                "Cranial window drape", root.transform,
-                new Vector3(0.12f, 0.35f, 0.545f), new Vector2(0.13f, 0.13f), 0.007f, drape, 4.6f
-            );
-            ClothPanel(
-                "Caudal window drape", root.transform,
-                new Vector3(0.12f, 0.34f, 0.215f), new Vector2(0.13f, 0.13f), 0.007f, drape, 5.4f
+                "Fitted genital modesty panel", root.transform,
+                new Vector3(0f, 0.356f, -0.095f), new Vector2(0.28f, 0.20f),
+                0.006f, drape, 0.7f
             );
         }
 

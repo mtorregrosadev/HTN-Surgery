@@ -22,19 +22,8 @@ The demo should optimize for a complete, reliable loop rather than broad anatomi
 
 The following topology is the project's primary design constraint. Implementations should preserve these boundaries and data directions even when individual technologies evolve.
 
-```text
-                         EMBEDDED / HARDWARE
-                  calibration + wired sensor path
-                              ^
-                              |
-                              |
-VR / XR  <====> CLIENT  <====> SCALPEL CONTROLLER <====> GO/PYTHON API <====> SOFA
-              immersive         hardware and              sessions        dynamic 3D
-              rendering         command boundary          normalization   simulation
-                                                               |
-                                                               v
-                                                            MONGODB
-```
+<img width="930" height="340" alt="image" src="https://github.com/user-attachments/assets/4ed2a014-6c05-4ae8-8a1d-461ee421dbb3" />
+
 
 ### Non-negotiable boundaries
 

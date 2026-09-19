@@ -197,11 +197,15 @@ namespace SurgePrep.Editor
             simulation.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             var renderer = simulation.AddComponent<SimulationSceneRenderer>();
             var stream = simulation.AddComponent<ScalpelStreamClient>();
+            stream.enabled = false;
+            var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
             var hud = simulation.AddComponent<ChestTubeShowcaseHud>();
             SetObject(renderer, "tissueMaterial", tissue);
             SetObject(renderer, "toolMaterial", tool);
             SetObject(stream, "sceneRenderer", renderer);
+            SetObject(manualDemo, "sceneRenderer", renderer);
             SetObject(hud, "sceneRenderer", renderer);
+            SetObject(hud, "manualDemo", manualDemo);
             CreateTargetGuide(simulation.transform, target);
 
             var camera = CreateCamera();
@@ -224,8 +228,8 @@ namespace SurgePrep.Editor
             Selection.activeGameObject = simulation;
             EditorGUIUtility.PingObject(AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath));
             Debug.Log(
-                "Surge Prep showcase created. Paste an active session ID into " +
-                "ScalpelStreamClient, then enter Play Mode."
+                "Surge Prep showcase created. Start Docker, enter Play Mode, and click " +
+                "the Game view to control the training tool."
             );
         }
 

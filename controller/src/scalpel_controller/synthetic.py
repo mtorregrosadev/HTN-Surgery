@@ -29,9 +29,9 @@ class ManualToolState:
         if key == "q":
             return False
         if key == "a":
-            self.x_mm -= 2.0
-        elif key == "d":
             self.x_mm += 2.0
+        elif key == "d":
+            self.x_mm -= 2.0
         elif key == "w":
             self.z_mm += 2.0
         elif key == "s":

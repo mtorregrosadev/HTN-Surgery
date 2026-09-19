@@ -5,6 +5,7 @@ namespace SurgePrep
     public sealed class ChestTubeShowcaseHud : MonoBehaviour
     {
         [SerializeField] private SimulationSceneRenderer sceneRenderer;
+        [SerializeField] private UnityManualDemoClient manualDemo;
         [SerializeField] private string exerciseTitle = "Chest-tube access rehearsal";
         [SerializeField] private float illustrativeForceMinimumN = 0.3f;
         [SerializeField] private float illustrativeForceMaximumN = 1.2f;
@@ -46,10 +47,11 @@ namespace SurgePrep
             var snapshot = sceneRenderer != null ? sceneRenderer.LatestSnapshot : null;
             if (snapshot == null)
             {
-                GUI.Label(new Rect(38, 104, 255, 24), "Waiting for Scalpel controller…", valueStyle);
+                var status = manualDemo != null ? manualDemo.Status : "Waiting for Scalpel controller…";
+                GUI.Label(new Rect(38, 104, 255, 48), status, valueStyle);
                 GUI.Label(
-                    new Rect(38, 140, 255, 60),
-                    "Start a session and keep the hardware or synthetic stream running.",
+                    new Rect(38, 156, 255, 60),
+                    "Docker runs in the background; no Terminal focus or session ID is needed.",
                     smallStyle
                 );
                 Disclaimer(panel);
@@ -83,6 +85,12 @@ namespace SurgePrep
             Metric("Force", $"{force:0.00} N", 158);
             Metric("Target offset", $"{radialError:0.0} mm", 194);
             Metric("Simulation tick", snapshot.tick.ToString(), 230);
+
+            GUI.Label(
+                new Rect(38, 252, 255, 18),
+                "WASD move  •  SPACE contact  •  [ ] pressure  •  R reset",
+                smallStyle
+            );
 
             var bar = new Rect(145, 166, 156, 8);
             DrawRect(bar, new Color(0.12f, 0.17f, 0.2f));

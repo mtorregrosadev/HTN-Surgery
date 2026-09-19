@@ -55,5 +55,51 @@ namespace SurgePrep
         public DeformableMeshDto[] deformableMeshes;
         public string[] events;
     }
-}
 
+    [Serializable]
+    public sealed class CalibrationCreateDto
+    {
+        public string deviceId;
+        public float[] transform;
+        public float rmsErrorMm;
+    }
+
+    [Serializable]
+    public sealed class CalibrationDto
+    {
+        public string calibrationId;
+    }
+
+    [Serializable]
+    public sealed class SessionCreateDto
+    {
+        public string exerciseId;
+        public string calibrationId;
+        public string toolId;
+        public string deviceId;
+    }
+
+    [Serializable]
+    public sealed class SessionDto
+    {
+        public string sessionId;
+    }
+
+    [Serializable]
+    public sealed class ToolSampleDto
+    {
+        public string contractVersion;
+        public string sessionId;
+        public string toolId;
+        public string deviceId;
+        public string calibrationId;
+        public long sequence;
+        public long timestampMs;
+        public Vector3Dto positionMm;
+        public QuaternionDto orientation;
+        public float forceN;
+        public bool contact;
+        public float quality;
+        public bool sourceHealthy;
+    }
+}

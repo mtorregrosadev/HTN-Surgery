@@ -100,6 +100,23 @@ class TissueState(ApiModel):
     deformation_mm: float = Field(ge=0)
 
 
+class DeformableMeshState(ApiModel):
+    object_id: str = Field(min_length=1)
+    topology_revision: int = Field(ge=1)
+    vertices_mm: list[Vector3]
+    triangle_indices: list[int]
+
+    @model_validator(mode="after")
+    def triangles_reference_existing_vertices(self) -> "DeformableMeshState":
+        if len(self.triangle_indices) % 3:
+            raise ValueError("triangleIndices must contain complete triangles")
+        if self.triangle_indices and max(self.triangle_indices) >= len(self.vertices_mm):
+            raise ValueError("triangleIndices references a missing vertex")
+        if self.triangle_indices and min(self.triangle_indices) < 0:
+            raise ValueError("triangleIndices cannot be negative")
+        return self
+
+
 class SimulationSnapshot(ApiModel):
     contract_version: str = "1.0"
     session_id: str
@@ -107,6 +124,7 @@ class SimulationSnapshot(ApiModel):
     simulation_time_ms: int = Field(ge=0)
     tool: ToolState
     tissue: TissueState
+    deformable_meshes: list[DeformableMeshState] = Field(default_factory=list)
     events: list[str] = Field(default_factory=list)
 
 
@@ -139,4 +157,3 @@ def utc_now() -> datetime:
 
 def mongo_document(model: ApiModel) -> dict[str, Any]:
     return model.model_dump(by_alias=True, mode="json")
-

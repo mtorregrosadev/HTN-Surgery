@@ -56,7 +56,7 @@ def createScene(root):
     )
     tissue.addObject("FixedProjectiveConstraint", indices="@fixedBase.indices")
     surface = tissue.addChild("surface")
-    surface.addObject("QuadSetTopologyContainer")
+    surface.addObject("QuadSetTopologyContainer", name="topology")
     surface.addObject("QuadSetTopologyModifier")
     surface.addObject("Hexa2QuadTopologicalMapping", input="@../grid", output="@.")
     surface.addObject("MechanicalObject")
@@ -72,4 +72,3 @@ def createScene(root):
     tool.addObject("SphereCollisionModel", radius=3.0, simulated=False, moving=True)
     tool.addObject("UniformMass", totalMass=0.01)
     return root
-

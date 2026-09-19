@@ -8,7 +8,14 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from .models import SimulationSnapshot, TissueState, ToolSample, ToolState
+from .models import (
+    DeformableMeshState,
+    SimulationSnapshot,
+    TissueState,
+    ToolSample,
+    ToolState,
+    Vector3,
+)
 
 
 class Simulator(ABC):
@@ -38,15 +45,23 @@ class MemorySimulator(Simulator):
     def __init__(self, step_ms: int = 10) -> None:
         self.step_ms = step_ms
         self.ticks: dict[str, int] = defaultdict(int)
+        self.contacts: dict[str, bool] = defaultdict(bool)
 
     async def begin_session(self, session_id: str) -> None:
         self.ticks[session_id] = 0
+        self.contacts[session_id] = False
 
     async def step(self, sample: ToolSample) -> SimulationSnapshot:
         self.ticks[sample.session_id] += 1
         tick = self.ticks[sample.session_id]
         deformation = min(sample.force_n * 1.5, 12.0) if sample.contact else 0.0
-        events = ["contact-start"] if sample.contact and tick == 1 else []
+        previous_contact = self.contacts[sample.session_id]
+        events: list[str] = []
+        if sample.contact and not previous_contact:
+            events.append("contact-start")
+        elif previous_contact and not sample.contact:
+            events.append("contact-end")
+        self.contacts[sample.session_id] = sample.contact
         return SimulationSnapshot(
             session_id=sample.session_id,
             tick=tick,
@@ -57,11 +72,42 @@ class MemorySimulator(Simulator):
                 contact=sample.contact,
             ),
             tissue=TissueState(deformation_mm=deformation),
+            deformable_meshes=[self._training_pad_mesh(deformation)],
             events=events,
         )
 
     async def end_session(self, session_id: str) -> None:
         self.ticks.pop(session_id, None)
+        self.contacts.pop(session_id, None)
+
+    @staticmethod
+    def _training_pad_mesh(deformation_mm: float) -> DeformableMeshState:
+        coordinates = (-40.0, 0.0, 40.0)
+        vertices = [
+            Vector3(x=x, y=-deformation_mm if x == 0 and z == 0 else 0.0, z=z)
+            for z in coordinates
+            for x in coordinates
+        ]
+        triangles: list[int] = []
+        for row in range(2):
+            for column in range(2):
+                lower_left = row * 3 + column
+                triangles.extend(
+                    [
+                        lower_left,
+                        lower_left + 3,
+                        lower_left + 1,
+                        lower_left + 1,
+                        lower_left + 3,
+                        lower_left + 4,
+                    ]
+                )
+        return DeformableMeshState(
+            object_id="training-pad",
+            topology_revision=1,
+            vertices_mm=vertices,
+            triangle_indices=triangles,
+        )
 
 
 class SofaSimulator(Simulator):
@@ -133,6 +179,7 @@ class SofaSimulator(Simulator):
             self._simulation.animate(root, self.step_ms / 1000)
             tick += 1
             deformation = self._maximum_deformation_mm(root)
+            surface = self._surface_mesh(root)
             events: list[str] = []
             if sample.contact and not previous_contact:
                 events.append("contact-start")
@@ -149,6 +196,7 @@ class SofaSimulator(Simulator):
                     contact=sample.contact,
                 ),
                 tissue=TissueState(deformation_mm=deformation),
+                deformable_meshes=[surface],
                 events=events,
             )
 
@@ -167,3 +215,21 @@ class SofaSimulator(Simulator):
             squared = sum((float(point[index]) - float(rest[index])) ** 2 for index in range(3))
             maximum_squared = max(maximum_squared, squared)
         return maximum_squared**0.5
+
+    @staticmethod
+    def _surface_mesh(root: Any) -> DeformableMeshState:
+        positions = root.tissue.surface.dofs.position.value
+        quads = root.tissue.surface.topology.quads.value
+        triangles: list[int] = []
+        for quad in quads:
+            a, b, c, d = (int(index) for index in quad)
+            triangles.extend([a, b, c, a, c, d])
+        return DeformableMeshState(
+            object_id="training-pad",
+            topology_revision=1,
+            vertices_mm=[
+                Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
+                for point in positions
+            ],
+            triangle_indices=triangles,
+        )

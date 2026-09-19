@@ -4,7 +4,7 @@
   "title": "SOFA simulation snapshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contractVersion", "sessionId", "tick", "simulationTimeMs", "tool", "tissue", "events"],
+  "required": ["contractVersion", "sessionId", "tick", "simulationTimeMs", "tool", "tissue", "deformableMeshes", "events"],
   "properties": {
     "contractVersion": { "const": "1.0" },
     "sessionId": { "type": "string", "minLength": 1 },
@@ -24,7 +24,26 @@
       "required": ["deformationMm"],
       "properties": { "deformationMm": { "type": "number", "minimum": 0 } }
     },
+    "deformableMeshes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "topologyRevision", "verticesMm", "triangleIndices"],
+        "properties": {
+          "objectId": { "type": "string", "minLength": 1 },
+          "topologyRevision": { "type": "integer", "minimum": 1 },
+          "verticesMm": {
+            "type": "array",
+            "items": { "$ref": "tool-sample.schema.json#/$defs/vector3" }
+          },
+          "triangleIndices": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
     "events": { "type": "array", "items": { "type": "string" } }
   }
 }
-

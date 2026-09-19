@@ -43,8 +43,9 @@ async def test_session_round_trip_and_metrics():
 
     assert snapshot.tick == 3
     assert snapshot.tissue.deformation_mm == 3.0
+    assert snapshot.deformable_meshes[0].vertices_mm[4].y == -3.0
+    assert snapshot.events == []
     result = await service.complete_session(session.session_id)
     assert result.metrics.sample_count == 3
     assert result.metrics.peak_force_n == 2.0
     assert len(await service.replay(session.session_id)) == 3
-

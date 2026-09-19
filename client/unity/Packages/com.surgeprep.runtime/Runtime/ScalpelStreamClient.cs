@@ -60,6 +60,9 @@ namespace SurgePrep
             {
                 if (ContractCompatibility.TryReadError(payload, out var error))
                 {
+                    // An earlier snapshot in this frame must not clear a later
+                    // pause or rejection. Only a snapshot after the error can recover.
+                    latest = null;
                     HandleTrackingError(error);
                     continue;
                 }

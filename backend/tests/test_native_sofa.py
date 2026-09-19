@@ -101,8 +101,20 @@ async def test_native_sofa_hard_stops_the_tool_at_protected_ribs() -> None:
     await simulator.start()
     await simulator.begin_session("native-test")
     try:
+        if not simulator._scene_module.anatomy_surface_samples():
+            pytest.skip("high-resolution skin has not been fetched")
+        body_contact = None
+        for sequence, y_mm in enumerate((10.0, 5.0, 2.0, 0.0, -1.0, -2.0), start=1):
+            body_contact = await simulator.step(
+                sample(sequence, y_mm, -100.0, "scalpel")
+            )
+        assert body_contact is not None
+        assert body_contact.tool.contact
+        assert body_contact.tool.reaction_force_n > 0.0
+        assert "outside-corridor" in body_contact.events
+
         snapshot = await simulator.step(
-            sample(1, -16.0, 0.0, "scalpel", z_mm=18.0)
+            sample(10, -16.0, 0.0, "scalpel", z_mm=18.0)
         )
         surface_y = simulator._scene_module.chest_surface_y_mm(0.0, 18.0)
         assert "protected-anatomy" in snapshot.events

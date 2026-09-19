@@ -228,7 +228,7 @@ class SofaSimulator(Simulator):
                 raise RuntimeError("SOFA session has not been initialized")
             root = state.root
             chest = self._chests[sample.session_id]
-            surface_y = self._scene_module.chest_surface_y_mm(
+            surface_y = self._scene_module.body_surface_y_mm(
                 sample.position_mm.x, sample.position_mm.z
             )
             blocked_by_rib = hits_protected_rib(
@@ -363,6 +363,10 @@ class SofaSimulator(Simulator):
             nodal_contact = SofaSimulator._layer(root, layer).dofs.getData("lambda").value
             for axis in range(3):
                 components[axis] += sum(float(force[axis]) for force in nodal_contact)
+        if root.getChild("bodyContactShell") is not None:
+            body_contact = root.bodyContactShell.dofs.getData("lambda").value
+            for axis in range(3):
+                components[axis] += sum(float(force[axis]) for force in body_contact)
         return math.sqrt(sum(component * component for component in components))
 
     @staticmethod

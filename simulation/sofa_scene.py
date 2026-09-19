@@ -6,6 +6,9 @@ visible Unity meshes are exported directly from these mapped SOFA surfaces.
 Material values are illustrative training parameters, not clinical claims.
 """
 
+from functools import lru_cache
+from pathlib import Path
+
 FIELD_RADIUS_X_MM = 40.0
 FIELD_RADIUS_Z_MM = 36.0
 GRID_X = 17
@@ -51,12 +54,74 @@ SCALPEL_CUTTING_EDGE_SEGMENTS = [[index, index + 1] for index in range(4)]
 RIB_CENTRES_Z_MM = (-18.0, 18.0)
 RIB_RADIUS_MM = 4.0
 RIB_TOP_DEPTH_MM = -10.0
+ANATOMY_BIN_MM = 12.0
+BODY_CONTACT_RADIUS_MM = 5.0
 
 
 def chest_surface_y_mm(x_mm, z_mm):
     return sum(
         coefficient * (x_mm ** x_power) * (z_mm ** z_power)
         for (x_power, z_power), coefficient in CHEST_SURFACE_TERMS
+    )
+
+
+@lru_cache(maxsize=1)
+def anatomy_surface_samples():
+    """Downsample the registered high-resolution skin for broad contact.
+
+    The OBJ remains the visual source in Unity. SOFA receives an invisible,
+    simulation-friendly point shell derived from the same mesh, excluding the
+    localized deformable field so it cannot obstruct real layer cutting.
+    """
+    scene_file = globals().get("__file__")
+    repository = Path(scene_file).resolve().parents[1] if scene_file else Path.cwd()
+    source = (
+        repository
+        / "bodyparts3d_highres"
+        / "FJ2810_BP22617_FMA7163_Skin.obj"
+    )
+    if not source.exists():
+        return {}
+    bins = {}
+    with source.open(encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            if not line.startswith("v "):
+                continue
+            _, raw_x, raw_y, raw_z = line.split()[:4]
+            # Match ChestTubeShowcaseBuilder's millimetre import, 180-degree
+            # supine rotation, procedure-window origin, and Unity Z reflection.
+            x_mm = -float(raw_x) - 120.0
+            y_mm = -float(raw_y) - 213.0
+            z_mm = 1200.0 - float(raw_z)
+            if not (-150.0 <= x_mm <= 150.0 and -260.0 <= z_mm <= 260.0):
+                continue
+            key = (round(x_mm / ANATOMY_BIN_MM), round(z_mm / ANATOMY_BIN_MM))
+            bins[key] = max(y_mm, bins.get(key, -10_000.0))
+    return bins
+
+
+def body_surface_y_mm(x_mm, z_mm):
+    if (x_mm / FIELD_RADIUS_X_MM) ** 2 + (z_mm / FIELD_RADIUS_Z_MM) ** 2 <= 1.0:
+        return chest_surface_y_mm(x_mm, z_mm)
+    bins = anatomy_surface_samples()
+    target = (round(x_mm / ANATOMY_BIN_MM), round(z_mm / ANATOMY_BIN_MM))
+    if target in bins:
+        return bins[target]
+    for radius in range(1, 6):
+        candidates = [
+            (key, value)
+            for key, value in bins.items()
+            if abs(key[0] - target[0]) <= radius and abs(key[1] - target[1]) <= radius
+        ]
+        if candidates:
+            return min(
+                candidates,
+                key=lambda item: (item[0][0] - target[0]) ** 2
+                + (item[0][1] - target[1]) ** 2,
+            )[1]
+    return chest_surface_y_mm(
+        max(-FIELD_RADIUS_X_MM, min(FIELD_RADIUS_X_MM, x_mm)),
+        max(-FIELD_RADIUS_Z_MM, min(FIELD_RADIUS_Z_MM, z_mm)),
     )
 
 
@@ -281,6 +346,44 @@ def _add_protected_anatomy(root):
     return ribs
 
 
+def _add_body_contact_shell(root):
+    positions = []
+    for (x_bin, z_bin), surface_y in anatomy_surface_samples().items():
+        x_mm = x_bin * ANATOMY_BIN_MM
+        z_mm = z_bin * ANATOMY_BIN_MM
+        if (x_mm / 44.0) ** 2 + (z_mm / 40.0) ** 2 <= 1.0:
+            continue
+        positions.append([x_mm, surface_y - BODY_CONTACT_RADIUS_MM, z_mm])
+    if not positions:
+        return None
+    shell = root.addChild("bodyContactShell")
+    shell.addObject("EulerImplicitSolver")
+    shell.addObject(
+        "SparseLDLSolver",
+        name="linearSolver",
+        template="CompressedRowSparseMatrixMat3x3d",
+    )
+    shell.addObject("MechanicalObject", template="Vec3d", name="dofs", position=positions)
+    shell.addObject("UniformMass", totalMass=0.001)
+    shell.addObject(
+        "RestShapeSpringsForceField",
+        points=list(range(len(positions))),
+        stiffness=0.25,
+        angularStiffness=0.0,
+    )
+    shell.addObject(
+        "SphereCollisionModel",
+        name="skin",
+        radius=BODY_CONTACT_RADIUS_MM,
+        simulated=True,
+        moving=False,
+        group=1,
+        tags="BodyContact",
+    )
+    shell.addObject("LinearSolverConstraintCorrection")
+    return shell
+
+
 def createScene(root, carving_active=False):
     root.dt = 0.01
     root.gravity = [0.0, 0.0, 0.0]
@@ -301,6 +404,7 @@ def createScene(root, carving_active=False):
             "Sofa.Component.Mass",
             "Sofa.Component.ODESolver.Backward",
             "Sofa.Component.SolidMechanics.FEM.Elastic",
+            "Sofa.Component.SolidMechanics.Spring",
             "Sofa.Component.StateContainer",
             "Sofa.Component.Topology.Container.Dynamic",
             "Sofa.Component.Topology.Mapping",
@@ -332,6 +436,7 @@ def createScene(root, carving_active=False):
     layers = root.addChild("layers")
     for name, specification in LAYER_SPECS.items():
         _add_layer(layers, name, specification)
+    _add_body_contact_shell(root)
     _add_protected_anatomy(root)
     _add_tool(root)
 

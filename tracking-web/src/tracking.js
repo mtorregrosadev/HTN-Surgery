@@ -29,6 +29,8 @@ const MAX_CORRECTION_BITS = {
   [DICTIONARIES.OPENCV_5X5_250]: 2,
 };
 
+const GEOMETRY_EPSILON = 1e-8;
+
 export function createDetector(dictionaryName = DEFAULT_DICTIONARY) {
   if (!Object.values(DICTIONARIES).includes(dictionaryName)) throw new Error('Unsupported marker dictionary');
   return new AR.Detector({ dictionaryName });
@@ -39,37 +41,124 @@ export function markerSvg(dictionaryName = DEFAULT_DICTIONARY) {
   return new AR.Dictionary(dictionaryName).generateSVG(TARGET_MARKER_ID);
 }
 
-export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY) {
-  const validMarkers = markers.filter((marker) => marker.hammingDistance <= MAX_CORRECTION_BITS[dictionaryName]);
-  if (dictionaryName !== DICTIONARIES.SURGE_PREP) {
-    return validMarkers.reduce((largest, marker) => {
-      const size = marker.corners.reduce((sum, corner, index) => {
-        const next = marker.corners[(index + 1) % 4];
-        return sum + Math.hypot(next.x - corner.x, next.y - corner.y);
-      }, 0);
-      return !largest || size > largest.size ? { marker, size } : largest;
-    }, null)?.marker ?? null;
+function cross(ax, ay, bx, by) {
+  return ax * by - ay * bx;
+}
+
+function crossPoints(a, b, c) {
+  return cross(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y);
+}
+
+function finitePoint(point) {
+  return point && Number.isFinite(point.x) && Number.isFinite(point.y);
+}
+
+/**
+ * Return the intersection of two finite line segments, or null when they are
+ * parallel/degenerate. The marker diagonals are segments, not infinite lines,
+ * so checking the parameters also rejects crossed or malformed corner lists.
+ */
+function segmentIntersection(startA, endA, startB, endB) {
+  const directionA = { x: endA.x - startA.x, y: endA.y - startA.y };
+  const directionB = { x: endB.x - startB.x, y: endB.y - startB.y };
+  const denominator = cross(directionA.x, directionA.y, directionB.x, directionB.y);
+  const offset = { x: startB.x - startA.x, y: startB.y - startA.y };
+  const scale = Math.max(
+    Math.hypot(directionA.x, directionA.y),
+    Math.hypot(directionB.x, directionB.y),
+    1,
+  );
+  if (!Number.isFinite(denominator) || Math.abs(denominator) <= GEOMETRY_EPSILON * scale * scale) return null;
+  const parameterA = cross(offset.x, offset.y, directionB.x, directionB.y) / denominator;
+  const parameterB = cross(offset.x, offset.y, directionA.x, directionA.y) / denominator;
+  if (
+    parameterA < -GEOMETRY_EPSILON || parameterA > 1 + GEOMETRY_EPSILON ||
+    parameterB < -GEOMETRY_EPSILON || parameterB > 1 + GEOMETRY_EPSILON
+  ) return null;
+  return {
+    x: startA.x + parameterA * directionA.x,
+    y: startA.y + parameterA * directionA.y,
+  };
+}
+
+/**
+ * ArUco returns corners in perimeter order. A valid marker must be a finite,
+ * non-self-intersecting convex quadrilateral; otherwise a false center can
+ * contaminate the path and depth estimate. The diagonal intersection is the
+ * projective image of the square's center and remains correct under oblique
+ * views where the mean of four image corners is biased.
+ */
+export function projectiveMarkerCenter(corners) {
+  if (!Array.isArray(corners) || corners.length !== 4 || corners.some((corner) => !finitePoint(corner))) return null;
+  const edgeLengths = corners.map((corner, index) => {
+    const next = corners[(index + 1) % corners.length];
+    return Math.hypot(next.x - corner.x, next.y - corner.y);
+  });
+  const scale = Math.max(...edgeLengths);
+  if (!Number.isFinite(scale) || scale <= GEOMETRY_EPSILON || edgeLengths.some((length) => length <= GEOMETRY_EPSILON)) return null;
+
+  const signedCorners = corners.map((corner, index) => crossPoints(corner, corners[(index + 1) % 4], corners[(index + 2) % 4]));
+  const orientation = Math.sign(signedCorners[0]);
+  const areaTolerance = GEOMETRY_EPSILON * scale * scale;
+  if (
+    !orientation ||
+    signedCorners.some((turn) => Math.abs(turn) <= areaTolerance || Math.sign(turn) !== orientation)
+  ) return null;
+
+  return segmentIntersection(corners[0], corners[2], corners[1], corners[3]);
+}
+
+function markerGeometryValid(marker) {
+  return Boolean(projectiveMarkerCenter(marker?.corners));
+}
+
+function markerSize(corners) {
+  return corners.reduce((sum, corner, index) => {
+    const next = corners[(index + 1) % corners.length];
+    return sum + Math.hypot(next.x - corner.x, next.y - corner.y);
+  }, 0) / corners.length;
+}
+
+/**
+ * Select one decoded marker. Pass the previously selected ID to keep the
+ * target stable through frames; a missing locked ID returns null instead of
+ * silently switching to another square. Pass null/undefined only for an
+ * explicit selection reset (source restart or dictionary change in the UI).
+ */
+export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY, lockedMarkerId = null) {
+  if (!Array.isArray(markers)) return null;
+  const maxCorrectionBits = MAX_CORRECTION_BITS[dictionaryName];
+  const validMarkers = markers.filter((marker) => (
+    marker &&
+    Number.isFinite(marker.hammingDistance) &&
+    marker.hammingDistance <= maxCorrectionBits &&
+    markerGeometryValid(marker)
+  ));
+  if (lockedMarkerId !== null && lockedMarkerId !== undefined) {
+    return validMarkers.find((marker) => marker.id === lockedMarkerId) ?? null;
   }
-  return validMarkers.find((marker) => marker.id === TARGET_MARKER_ID) ?? null;
+  if (dictionaryName === DICTIONARIES.SURGE_PREP) {
+    return validMarkers.find((marker) => marker.id === TARGET_MARKER_ID) ?? null;
+  }
+  return validMarkers.reduce((largest, marker) => {
+    const size = markerSize(marker.corners);
+    return !largest || size > largest.size ? { marker, size } : largest;
+  }, null)?.marker ?? null;
 }
 
 export function markerPose2d(marker, timestampMs) {
-  if (!marker || marker.corners?.length !== 4) return null;
+  if (!marker || !Array.isArray(marker.corners) || marker.corners.length !== 4) return null;
   const { corners } = marker;
-  const x = corners.reduce((sum, corner) => sum + corner.x, 0) / 4;
-  const y = corners.reduce((sum, corner) => sum + corner.y, 0) / 4;
+  const center = projectiveMarkerCenter(corners);
+  if (!center) return null;
   const dx = corners[1].x - corners[0].x;
   const dy = corners[1].y - corners[0].y;
-  const edgeLengths = corners.map((corner, index) => {
-    const next = corners[(index + 1) % 4];
-    return Math.hypot(next.x - corner.x, next.y - corner.y);
-  });
   return {
     markerId: marker.id,
-    x,
-    y,
+    x: center.x,
+    y: center.y,
     angleDeg: Math.atan2(dy, dx) * 180 / Math.PI,
-    sizePx: edgeLengths.reduce((sum, length) => sum + length, 0) / 4,
+    sizePx: markerSize(corners),
     corners,
     timestampMs,
   };
@@ -120,6 +209,6 @@ export function movementSpeed(previous, current) {
 export function appendPath(path, pose, isContinuous = true) {
   if (!pose) return path;
   const last = path.at(-1);
-  if (last && Math.hypot(pose.x - last.x, pose.y - last.y) < 2) return path;
+  if (last && isContinuous && Math.hypot(pose.x - last.x, pose.y - last.y) < 2) return path;
   return [...path, { x: pose.x, y: pose.y, continuous: isContinuous }].slice(-MAX_PATH_POINTS);
 }

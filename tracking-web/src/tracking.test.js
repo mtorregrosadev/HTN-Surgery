@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, DICTIONARIES, projectiveMarkerCenter, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
 
 function makeMarkerImage(detector, markerId) {
   const size = 320;
@@ -48,6 +48,48 @@ function rasterizeMarkerSvg(svg) {
   return { width: size, height: size, data: pixels };
 }
 
+function rotateImage(image, quarterTurns) {
+  const turns = ((quarterTurns % 4) + 4) % 4;
+  if (turns === 0) return image;
+  const { width, height, data } = image;
+  const rotated = new Uint8ClampedArray(data.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const [rotatedX, rotatedY] = turns === 1
+        ? [height - 1 - y, x]
+        : turns === 2
+          ? [width - 1 - x, height - 1 - y]
+          : [y, width - 1 - x];
+      const sourceIndex = (y * width + x) * 4;
+      const targetIndex = (rotatedY * width + rotatedX) * 4;
+      rotated[targetIndex] = data[sourceIndex];
+      rotated[targetIndex + 1] = data[sourceIndex + 1];
+      rotated[targetIndex + 2] = data[sourceIndex + 2];
+      rotated[targetIndex + 3] = data[sourceIndex + 3];
+    }
+  }
+  return { width, height, data: rotated };
+}
+
+function syntheticMarker(id, corners, hammingDistance = 0) {
+  return { id, corners, hammingDistance };
+}
+
+function squareCorners(centerX, centerY, sidePx, angleDeg = 0) {
+  const angle = angleDeg * Math.PI / 180;
+  const half = sidePx / 2;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return [[-half, -half], [half, -half], [half, half], [-half, half]].map(([x, y]) => ({
+    x: centerX + x * cos - y * sin,
+    y: centerY + x * sin + y * cos,
+  }));
+}
+
+function angleDifference(actual, expected) {
+  return Math.abs(((actual - expected + 180) % 360 + 360) % 360 - 180);
+}
+
 test('generated Surge Prep marker #0 is detected', () => {
   const detector = createDetector(DICTIONARIES.SURGE_PREP);
   const marker = selectMarker(detector.detect(makeMarkerImage(detector, 0)), DICTIONARIES.SURGE_PREP);
@@ -80,6 +122,17 @@ test('the marker preview SVG is detectable in every supported family', () => {
   }
 });
 
+test('each supported dictionary detects its generated marker at quarter-turn rotations', () => {
+  for (const family of Object.values(DICTIONARIES)) {
+    const detector = createDetector(family);
+    const image = makeMarkerImage(detector, 0);
+    for (const quarterTurns of [1, 2, 3]) {
+      const marker = selectMarker(detector.detect(rotateImage(image, quarterTurns)), family);
+      assert.equal(marker?.id, 0, `${family} at ${quarterTurns * 90}°`);
+    }
+  }
+});
+
 test('pose and speed use image coordinates and elapsed time', () => {
   const marker = { id: 0, corners: [{ x: 10, y: 20 }, { x: 30, y: 20 }, { x: 30, y: 40 }, { x: 10, y: 40 }] };
   const pose = markerPose2d(marker, 1000);
@@ -91,6 +144,71 @@ test('pose and speed use image coordinates and elapsed time', () => {
   assert.equal(movementSpeed(pose, { ...pose, timestampMs: 2000 }), null);
   assert.equal(appendPath([], pose).length, 1);
   assert.equal(appendPath([{ x: 20, y: 30 }], pose).length, 1);
+});
+
+test('projective center uses diagonal intersection for an oblique marker', () => {
+  const corners = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 3, y: 3 }, { x: 0, y: 2 }];
+  const center = projectiveMarkerCenter(corners);
+  assert.ok(center);
+  assert.ok(Math.abs(center.x - 4 / 3) < 1e-10);
+  assert.ok(Math.abs(center.y - 4 / 3) < 1e-10);
+  const pose = markerPose2d(syntheticMarker(0, corners), 1000);
+  assert.ok(pose);
+  assert.ok(Math.abs(pose.x - 4 / 3) < 1e-10);
+  assert.ok(Math.abs(pose.y - 4 / 3) < 1e-10);
+  assert.notDeepEqual({ x: pose.x, y: pose.y }, { x: 1.75, y: 1.25 });
+});
+
+test('marker angle remains correct through full in-plane rotations', () => {
+  for (const angleDeg of [-179, -135, -90, -45, 0, 45, 90, 135, 179]) {
+    const pose = markerPose2d(syntheticMarker(0, squareCorners(160, 120, 80, angleDeg)), 1000);
+    assert.ok(pose, `rotation ${angleDeg}° should be valid`);
+    assert.ok(angleDifference(pose.angleDeg, angleDeg) < 1e-8, `rotation ${angleDeg}° measured as ${pose.angleDeg}°`);
+    assert.ok(Math.abs(pose.x - 160) < 1e-8);
+    assert.ok(Math.abs(pose.y - 120) < 1e-8);
+  }
+});
+
+test('invalid marker corners are rejected before producing measurements', () => {
+  const invalid = [
+    null,
+    [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 0 }, { x: 0, y: 2 }],
+    [{ x: 0, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }, { x: 2, y: 0 }],
+    [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 4, y: 0 }, { x: 0, y: 2 }],
+    [{ x: 0, y: 0 }, { x: Number.NaN, y: 1 }, { x: 2, y: 2 }, { x: 0, y: 2 }],
+  ];
+  for (const corners of invalid) {
+    assert.equal(projectiveMarkerCenter(corners), null);
+    assert.equal(markerPose2d(syntheticMarker(0, corners), 1000), null);
+  }
+});
+
+test('selected marker ID stays locked through a competing marker and loss', () => {
+  const small = syntheticMarker(7, squareCorners(80, 80, 40));
+  const large = syntheticMarker(23, squareCorners(240, 160, 120));
+  const selected = selectMarker([small, large], DICTIONARIES.OPENCV_5X5_250);
+  assert.equal(selected?.id, 23);
+  assert.equal(selectMarker([small, large], DICTIONARIES.OPENCV_5X5_250, selected.id)?.id, 23);
+  assert.equal(selectMarker([small], DICTIONARIES.OPENCV_5X5_250, selected.id), null);
+  assert.equal(selectMarker([small, large], DICTIONARIES.OPENCV_5X5_250, selected.id)?.id, 23);
+  assert.equal(selectMarker([small], DICTIONARIES.OPENCV_5X5_250)?.id, 7);
+});
+
+test('path records a visible break instead of fabricating a dropout bridge', () => {
+  const first = { x: 20, y: 30 };
+  const afterLoss = appendPath(appendPath([], first), { x: 100, y: 130 }, false);
+  assert.equal(afterLoss.length, 2);
+  assert.equal(afterLoss[1].continuous, false);
+  const resumed = appendPath(afterLoss, { x: 110, y: 140 }, true);
+  assert.equal(resumed.length, 3);
+  assert.equal(resumed[2].continuous, true);
+});
+
+test('path preserves a break even when reacquisition is near the last point', () => {
+  const beforeLoss = appendPath([], { x: 20, y: 30 });
+  const reacquired = appendPath(beforeLoss, { x: 20.5, y: 30.5 }, false);
+  assert.equal(reacquired.length, 2);
+  assert.equal(reacquired[1].continuous, false);
 });
 
 test('relative Z starts at zero and follows apparent marker size', () => {

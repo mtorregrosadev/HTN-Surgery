@@ -28,7 +28,7 @@ let lastProcessedMs = 0;
 let previousPose = null;
 let path = [];
 let frameCount = 0;
-let missingFrames = 0;
+let selectedMarkerId = null;
 let depthReference = null;
 let calibrationSamples = [];
 
@@ -74,6 +74,10 @@ function resetDepthCalibration(message) {
 }
 
 function beginDepthCalibration() {
+  // This visible reset starts a fresh measurement and explicitly allows a
+  // different marker ID to be selected. Keep ordinary detection loss locked.
+  resetMarkerSelection();
+  previousPose = null;
   if (!source) {
     resetDepthCalibration('Start the camera or demo, then show the marker.');
     return;
@@ -84,6 +88,10 @@ function beginDepthCalibration() {
   setCalibrationStatus('SHOW MARKER');
   $('depth-hint').textContent = 'Hold the full marker still and facing the camera lens.';
   $('position-z').textContent = '—';
+}
+
+function resetMarkerSelection() {
+  selectedMarkerId = null;
 }
 
 let isProcessing = false;
@@ -178,45 +186,13 @@ function processFrame(timestampMs) {
     processingContext.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
     const pixels = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
     const markers = detector.detect(pixels);
-    const marker = selectMarker(markers, dictionaryName);
+    const marker = selectMarker(markers, dictionaryName, selectedMarkerId);
     frameCount += 1;
     $('frame-count').textContent = String(frameCount);
 
     const pose = markerPose2d(marker, timestampMs);
     if (pose) {
-      let isContinuous = true;
-      if (previousPose) {
-        const dt = timestampMs - previousPose.timestampMs;
-        const dist = Math.hypot(pose.x - previousPose.x, pose.y - previousPose.y);
-
-        // Autocomplete brief dropouts (under 500ms and natural hand movement distance):
-        if (missingFrames > 0) {
-          if (dt <= 500 && dist <= 200) {
-            // Smoothly bridge the gap by interpolating intermediate points
-            const steps = Math.min(4, Math.max(1, Math.floor(dist / 20)));
-            for (let s = 1; s < steps; s += 1) {
-              const t = s / steps;
-              path = appendPath(path, {
-                x: previousPose.x + (pose.x - previousPose.x) * t,
-                y: previousPose.y + (pose.y - previousPose.y) * t,
-                timestampMs: previousPose.timestampMs + dt * t,
-              }, true);
-            }
-            isContinuous = true;
-          } else {
-            // Real break: start new stroke
-            isContinuous = false;
-          }
-        }
-      } else {
-        isContinuous = false;
-      }
-
-      missingFrames = 0;
-      if (depthReference && depthReference.markerId !== pose.markerId) {
-        beginDepthCalibration();
-        $('depth-hint').textContent = 'Marker ID changed. Hold this marker still to set a new starting position.';
-      }
+      if (selectedMarkerId === null) selectedMarkerId = pose.markerId;
       if (!depthReference) {
         const result = advanceDepthCalibration(calibrationSamples, pose);
         calibrationSamples = result.samples;
@@ -228,10 +204,13 @@ function processFrame(timestampMs) {
         } else {
           setCalibrationStatus(`HOLD STILL ${calibrationSamples.length}/${CALIBRATION_FRAMES}`);
         }
+      } else {
+        setCalibrationStatus('Z READY', true);
       }
+      const hadPreviousPose = previousPose !== null;
       const speed = movementSpeed(previousPose, pose);
+      path = appendPath(path, pose, hadPreviousPose && speed !== null);
       previousPose = pose;
-      path = appendPath(path, pose, isContinuous);
       setStatus('MARKER FOUND', 'detected');
       setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
       $('position-x').textContent = Math.round(pose.x);
@@ -245,25 +224,29 @@ function processFrame(timestampMs) {
       $('speed').textContent = speed == null ? '—' : Math.round(speed);
       $('marker-id').textContent = `#${pose.markerId}`;
     } else {
-      missingFrames += 1;
+      // A lost or malformed detection is a real gap. Clear stale readouts and
+      // drop the speed baseline immediately; the next valid pose starts a new
+      // path segment and is never fabricated across this gap.
+      previousPose = null;
       if (!depthReference) {
         calibrationSamples = [];
         setCalibrationStatus('SHOW MARKER');
         $('depth-hint').textContent = 'Keep the full marker visible and hold it still to set the starting position.';
+      } else {
+        setCalibrationStatus('Z PAUSED');
       }
-      if (missingFrames >= 3) {
-        previousPose = null;
-        setStatus('MARKER LOST', 'searching');
-        const hint = markers.length
+      setStatus('MARKER LOST', 'searching');
+      const hint = selectedMarkerId !== null
+        ? `Marker #${selectedMarkerId} is not visible. Keep it in view; another marker will not be selected automatically.`
+        : markers.length
           ? dictionaryName === DICTIONARIES.SURGE_PREP
             ? 'This marker does not match Surge Prep #0. Select the family shown by your marker generator, or use the marker from this page.'
             : 'The square is not a reliable match. Check the exact marker family in your generator, then keep its white margin visible.'
           : detector.candidates.length
             ? 'A square is visible, but its code does not match. Check the marker family above.'
             : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
-        setTracking('Looking for marker', hint);
-        clearMeasurements();
-      }
+      setTracking('Looking for marker', hint);
+      clearMeasurements();
     }
     drawOverlay(pose);
     drawPreview();
@@ -306,13 +289,13 @@ function stopSource() {
   fileUrl = null;
   source = null;
   $('video-file').value = '';
+  resetMarkerSelection();
   previousPose = null;
   resetDepthCalibration('Start the camera or demo, then show the marker.');
   path = [];
   frameCount = 0;
   $('frame-count').textContent = '0';
   drawPreview();
-  missingFrames = 0;
   overlayContext.clearRect(0, 0, overlay.width, overlay.height);
   $('empty-state').hidden = false;
   $('camera-button').innerHTML = 'Start camera <span>↗</span>';
@@ -381,6 +364,7 @@ async function startVideo() {
 
 function startProcessing(kind) {
   source = kind;
+  resetMarkerSelection();
   processingCanvas.width = Math.min(video.videoWidth, 480);
   processingCanvas.height = Math.round(processingCanvas.width * video.videoHeight / video.videoWidth);
   overlay.width = processingCanvas.width;
@@ -436,6 +420,7 @@ $('clear-button').addEventListener('click', () => { path = []; drawPreview(); dr
 $('dictionary').addEventListener('change', () => {
   dictionaryName = $('dictionary').value;
   detector = createDetector(dictionaryName);
+  resetMarkerSelection();
   previousPose = null;
   resetDepthCalibration('The marker family changed. Hold the new marker still to set a new starting position.');
   path = [];

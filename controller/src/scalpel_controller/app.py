@@ -72,11 +72,30 @@ class SessionHub:
 
     async def hardware_stream(self, socket: WebSocket, session_id: str) -> None:
         await socket.accept()
+        optical_tracking_seen = False
         try:
             while True:
                 sample = await socket.receive_json()
+
+                # Manual/keyboard streams are valid until optical tracking has
+                # actually taken over. Once it has, do not silently fall back to
+                # the last client pose when the tracker goes stale.
+                tracking_pose = self.tracking.telemetry if self.tracking else None
+                tracking_active = bool(tracking_pose and tracking_pose.is_active())
+                if tracking_active:
+                    optical_tracking_seen = True
+                elif optical_tracking_seen:
+                    await self._send_stream_error(
+                        socket,
+                        session_id,
+                        409,
+                        {"detail": "Optical tracking is stale; waiting for a fresh pose"},
+                    )
+                    continue
+
                 # 1. If physical scalpel hardware is actively streaming, merge real FSR pressure
-                if self.hardware and self.hardware.is_active():
+                hardware_active = bool(self.hardware and self.hardware.is_active())
+                if hardware_active:
                     hw = self.hardware.telemetry
                     sample["forceN"] = hw.force_n
                     sample["contact"] = hw.is_contact
@@ -86,8 +105,8 @@ class SessionHub:
                         sample["deviceId"] = hw.device_id
 
                 # 2. If optical camera tracking is active, merge tracked position & orientation
-                if self.tracking and self.tracking.is_active():
-                    tr = self.tracking.telemetry
+                if tracking_active and tracking_pose is not None:
+                    tr = tracking_pose
                     sample["positionMm"] = {
                         "x": tr.x_mm,
                         "y": tr.y_mm,
@@ -102,7 +121,7 @@ class SessionHub:
                     sample["quality"] = max(0.5, tr.confidence)
                     sample["sourceHealthy"] = True
                     # If hardware FSR is not connected, use optical surface depth for contact
-                    if not (self.hardware and self.hardware.is_active()):
+                    if not hardware_active:
                         if tr.y_mm <= 0.0:
                             sample["contact"] = True
                             sample["forceN"] = min(8.0, abs(tr.y_mm) * 0.8 + 0.5)
@@ -113,22 +132,37 @@ class SessionHub:
                         "POST", f"/v1/sessions/{session_id}/samples", sample
                     )
                 except Exception:
+                    await self._send_stream_error(
+                        socket,
+                        session_id,
+                        503,
+                        {"detail": "Controller could not reach the simulation API"},
+                    )
                     continue
 
                 if status_code >= 400:
-                    error = {
-                        "type": "error",
-                        "sessionId": session_id,
-                        "status": status_code,
-                        "detail": snapshot,
-                    }
-                    await socket.send_json(error)
-                    await self.broadcast(session_id, error)
+                    await self._send_stream_error(socket, session_id, status_code, snapshot)
                     continue
                 await socket.send_json(snapshot)
                 await self.broadcast(session_id, snapshot)
         except WebSocketDisconnect:
             return
+
+    async def _send_stream_error(
+        self,
+        socket: WebSocket,
+        session_id: str,
+        status_code: int,
+        detail: Any,
+    ) -> None:
+        error = {
+            "type": "error",
+            "sessionId": session_id,
+            "status": status_code,
+            "detail": detail,
+        }
+        await socket.send_json(error)
+        await self.broadcast(session_id, error)
 
     async def broadcast(self, session_id: str, snapshot: Any) -> None:
         disconnected: list[WebSocket] = []
@@ -268,5 +302,4 @@ def create_app(
 
 
 app = create_app()
-
 

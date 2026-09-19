@@ -10,7 +10,8 @@ Firmware for the ESP32-C3 microcontroller driving an I2C OLED display (SSD1306, 
 | **OLED SCL** | **GPIO 4** | I2C Clock |
 | **OLED VCC** | **5V** (or 3.3V) | Power |
 | **OLED GND** | **GND** | Ground |
-| **Pressure Sensor** | **GPIO 10** | Pressure / contact signal (supports pull-down/pull-up/floating) |
+| **FSR 400/402 (Analog)** | **GPIO 1** | **Recommended ADC1 pin** (12-bit 0-4095 continuous analog force) |
+| **Pressure Switch (Digital)**| **GPIO 10** | Digital-only GPIO input |
 
 ## Display Modes
 
@@ -21,7 +22,7 @@ The display manager renders fiducial markers with an explicit white quiet zone b
 3. **Mode 2 (`'2'`)**: ArUco Surge Prep MIP 36h12 #0.
 4. **Mode 3 (`'3'`)**: ArUco OpenCV 4×4 #0.
 5. **Mode 4 (`'4'`)**: Split View (ArUco 5×5 #0 + live pressure status).
-6. **Mode 5 (`'5'` or `'p'`)**: Pressure Sensor Monitor (live contact state, pressure gauge bar, raw value, sequence number, and TX status).
+6. **Mode 5 (`'5'` or `'p'`)**: Pressure Sensor Monitor (live contact state, analog/digital pressure gauge bar, force in Newtons, raw value, sequence number, and TX status).
 
 ## Switching Modes & Terminal Sharing
 
@@ -29,6 +30,8 @@ The display manager renders fiducial markers with an explicit white quiet zone b
 - **USB Serial Terminal (115200 baud)**:
   - `'0'` - `'5'`: Select display screen directly.
   - `'p'`: Jump directly to Pressure Sensor Monitor screen.
+  - `'k'`: Toggle active pin (**GPIO 1 [12-bit ADC1 Analog]** <-> **GPIO 10 [Digital]**).
+  - `'c'`: Auto-zero ADC baseline for unpressed FSR 400/402.
   - `'t'` / `'s'`: Toggle continuous pressure streaming in terminal.
   - `'j'`: Toggle JSON telemetry stream vs. human-readable log.
   - `'r'`: Read instantaneous pressure sensor diagnostics.

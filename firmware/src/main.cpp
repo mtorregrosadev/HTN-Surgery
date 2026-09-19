@@ -9,8 +9,13 @@
 #define OLED_RESET -1
 #define PIN_SDA 3
 #define PIN_SCL 4
-#define PIN_BUTTON 9   // ESP32-C3 onboard BOOT button
-#define PIN_PRESSURE 10 // Pressure sensor input on GPIO 10
+#define PIN_BUTTON 9        // ESP32-C3 onboard BOOT button
+#define PIN_PRESSURE_ADC 1  // ESP32-C3 ADC1_CH1: 12-bit Analog input for FSR 400/402
+#define PIN_PRESSURE_DIG 10 // ESP32-C3 GPIO 10: Digital GPIO
+
+uint8_t activePressurePin = PIN_PRESSURE_ADC; // Default to GPIO 1 for analog FSR 400/402
+int adcZeroBaseline = 0;
+int adcContactThreshold = 80;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -210,26 +215,42 @@ const char* getPullModeName() {
 
 void applyPullMode() {
   if (currentPullMode == PULL_DOWN) {
-    pinMode(PIN_PRESSURE, INPUT_PULLDOWN);
+    pinMode(activePressurePin, INPUT_PULLDOWN);
   } else if (currentPullMode == PULL_UP) {
-    pinMode(PIN_PRESSURE, INPUT_PULLUP);
+    pinMode(activePressurePin, INPUT_PULLUP);
   } else {
-    pinMode(PIN_PRESSURE, INPUT);
+    pinMode(activePressurePin, INPUT);
   }
 }
 
+void calibrateAdcZero() {
+  if (!pressure.isAdc) return;
+  long sum = 0;
+  for (int i = 0; i < 20; i++) {
+    sum += analogRead(activePressurePin);
+    delay(5);
+  }
+  adcZeroBaseline = (int)(sum / 20);
+  adcContactThreshold = adcZeroBaseline + 80;
+  Serial.printf("[FSR-402] Baseline zeroed to raw=%d (Threshold: %d on Pin %d)\n",
+                adcZeroBaseline, adcContactThreshold, activePressurePin);
+}
+
 void initPressureSensor() {
-  applyPullMode();
-#if defined(digitalPinToAnalogChannel)
-  pressure.isAdc = (digitalPinToAnalogChannel(PIN_PRESSURE) >= 0);
-#else
-  pressure.isAdc = false;
-#endif
-  Serial.printf("[Sensor] Pressure Sensor configured on GPIO %d (%s, Active %s, Mode: %s)\n",
-                PIN_PRESSURE,
+  pressure.isAdc = (digitalPinToAnalogChannel(activePressurePin) >= 0);
+  if (pressure.isAdc) {
+    pinMode(activePressurePin, INPUT); // Disable internal pull resistors so external FSR divider isn't distorted
+    calibrateAdcZero();
+  } else {
+    applyPullMode();
+  }
+  Serial.printf("[Sensor] Pressure Sensor configured on GPIO %d (%s, Mode: %s)\n",
+                activePressurePin,
                 getPullModeName(),
-                pressureActiveHigh ? "HIGH" : "LOW",
-                pressure.isAdc ? "ADC/Analog" : "Digital GPIO");
+                pressure.isAdc ? "12-bit ADC1 Analog (FSR 400/402)" : "Digital GPIO");
+  if (!pressure.isAdc) {
+    Serial.println("[NOTE] GPIO 10 is digital-only on ESP32-C3. Move signal wire to GPIO 1 for true analog FSR 400/402!");
+  }
 }
 
 bool updatePressureSensor() {
@@ -238,11 +259,13 @@ bool updatePressureSensor() {
   bool contact = false;
 
   if (pressure.isAdc) {
-    raw = analogRead(PIN_PRESSURE);
-    contact = (raw > 500);
-    pressure.forceEstimateN = contact ? ((float)(raw - 500) / 3595.0f * 10.0f + 0.5f) : 0.0f;
+    raw = analogRead(activePressurePin);
+    int delta = max(0, raw - adcZeroBaseline);
+    contact = (delta > 80);
+    int span = max(100, 4095 - adcZeroBaseline);
+    pressure.forceEstimateN = contact ? ((float)delta / (float)span * 10.0f) : 0.0f;
   } else {
-    raw = digitalRead(PIN_PRESSURE);
+    raw = digitalRead(activePressurePin);
     contact = pressureActiveHigh ? (raw == HIGH) : (raw == LOW);
     pressure.forceEstimateN = contact ? 1.5f : 0.0f;
   }
@@ -260,8 +283,9 @@ bool updatePressureSensor() {
 
     // Immediate terminal event
     if (jsonTerminal) {
-      Serial.printf("{\"event\":\"pressure_event\",\"pin\":%d,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"seq\":%lu,\"timestampMs\":%lu}\n",
-                    PIN_PRESSURE,
+      Serial.printf("{\"event\":\"pressure_event\",\"pin\":%d,\"isAdc\":%s,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"seq\":%lu,\"timestampMs\":%lu}\n",
+                    activePressurePin,
+                    pressure.isAdc ? "true" : "false",
                     pressure.isContact ? "true" : "false",
                     pressure.rawValue,
                     pressure.forceEstimateN,
@@ -270,10 +294,10 @@ bool updatePressureSensor() {
     } else {
       if (pressure.isContact) {
         Serial.printf(">>> [PRESSURE EVENT] >>> CONTACT DETECTED on Pin %d! Raw=%d | Force=%.2f N | Seq=%lu | Time=%lu ms <<<\n",
-                      PIN_PRESSURE, pressure.rawValue, pressure.forceEstimateN, pressure.sampleCount, now);
+                      activePressurePin, pressure.rawValue, pressure.forceEstimateN, pressure.sampleCount, now);
       } else {
         Serial.printf("--- [PRESSURE EVENT] --- Contact RELEASED on Pin %d. Raw=%d | Force=0.00 N | Seq=%lu | Time=%lu ms ---\n",
-                      PIN_PRESSURE, pressure.rawValue, pressure.sampleCount, now);
+                      activePressurePin, pressure.rawValue, pressure.sampleCount, now);
       }
     }
   }
@@ -288,8 +312,9 @@ void streamPressureToTerminal() {
   lastStreamMs = now;
 
   if (jsonTerminal) {
-    Serial.printf("{\"type\":\"pressure\",\"pin\":%d,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"pull\":\"%s\",\"seq\":%lu,\"timestampMs\":%lu}\n",
-                  PIN_PRESSURE,
+    Serial.printf("{\"type\":\"pressure\",\"pin\":%d,\"isAdc\":%s,\"contact\":%s,\"raw\":%d,\"forceN\":%.2f,\"pull\":\"%s\",\"seq\":%lu,\"timestampMs\":%lu}\n",
+                  activePressurePin,
+                  pressure.isAdc ? "true" : "false",
                   pressure.isContact ? "true" : "false",
                   pressure.rawValue,
                   pressure.forceEstimateN,
@@ -297,8 +322,9 @@ void streamPressureToTerminal() {
                   pressure.sampleCount,
                   now);
   } else {
-    Serial.printf("[PRESSURE] pin=%d | state=%-7s | raw=%d | force=%.2fN | pull=%-9s | seq=%lu | t=%lums\n",
-                  PIN_PRESSURE,
+    Serial.printf("[PRESSURE] pin=%d (%s) | state=%-7s | raw=%-4d | force=%.2fN | pull=%-9s | seq=%lu | t=%lums\n",
+                  activePressurePin,
+                  pressure.isAdc ? "ADC1" : "DIG ",
                   pressure.isContact ? "CONTACT" : "IDLE",
                   pressure.rawValue,
                   pressure.forceEstimateN,
@@ -318,10 +344,14 @@ void drawPressureScreen() {
   display.setCursor(4, 2);
   display.print("SURGE PREP PRESSURE");
 
-  // Subtitle with Pin & Pull mode
+  // Subtitle with Pin & Mode
   display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
   display.setCursor(2, 14);
-  display.printf("PIN: GPIO %d [%s]", PIN_PRESSURE, getPullModeName());
+  if (pressure.isAdc) {
+    display.printf("PIN: GPIO %d [ADC1 ANALOG]", activePressurePin);
+  } else {
+    display.printf("PIN: GPIO %d [%s DIG]", activePressurePin, getPullModeName());
+  }
 
   // Contact status box
   if (pressure.isContact) {
@@ -340,7 +370,9 @@ void drawPressureScreen() {
   display.drawRect(2, 42, SCREEN_WIDTH - 4, 8, SSD1306_WHITE);
   int fillWidth = 0;
   if (pressure.isAdc) {
-    fillWidth = map(constrain(pressure.rawValue, 0, 4095), 0, 4095, 0, SCREEN_WIDTH - 8);
+    int delta = max(0, pressure.rawValue - adcZeroBaseline);
+    int span = max(100, 4095 - adcZeroBaseline);
+    fillWidth = map(constrain(delta, 0, span), 0, span, 0, SCREEN_WIDTH - 8);
   } else {
     fillWidth = pressure.isContact ? (SCREEN_WIDTH - 8) : 0;
   }
@@ -351,10 +383,17 @@ void drawPressureScreen() {
   // Telemetry status line
   display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
   display.setCursor(2, 54);
-  display.printf("RAW:%d  SEQ:%lu  %s",
-                 pressure.rawValue,
-                 pressure.sampleCount % 1000,
-                 streamTerminal ? "TX:ON" : "TX:OFF");
+  if (pressure.isAdc) {
+    display.printf("RAW:%-4d FORCE:%.1fN  %s",
+                   pressure.rawValue,
+                   pressure.forceEstimateN,
+                   streamTerminal ? "TX" : "--");
+  } else {
+    display.printf("RAW:%d  SEQ:%lu  %s",
+                   pressure.rawValue,
+                   pressure.sampleCount % 1000,
+                   streamTerminal ? "TX:ON" : "TX:OFF");
+  }
 
   display.display();
 }
@@ -417,7 +456,8 @@ void renderCurrentMode() {
       drawSplitView();
       break;
     case MODE_PRESSURE:
-      Serial.println("[Display] Mode 5: Pressure Sensor Monitor (GPIO 10)");
+      Serial.printf("[Display] Mode 5: Pressure Sensor Monitor (GPIO %d - %s)\n",
+                    activePressurePin, pressure.isAdc ? "ADC1 Analog" : "Digital");
       drawPressureScreen();
       break;
     default:
@@ -432,8 +472,10 @@ void printHelp() {
   Serial.println("  '2' : ArUco MIP 36h12 #0");
   Serial.println("  '3' : ArUco OpenCV 4x4 #0 (High Motion Tolerance)");
   Serial.println("  '4' : Split View (ArUco + Pressure Status)");
-  Serial.println("  '5' : Pressure Sensor Screen (GPIO 10)");
+  Serial.println("  '5' : Pressure Sensor Screen");
   Serial.println("  'p' : Switch to Pressure Sensor screen");
+  Serial.println("  'k' : Toggle pin (GPIO 1 [ADC1 Analog] <-> GPIO 10 [Digital])");
+  Serial.println("  'c' : Auto-zero ADC baseline for unpressed FSR 400/402");
   Serial.println("  't' : Toggle terminal pressure streaming (ON/OFF)");
   Serial.println("  'j' : Toggle JSON telemetry output (ON/OFF)");
   Serial.println("  'r' : Instantaneous pressure reading & diagnostics");
@@ -487,7 +529,7 @@ void setup() {
     display.ssd1306_command(0xFF); // Maximum contrast
   }
 
-  // Initialize Pressure Sensor on GPIO 10
+  // Initialize Pressure Sensor (default to GPIO 1 for ADC)
   initPressureSensor();
 
   renderCurrentMode();
@@ -523,6 +565,14 @@ void loop() {
     } else if (ch == 'p') {
       currentMode = MODE_PRESSURE;
       renderCurrentMode();
+    } else if (ch == 'k') {
+      activePressurePin = (activePressurePin == PIN_PRESSURE_ADC) ? PIN_PRESSURE_DIG : PIN_PRESSURE_ADC;
+      initPressureSensor();
+      if (currentMode == MODE_PRESSURE) {
+        renderCurrentMode();
+      }
+    } else if (ch == 'c') {
+      calibrateAdcZero();
     } else if (ch == ' ' || ch == 'n') {
       currentMode = (DisplayMode)((currentMode + 1) % MODE_COUNT);
       renderCurrentMode();
@@ -538,12 +588,12 @@ void loop() {
       Serial.printf("[Terminal] JSON output format: %s\n", jsonTerminal ? "ENABLED" : "DISABLED");
     } else if (ch == 'r') {
       Serial.printf("[Pressure Reading] Pin %d: Raw=%d, Contact=%s, Force=%.2f N, Pull=%s, Mode=%s\n",
-                    PIN_PRESSURE,
+                    activePressurePin,
                     pressure.rawValue,
                     pressure.isContact ? "YES" : "NO",
                     pressure.forceEstimateN,
                     getPullModeName(),
-                    pressure.isAdc ? "ADC" : "Digital");
+                    pressure.isAdc ? "ADC1 Analog (FSR 400/402)" : "Digital GPIO");
     } else if (ch == 'i') {
       pressureActiveHigh = !pressureActiveHigh;
       Serial.printf("[Pressure Config] Polarity: Active %s\n", pressureActiveHigh ? "HIGH" : "LOW");

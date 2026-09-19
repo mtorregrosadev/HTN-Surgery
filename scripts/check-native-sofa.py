@@ -61,22 +61,37 @@ def configure_paths(root: Path) -> None:
         os.environ["PYTHONPATH"] = pythonpath + os.pathsep + os.environ.get("PYTHONPATH", "")
         sys.path[:0] = [path for path in paths if Path(path).is_dir() and path not in sys.path]
     if lib.is_dir():
-        os.environ["DYLD_LIBRARY_PATH"] = str(lib) + os.pathsep + os.environ.get("DYLD_LIBRARY_PATH", "")
-        os.environ["LD_LIBRARY_PATH"] = str(lib) + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+        lib_paths = [str(lib)]
+        if plugins.is_dir():
+            lib_paths.extend(str(path) for path in plugins.glob("*/lib") if path.is_dir())
+        joined = os.pathsep.join(lib_paths)
+        os.environ["DYLD_LIBRARY_PATH"] = joined + os.pathsep + os.environ.get("DYLD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = joined + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
     os.environ["SOFA_ROOT"] = str(root)
     os.environ["SURGE_PREP_SOFA_ROOT"] = str(root)
+    os.environ.setdefault("SOFAPYTHON3_ROOT", str(plugins / "SofaPython3"))
 
 
 def import_plugins() -> None:
     try:
+        import numpy  # noqa: F401
+    except ImportError:
+        fail(
+            "numpy is required by SofaPython3. Create a Python 3.12 venv and install it: "
+            "python3.12 -m venv .venv-sofa && .venv-sofa/bin/pip install numpy"
+        )
+    try:
         import Sofa  # noqa: F401
-        import SofaRuntime  # noqa: F401
+        import SofaRuntime
     except ImportError as error:
         fail(f"SofaPython3 did not import ({error}).")
     try:
-        import SofaCarving  # noqa: F401
-    except ImportError as error:
-        fail(f"SofaCarving did not import ({error}).")
+        loaded = SofaRuntime.importPlugin("SofaCarving")
+    except Exception as error:
+        fail(f"SofaCarving plugin failed to load ({error}).")
+    else:
+        if loaded is False:
+            fail("SofaCarving plugin was not found in the SOFA install.")
     print("Loaded Sofa, SofaRuntime, and SofaCarving.")
 
 
@@ -89,10 +104,14 @@ def smoke_test() -> None:
     spec_ns: dict = {}
     exec(scene_path.read_text(), spec_ns)
     root = Sofa.Core.Node("smoke")
-    spec_ns["createScene"](root)
+    # Loading and initializing the real CarvingManager verifies SofaCarving.
+    # Keep it inactive while gravity drives the FEM smoke test: activating
+    # carving while the tool is teleported into tissue can crash native SOFA.
+    spec_ns["createScene"](root, carving_active=False)
+    root.gravity = [0.0, -9810.0, 0.0]
     Sofa.Simulation.init(root)
     root.tool.dofs.position.value = [[0.0, -1.2, 0.0, 0.0, 0.0, 0.0, 1.0]]
-    for _ in range(8):
+    for _ in range(12):
         Sofa.Simulation.animate(root, 0.01)
     skin = root.skin.dofs.position.value
     rest = root.skin.dofs.rest_position.value
@@ -100,7 +119,10 @@ def smoke_test() -> None:
         sum((float(point[i]) - float(rest[i])) ** 2 for i in range(3)) ** 0.5
         for point, rest in zip(skin, rest)
     )
+    has_carving = root.getObject("CarvingManager") is not None
     Sofa.Simulation.unload(root)
+    if not has_carving:
+        fail("CarvingManager was not created.")
     if deformation <= 0.0:
         fail("Headless smoke test did not produce skin deformation.")
     print(f"Headless deformation-and-carving smoke test passed ({deformation:.3f} mm).")

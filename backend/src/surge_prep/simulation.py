@@ -127,15 +127,16 @@ class SofaSimulator(Simulator):
         try:
             import Sofa
             import Sofa.Simulation
-            import SofaRuntime  # noqa: F401
+            import SofaRuntime
         except ImportError as error:
             raise RuntimeError(
                 "Native SOFA backend selected but SofaPython3 is unavailable. "
                 "Install official SOFA v26.06 and run scripts/check-native-sofa.py"
             ) from error
         try:
-            import SofaCarving  # noqa: F401
-        except ImportError as error:
+            if SofaRuntime.importPlugin("SofaCarving") is False:
+                raise RuntimeError("SofaCarving plugin was not found")
+        except Exception as error:
             raise RuntimeError(
                 "SofaCarving is required for the showcase topology path. "
                 "Use the official SOFA v26.06 package and re-run scripts/check-native-sofa.py"
@@ -212,8 +213,7 @@ class SofaSimulator(Simulator):
     def _apply_tool(self, root: Any, sample: ToolSample, tool_pose: list) -> None:
         root.tool.dofs.position.value = tool_pose
         radius = {"scalpel": 1.6, "blunt-dissector": 2.4, "chest-tube": 3.2}.get(sample.tool_id, 2.0)
-        if hasattr(root.tool, "collision"):
-            root.tool.collision.radius.value = radius
+        root.tool.CollisionModel.ParticleModel.radius.value = radius
 
     @staticmethod
     def _maximum_deformation_mm(root: Any) -> float:

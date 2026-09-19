@@ -6,3 +6,5 @@ __pycache__/
 *.py[cod]
 tracking-web/node_modules/
 tracking-web/dist/
+.pio/
+firmware/.pio/

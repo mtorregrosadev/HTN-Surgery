@@ -134,7 +134,9 @@ class IncisionState:
                 b = a + 1
                 c = (row + 1) * x_columns + column + 1
                 d = c - 1
-                triangles.extend([a, b, c, a, c, d])
+                # Face +Y so the chest-mounted surface faces Unity's front camera
+                # after the API-to-Unity handedness conversion and scene rotation.
+                triangles.extend([a, c, b, a, d, c])
         return DeformableMeshState(
             object_id="training-membrane",
             topology_revision=self.topology_revision,
@@ -157,7 +159,10 @@ class IncisionState:
                 Vector3(x=x1, y=surface_y_mm - depth * 0.6 - 0.2, z=half_width),
                 Vector3(x=x0, y=surface_y_mm - depth * 0.6 - 0.2, z=half_width),
             ])
-            triangles.extend([base, base + 1, base + 2, base, base + 2, base + 3])
+            triangles.extend([
+                base, base + 2, base + 1,
+                base, base + 3, base + 2,
+            ])
         return DeformableMeshState(
             object_id="incision-channel",
             topology_revision=self.topology_revision,

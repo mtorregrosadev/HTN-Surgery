@@ -118,8 +118,10 @@ async def test_controlled_motion_opens_an_incision_and_records_metrics():
     assert latest.tissue.incision_length_mm >= 24
     assert latest.tissue.incision_depth_mm >= 0.65
     assert latest.deformable_meshes[0].topology_revision > 1
+    assert latest.deformable_meshes[0].triangle_indices[:3] == [0, 14, 1]
     assert latest.deformable_meshes[1].object_id == "incision-channel"
     assert latest.deformable_meshes[1].triangle_indices
+    assert latest.deformable_meshes[1].triangle_indices[:3] == [0, 2, 1]
 
     result = await service.complete_session(session.session_id)
     assert result.metrics.incision_length_mm == latest.tissue.incision_length_mm

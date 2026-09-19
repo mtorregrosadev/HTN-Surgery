@@ -90,8 +90,21 @@ namespace SurgePrep
                 var tip = new GameObject("Authoritative SOFA Tool Tip");
                 tip.transform.SetParent(transform, false);
                 toolTransform = tip.transform;
-                CreateToolVisuals(tip.transform);
             }
+            if (scalpelVisual == null)
+            {
+                CreateToolVisuals(toolTransform);
+            }
+            // Hover 12 mm above chest in procedure window so the scalpel is immediately visible
+            toolTargetPosition = new Vector3(0f, 0.012f, 0f);
+            toolTransform.localPosition = toolTargetPosition;
+            toolTransform.localRotation = CoordinateFrame.Rotation(new QuaternionDto
+            {
+                qx = 0.34202014f,
+                qy = 0f,
+                qz = 0f,
+                qw = 0.93969262f
+            });
         }
 
         private void CreateToolVisuals(Transform tip)
@@ -128,7 +141,8 @@ namespace SurgePrep
             {
                 foreach (var renderer in tip.GetComponentsInChildren<MeshRenderer>())
                 {
-                    if (renderer.sharedMaterial != null && renderer.sharedMaterial.name == "ScalpelBlade")
+                    if (renderer.sharedMaterial != null &&
+                        (renderer.sharedMaterial.name == "ScalpelBlade" || renderer.sharedMaterial.name == "ScalpelPurpleHandle"))
                     {
                         continue;
                     }
@@ -136,7 +150,6 @@ namespace SurgePrep
                 }
             }
             UpdateToolVisual("scalpel");
-
         }
 
         private void UpdateToolVisual(string toolId)
@@ -150,25 +163,44 @@ namespace SurgePrep
 
         private static void CreateReadableScalpel(Transform parent)
         {
-            Primitive(
+            var handle = Primitive(
                 "Scalpel handle", PrimitiveType.Capsule, parent,
-                new Vector3(0f, 0.072f, 0f), new Vector3(0.011f, 0.048f, 0.011f)
+                new Vector3(0f, 0.072f, 0f), new Vector3(0.013f, 0.054f, 0.013f)
             );
-            Primitive(
+            var guard = Primitive(
                 "Scalpel guard", PrimitiveType.Cube, parent,
-                new Vector3(0f, 0.032f, 0f), new Vector3(0.018f, 0.006f, 0.012f)
+                new Vector3(0f, 0.032f, 0f), new Vector3(0.020f, 0.007f, 0.014f)
             );
             var blade = Primitive(
                 "Scalpel blade", PrimitiveType.Cube, parent,
-                new Vector3(0.005f, 0.014f, 0f), new Vector3(0.016f, 0.028f, 0.0024f)
+                new Vector3(0.006f, 0.014f, 0f), new Vector3(0.018f, 0.028f, 0.003f)
             );
+
+            // Handle: Purple surgical training tool color (matching real physical prototype)
+            var handleRenderer = handle.GetComponent<MeshRenderer>();
+            if (handleRenderer != null)
+            {
+                var purpleMat = new Material(handleRenderer.sharedMaterial)
+                {
+                    name = "ScalpelPurpleHandle",
+                    color = new Color(0.65f, 0.22f, 0.88f)
+                };
+                handleRenderer.sharedMaterial = purpleMat;
+            }
+            var guardRenderer = guard.GetComponent<MeshRenderer>();
+            if (guardRenderer != null && handleRenderer != null)
+            {
+                guardRenderer.sharedMaterial = handleRenderer.sharedMaterial;
+            }
+
+            // Blade: Bright stainless surgical steel
             var renderer = blade.GetComponent<MeshRenderer>();
             if (renderer != null)
             {
                 var bladeMaterial = new Material(renderer.sharedMaterial)
                 {
                     name = "ScalpelBlade",
-                    color = new Color(0.82f, 0.84f, 0.86f)
+                    color = new Color(0.92f, 0.94f, 0.96f)
                 };
                 renderer.sharedMaterial = bladeMaterial;
             }

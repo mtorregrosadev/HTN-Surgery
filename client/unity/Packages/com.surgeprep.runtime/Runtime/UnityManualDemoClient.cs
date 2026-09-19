@@ -68,29 +68,51 @@ namespace SurgePrep
         public bool TrackingActive { get; private set; }
         public string TrackingSource { get; private set; } = "";
 
-        private async void OnEnable()
+        private void OnEnable()
         {
-            trackingFailed = false;
-            frozen = false;
-            ClearReceived();
-            Status = "Starting controller session…";
             cancellation = new CancellationTokenSource();
-            http = new HttpClient { BaseAddress = new Uri(controllerUrl.TrimEnd('/') + "/") };
-            try
+            _ = RunConnectionLoop(cancellation.Token);
+        }
+
+        private async Task RunConnectionLoop(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
             {
-                await ReadHealth(cancellation.Token);
-                await CreateSession(cancellation.Token);
-                await StreamSamples(cancellation.Token);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception error)
-            {
-                Status = SimulationBackend == "sofa-native"
-                    ? "Controller unavailable"
-                    : "SOFA OFFLINE — start scripts/start-showcase.sh";
-                UnityEngine.Debug.LogError($"Unity manual demo failed: {error.Message}");
+                trackingFailed = false;
+                frozen = false;
+                ClearReceived();
+                Status = "Starting controller session…";
+                try
+                {
+                    http?.Dispose();
+                    http = new HttpClient { BaseAddress = new Uri(controllerUrl.TrimEnd('/') + "/") };
+                    await ReadHealth(token);
+                    await CreateSession(token);
+                    await StreamSamples(token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception error)
+                {
+                    Status = SimulationBackend == "sofa-native"
+                        ? "Controller reconnecting…"
+                        : "SOFA OFFLINE — reconnecting in 2s…";
+                    UnityEngine.Debug.LogWarning($"Unity manual demo reconnecting: {error.Message}");
+                }
+
+                if (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(2000, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
             }
         }
 

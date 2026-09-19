@@ -138,6 +138,9 @@ namespace SurgePrep.Editor
 
         private static void CreateScene()
         {
+            // The showcase relies on freshly generated registration objects.
+            // Reusing scene/domain state can leave an old physics renderer alive.
+            EditorSettings.enterPlayModeOptionsEnabled = false;
             Directory.CreateDirectory(MaterialRoot);
             Directory.CreateDirectory(GeneratedRoot);
             Directory.CreateDirectory(SceneRoot);
@@ -147,7 +150,7 @@ namespace SurgePrep.Editor
             var diaphragm = Material("Diaphragm", new Color(0.4f, 0.16f, 0.22f), 0.0f, 0.34f);
             var skin = Material("SiliconeSkin", new Color(0.62f, 0.40f, 0.31f), 0.0f, 0.3f);
             var target = Material("Target", new Color(0.2f, 0.55f, 0.62f), 0.0f, 0.45f);
-            var tissue = Material("InteractiveTissue", new Color(0.78f, 0.48f, 0.42f), 0.0f, 0.28f);
+            var tissue = Material("InteractiveTissue", new Color(0.62f, 0.40f, 0.31f), 0.0f, 0.3f);
             var fat = Material("Subcutaneous", new Color(0.9f, 0.78f, 0.55f), 0.0f, 0.22f);
             var pleura = Material("Pleura", new Color(0.72f, 0.7f, 0.68f), 0.0f, 0.5f);
             var incision = Material("IncisionChannel", new Color(0.35f, 0.08f, 0.08f), 0.0f, 0.55f);
@@ -202,6 +205,10 @@ namespace SurgePrep.Editor
                 var instance = PrefabUtility.InstantiatePrefab(prefab, parent) as GameObject;
                 instance.name = FriendlyName(file);
                 AssignMaterial(instance, MaterialFor(file, bone, cartilage, muscle, diaphragm, skin));
+                if (file.Contains("_Skin.obj"))
+                {
+                    CutProcedureWindow(instance);
+                }
             }
             muscleLayer.gameObject.SetActive(false);
             boneLayer.gameObject.SetActive(false);
@@ -211,7 +218,7 @@ namespace SurgePrep.Editor
 
             var window = new GameObject("RegistrationAnchor_ProcedureWindow");
             window.transform.SetParent(tableTop, false);
-            window.transform.localPosition = new Vector3(0.12f, 0.345f, 0.38f);
+            window.transform.localPosition = new Vector3(0.12f, 0.353f, 0.38f);
             window.transform.localRotation = Quaternion.identity;
 
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
@@ -699,7 +706,7 @@ namespace SurgePrep.Editor
             }
         }
 
-        private static void CropSkinToTorso(GameObject root)
+        private static void CutProcedureWindow(GameObject root)
         {
             var filters = root.GetComponentsInChildren<MeshFilter>(true);
             for (var filterIndex = 0; filterIndex < filters.Length; filterIndex++)
@@ -713,7 +720,7 @@ namespace SurgePrep.Editor
 
                 var vertices = source.vertices;
                 var sourceTriangles = source.triangles;
-                var torsoTriangles = new List<int>();
+                var retainedTriangles = new List<int>(sourceTriangles.Length);
                 var sourceUnitsPerMetre = source.bounds.max.z > 10f ? 1000f : 1f;
                 for (var index = 0; index + 2 < sourceTriangles.Length; index += 3)
                 {
@@ -721,41 +728,41 @@ namespace SurgePrep.Editor
                     var b = sourceTriangles[index + 1];
                     var c = sourceTriangles[index + 2];
                     var centre = (vertices[a] + vertices[b] + vertices[c]) / 3f;
-                    if (
-                        centre.z >= 0.94f * sourceUnitsPerMetre &&
-                        centre.z <= 1.43f * sourceUnitsPerMetre &&
-                        Mathf.Abs(centre.x) <= 0.285f * sourceUnitsPerMetre
-                    )
+                    var insideProcedureWindow =
+                        Mathf.Abs(centre.x + 0.12f * sourceUnitsPerMetre) <= 0.041f * sourceUnitsPerMetre
+                        && Mathf.Abs(centre.z - 1.20f * sourceUnitsPerMetre) <= 0.041f * sourceUnitsPerMetre
+                        && centre.y < -0.10f * sourceUnitsPerMetre;
+                    if (!insideProcedureWindow)
                     {
-                        torsoTriangles.Add(a);
-                        torsoTriangles.Add(b);
-                        torsoTriangles.Add(c);
+                        retainedTriangles.Add(a);
+                        retainedTriangles.Add(b);
+                        retainedTriangles.Add(c);
                     }
                 }
 
-                var cropped = new Mesh
+                var windowed = new Mesh
                 {
-                    name = "High-resolution torso skin",
+                    name = "BodyParts3D skin with procedure window",
                     indexFormat = source.indexFormat,
                     vertices = vertices,
                     normals = source.normals,
                     tangents = source.tangents,
                     uv = source.uv,
                 };
-                cropped.SetTriangles(torsoTriangles, 0);
-                cropped.RecalculateBounds();
+                windowed.SetTriangles(retainedTriangles, 0);
+                windowed.RecalculateBounds();
 
-                var path = $"{GeneratedRoot}/TorsoSkin{filterIndex}.asset";
+                var path = $"{GeneratedRoot}/ProcedureWindowSkin{filterIndex}.asset";
                 var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
                 if (existing == null)
                 {
-                    AssetDatabase.CreateAsset(cropped, path);
-                    filter.sharedMesh = cropped;
+                    AssetDatabase.CreateAsset(windowed, path);
+                    filter.sharedMesh = windowed;
                 }
                 else
                 {
-                    EditorUtility.CopySerialized(cropped, existing);
-                    UnityEngine.Object.DestroyImmediate(cropped);
+                    EditorUtility.CopySerialized(windowed, existing);
+                    UnityEngine.Object.DestroyImmediate(windowed);
                     filter.sharedMesh = existing;
                     EditorUtility.SetDirty(existing);
                 }

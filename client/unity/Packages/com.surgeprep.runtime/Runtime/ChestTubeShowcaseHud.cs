@@ -13,23 +13,42 @@ namespace SurgePrep
         private GUIStyle labelStyle;
         private GUIStyle valueStyle;
         private GUIStyle smallStyle;
+        private bool visible = true;
+
+        private void Update()
+        {
+            if (Input.GetKeyDown(KeyCode.Tab))
+            {
+                visible = !visible;
+            }
+        }
 
         private void OnGUI()
         {
             EnsureStyles();
-            var panel = new Rect(24, 24, 360, 336);
-            DrawRect(panel, new Color(0.025f, 0.045f, 0.065f, 0.94f));
-            DrawRect(new Rect(panel.x, panel.y, 5, panel.height), new Color(0.1f, 0.85f, 0.78f));
+            if (!visible)
+            {
+                if (GUI.Button(new Rect(18, 18, 150, 30), "SHOW GUIDANCE [TAB]"))
+                {
+                    visible = true;
+                }
+                return;
+            }
 
-            GUI.Label(new Rect(48, 43, 310, 30), exerciseTitle, titleStyle);
-            GUI.Label(new Rect(48, 77, 300, 24), "GUIDED LANDMARK + APPROACH", labelStyle);
+            var panel = new Rect(18, 18, 310, 294);
+            DrawRect(panel, new Color(0.025f, 0.045f, 0.065f, 0.94f));
+            DrawRect(new Rect(panel.x, panel.y, 4, panel.height), new Color(0.1f, 0.85f, 0.78f));
+
+            GUI.Label(new Rect(38, 32, 265, 26), exerciseTitle, titleStyle);
+            GUI.Label(new Rect(38, 61, 255, 20), "GUIDED LANDMARK + APPROACH", labelStyle);
+            if (GUI.Button(new Rect(280, 25, 38, 22), "TAB")) visible = false;
 
             var snapshot = sceneRenderer != null ? sceneRenderer.LatestSnapshot : null;
             if (snapshot == null)
             {
-                GUI.Label(new Rect(48, 120, 300, 28), "Waiting for Scalpel controller…", valueStyle);
+                GUI.Label(new Rect(38, 104, 255, 24), "Waiting for Scalpel controller…", valueStyle);
                 GUI.Label(
-                    new Rect(48, 158, 300, 70),
+                    new Rect(38, 140, 255, 60),
                     "Start a session and keep the hardware or synthetic stream running.",
                     smallStyle
                 );
@@ -56,16 +75,16 @@ namespace SurgePrep
                     ? new Color(0.15f, 0.9f, 0.62f)
                     : new Color(1f, 0.35f, 0.28f);
 
-            GUI.Label(new Rect(48, 112, 300, 22), "LIVE GUIDANCE", labelStyle);
+            GUI.Label(new Rect(38, 96, 255, 20), "LIVE GUIDANCE", labelStyle);
             GUI.color = statusColour;
-            GUI.Label(new Rect(48, 136, 300, 28), forceStatus, valueStyle);
+            GUI.Label(new Rect(38, 118, 255, 25), forceStatus, valueStyle);
             GUI.color = Color.white;
 
-            Metric("Force", $"{force:0.00} N", 180);
-            Metric("Target offset", $"{radialError:0.0} mm", 224);
-            Metric("Simulation tick", snapshot.tick.ToString(), 268);
+            Metric("Force", $"{force:0.00} N", 158);
+            Metric("Target offset", $"{radialError:0.0} mm", 194);
+            Metric("Simulation tick", snapshot.tick.ToString(), 230);
 
-            var bar = new Rect(174, 188, 170, 10);
+            var bar = new Rect(145, 166, 156, 8);
             DrawRect(bar, new Color(0.12f, 0.17f, 0.2f));
             DrawRect(
                 new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(force / 1.5f), bar.height),
@@ -76,14 +95,14 @@ namespace SurgePrep
 
         private void Metric(string label, string value, float y)
         {
-            GUI.Label(new Rect(48, y, 130, 24), label, labelStyle);
-            GUI.Label(new Rect(174, y - 2, 170, 26), value, valueStyle);
+            GUI.Label(new Rect(38, y, 105, 22), label, labelStyle);
+            GUI.Label(new Rect(145, y - 2, 150, 24), value, valueStyle);
         }
 
         private void Disclaimer(Rect panel)
         {
             GUI.Label(
-                new Rect(48, panel.yMax - 52, 300, 38),
+                new Rect(38, panel.yMax - 40, 255, 32),
                 "Training prototype • Illustrative rubric • Instructor review required",
                 smallStyle
             );
@@ -95,10 +114,10 @@ namespace SurgePrep
             {
                 return;
             }
-            titleStyle = Style(22, FontStyle.Bold, Color.white);
-            labelStyle = Style(13, FontStyle.Normal, new Color(0.65f, 0.72f, 0.78f));
-            valueStyle = Style(17, FontStyle.Bold, Color.white);
-            smallStyle = Style(12, FontStyle.Normal, new Color(0.7f, 0.76f, 0.8f));
+            titleStyle = Style(19, FontStyle.Bold, Color.white);
+            labelStyle = Style(11, FontStyle.Normal, new Color(0.65f, 0.72f, 0.78f));
+            valueStyle = Style(15, FontStyle.Bold, Color.white);
+            smallStyle = Style(10, FontStyle.Normal, new Color(0.7f, 0.76f, 0.8f));
             smallStyle.wordWrap = true;
         }
 

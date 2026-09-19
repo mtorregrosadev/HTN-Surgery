@@ -20,11 +20,11 @@ package added to a Unity project:
 5. Paste the printed session ID into **Scalpel Stream Client > Session Id** in
    the Inspector, then enter Play Mode.
 
-The scene includes a dark surgical training lab, console, floor guides, layered
-skin/ribs/cartilage/muscle/diaphragm, an illustrative target guide, the
-authoritative simulation surface, a blunt virtual tool, and live force/target
-guidance. It renders in the normal Unity Game view on a computer. Press `V`
-while playing to preview side-by-side phone-VR eye views.
+The scene presents a cropped high-resolution torso at an interactive surgical
+workstation inside a dark training lab. Use the **CHEST** and **ROOM** buttons
+for camera presets, right-drag to orbit, and scroll to zoom. The layer controls
+toggle skin, muscle, and bone; keys `1`, `2`, and `3` do the same. Press `Tab`
+to hide or restore the live guidance panel.
 
 The builder writes generated Unity assets only into the containing Unity
 project. Re-running it refreshes the scene without committing those generated
@@ -53,20 +53,6 @@ under Unity XR Plugin Management and supports Unity 2021.3+. Import the XREAL
 SDK into the containing Unity application, configure its loader and XR Origin,
 and keep these transport/rendering scripts unchanged. Hardware validation must
 wait until the exact glasses, Beam Pro firmware, and tracking mode are known.
-
-## Phone VR fallback
-
-The phone is a display/client, not a replacement for the controller or API. For
-a real phone viewer, add a supported Cardboard/XR provider to the containing
-Unity application, enable its Android loader under **Project Settings → XR
-Plug-in Management**, and build the showcase scene to Android. Set
-`ScalpelStreamClient → Controller Url` to the Mac's LAN address, for example
-`ws://192.168.1.20:8100`; `localhost` would point back to the phone. The phone
-and Mac must be on the same network. The `PhoneVrRig` keeps the same scene and
-transport; an XR loader owns head tracking and stereo rendering on-device.
-
-Until an Android build is ready, `V` provides a side-by-side stereo preview in
-the desktop Game view for a simple phone viewer/cardboard shell.
 
 ## Develop without hardware
 

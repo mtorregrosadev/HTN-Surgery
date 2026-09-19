@@ -9,3 +9,16 @@ tracking-web/node_modules/
 tracking-web/dist/
 .pio/
 firmware/.pio/
+
+# Unity
+client/unity/[Ll]ibrary/
+client/unity/[Tt]emp/
+client/unity/[Oo]bj/
+client/unity/[Bb]uild/
+client/unity/[Bb]uilds/
+client/unity/[Ll]ogs/
+client/unity/[Uu]ser[Ss]ettings/
+client/unity/[Mm]emoryCaptures/
+client/unity/*.csproj
+client/unity/*.sln
+client/unity/*.userprefs

@@ -75,16 +75,24 @@ export function markerPose2d(marker, timestampMs) {
   };
 }
 
-export function estimatedDepthMm(reference, markerSizePx) {
+export function relativeDepthPercent(reference, markerSizePx) {
   if (!reference || !Number.isFinite(markerSizePx) || markerSizePx <= 0) return null;
-  const { distanceMm, sizePx } = reference;
-  if (!Number.isFinite(distanceMm) || distanceMm <= 0 || !Number.isFinite(sizePx) || sizePx <= 0) return null;
-  return distanceMm * sizePx / markerSizePx;
+  const { sizePx } = reference;
+  if (!Number.isFinite(sizePx) || sizePx <= 0) return null;
+  return 100 * (sizePx / markerSizePx - 1);
 }
 
-export function advanceDepthCalibration(samples, pose, distanceMm) {
-  if (!pose || !Number.isFinite(pose.sizePx) || pose.sizePx <= 0 ||
-      !Number.isFinite(distanceMm) || distanceMm < 50 || distanceMm > 5000) {
+export function demoMarkerState(frame) {
+  return {
+    x: 320 + Math.sin(frame / 24) * 100,
+    y: 240 + Math.sin(frame / 37) * 60,
+    sidePx: 150 / (1 + 0.3 * Math.sin(frame / 25)),
+    angleRad: Math.sin(frame / 39) * 0.15,
+  };
+}
+
+export function advanceDepthCalibration(samples, pose) {
+  if (!pose || !Number.isFinite(pose.sizePx) || pose.sizePx <= 0) {
     return { samples: [], reference: null };
   }
   const first = samples[0];
@@ -99,7 +107,7 @@ export function advanceDepthCalibration(samples, pose, distanceMm) {
   if (next.length < CALIBRATION_FRAMES) return { samples: next, reference: null };
   const sizes = next.map((item) => item.sizePx).sort((a, b) => a - b);
   const sizePx = (sizes[3] + sizes[4]) / 2;
-  return { samples: next, reference: { distanceMm, sizePx, markerId: pose.markerId } };
+  return { samples: next, reference: { sizePx, markerId: pose.markerId } };
 }
 
 export function movementSpeed(previous, current) {

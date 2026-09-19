@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DICTIONARIES, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, demoMarkerState, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker } from './tracking.js';
 
 function makeMarkerImage(detector, markerId) {
   const size = 320;
@@ -93,28 +93,35 @@ test('pose and speed use image coordinates and elapsed time', () => {
   assert.equal(appendPath([{ x: 20, y: 30 }], pose).length, 1);
 });
 
-test('Z estimate uses a measured reference and rejects invalid measurements', () => {
-  const reference = { distanceMm: 300, sizePx: 120 };
-  assert.equal(estimatedDepthMm(reference, 120), 300);
-  assert.equal(estimatedDepthMm(reference, 60), 600);
-  assert.equal(estimatedDepthMm(null, 120), null);
-  assert.equal(estimatedDepthMm(reference, 0), null);
+test('relative Z starts at zero and follows apparent marker size', () => {
+  const reference = { sizePx: 120 };
+  assert.equal(relativeDepthPercent(reference, 120), 0);
+  assert.equal(relativeDepthPercent(reference, 60), 100);
+  assert.equal(relativeDepthPercent(reference, 240), -50);
+  assert.equal(relativeDepthPercent(null, 120), null);
+  assert.equal(relativeDepthPercent(reference, 0), null);
 });
 
 test('depth calibration waits for stable frames and resets after motion or marker loss', () => {
   const pose = { markerId: 0, x: 100, y: 100, sizePx: 80 };
   let samples = [];
   for (let index = 0; index < CALIBRATION_FRAMES - 1; index += 1) {
-    const next = advanceDepthCalibration(samples, { ...pose, sizePx: 80 + index * 0.2 }, 300);
+    const next = advanceDepthCalibration(samples, { ...pose, sizePx: 80 + index * 0.2 });
     samples = next.samples;
     assert.equal(next.reference, null);
   }
-  const stable = advanceDepthCalibration(samples, pose, 300);
-  assert.equal(stable.reference.distanceMm, 300);
+  const stable = advanceDepthCalibration(samples, pose);
   assert.equal(stable.reference.markerId, 0);
-  assert.ok(Math.abs(estimatedDepthMm(stable.reference, 40) - 600) < 5);
-  assert.equal(advanceDepthCalibration(samples, { ...pose, x: 130 }, 300).samples.length, 1);
-  assert.equal(advanceDepthCalibration(samples, { ...pose, markerId: 1 }, 300).samples.length, 1);
-  assert.equal(advanceDepthCalibration(samples, null, 300).samples.length, 0);
-  assert.equal(advanceDepthCalibration(samples, pose, 0).reference, null);
+  assert.ok(Math.abs(relativeDepthPercent(stable.reference, 40) - 100) < 2);
+  assert.equal(advanceDepthCalibration(samples, { ...pose, x: 130 }).samples.length, 1);
+  assert.equal(advanceDepthCalibration(samples, { ...pose, markerId: 1 }).samples.length, 1);
+  assert.equal(advanceDepthCalibration(samples, null).samples.length, 0);
+  assert.equal(advanceDepthCalibration(samples, { ...pose, sizePx: 0 }).reference, null);
+});
+
+test('synthetic demo holds the calibration size then moves in both Z directions', () => {
+  const startingSize = demoMarkerState(0).sidePx;
+  assert.equal(startingSize, 150);
+  assert.ok(relativeDepthPercent({ sizePx: startingSize }, demoMarkerState(25).sidePx) > 20);
+  assert.ok(relativeDepthPercent({ sizePx: startingSize }, demoMarkerState(125).sidePx) < -20);
 });

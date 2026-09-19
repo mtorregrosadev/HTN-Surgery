@@ -1,5 +1,5 @@
 import './style.css';
-import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, DICTIONARIES, estimatedDepthMm, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
+import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, demoMarkerState, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, TARGET_MARKER_ID } from './tracking.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('camera');
@@ -29,9 +29,7 @@ let previousPose = null;
 let path = [];
 let frameCount = 0;
 let missingFrames = 0;
-let currentPose = null;
 let depthReference = null;
-let calibrationDistanceMm = null;
 let calibrationSamples = [];
 
 function markerDescription() {
@@ -57,30 +55,33 @@ function setCalibrationStatus(label, ready = false) {
   $('calibration-status').className = `calibration-status${ready ? ' ready' : ''}`;
 }
 
+function setCalibrationStep(activeStep) {
+  for (let step = 1; step <= 3; step += 1) {
+    const item = $(`calibration-step-${step}`);
+    item.className = step === activeStep ? 'active' : step < activeStep ? 'complete' : '';
+    if (step === activeStep) item.setAttribute('aria-current', 'step');
+    else item.removeAttribute('aria-current');
+  }
+}
+
 function resetDepthCalibration(message) {
   depthReference = null;
-  calibrationDistanceMm = null;
   calibrationSamples = [];
-  setCalibrationStatus('NOT CALIBRATED');
+  setCalibrationStep(source ? 2 : 1);
+  setCalibrationStatus(source ? 'SHOW MARKER' : 'WAITING FOR CAMERA');
   $('depth-hint').textContent = message;
   $('position-z').textContent = '—';
 }
 
 function beginDepthCalibration() {
-  const rawDistance = $('reference-distance').value.trim();
-  const distanceMm = Number(rawDistance);
-  if (!rawDistance || !Number.isFinite(distanceMm) || distanceMm < 50 || distanceMm > 5000) {
-    $('depth-hint').textContent = 'Enter a measured lens-to-marker distance between 50 and 5000 mm.';
-    return;
-  }
   if (!source) {
-    $('depth-hint').textContent = 'Start the camera or video; calibration will begin when the marker is visible.';
+    resetDepthCalibration('Start the camera or demo, then show the marker.');
     return;
   }
   depthReference = null;
-  calibrationDistanceMm = distanceMm;
   calibrationSamples = [];
-  setCalibrationStatus(`HOLD STILL 0/${CALIBRATION_FRAMES}`);
+  setCalibrationStep(2);
+  setCalibrationStatus('SHOW MARKER');
   $('depth-hint').textContent = 'Hold the full marker still and facing the camera lens.';
   $('position-z').textContent = '—';
 }
@@ -145,20 +146,20 @@ function processFrame(timestampMs) {
   $('frame-count').textContent = String(frameCount);
 
   const pose = markerPose2d(marker, timestampMs);
-  currentPose = pose;
   if (pose) {
     missingFrames = 0;
     if (depthReference && depthReference.markerId !== pose.markerId) {
-      resetDepthCalibration('Marker ID changed. Check the marker, then recalibrate Z.');
+      beginDepthCalibration();
+      $('depth-hint').textContent = 'Marker ID changed. Hold this marker still to set a new starting position.';
     }
-    if (calibrationDistanceMm !== null) {
-      const result = advanceDepthCalibration(calibrationSamples, pose, calibrationDistanceMm);
+    if (!depthReference) {
+      const result = advanceDepthCalibration(calibrationSamples, pose);
       calibrationSamples = result.samples;
       if (result.reference) {
         depthReference = result.reference;
-        calibrationDistanceMm = null;
+        setCalibrationStep(3);
         setCalibrationStatus('Z READY', true);
-        $('depth-hint').textContent = `Reference captured at ${depthReference.distanceMm} mm. Recalibrate after changing the marker or camera position.`;
+        $('depth-hint').textContent = 'Starting position set. Positive Z means farther away; negative Z means closer.';
       } else {
         setCalibrationStatus(`HOLD STILL ${calibrationSamples.length}/${CALIBRATION_FRAMES}`);
       }
@@ -170,18 +171,20 @@ function processFrame(timestampMs) {
     setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
     $('position-x').textContent = Math.round(pose.x);
     $('position-y').textContent = Math.round(pose.y);
-    const zMm = depthReference?.markerId === pose.markerId
-      ? estimatedDepthMm(depthReference, pose.sizePx) : null;
-    $('position-z').textContent = zMm == null ? '—' : Math.round(zMm);
+    const zPercent = depthReference?.markerId === pose.markerId
+      ? relativeDepthPercent(depthReference, pose.sizePx) : null;
+    const roundedZ = zPercent == null ? null : Math.round(zPercent);
+    $('position-z').textContent = roundedZ == null ? '—' : `${roundedZ > 0 ? '+' : ''}${roundedZ}%`;
     $('marker-size').textContent = Math.round(pose.sizePx);
     $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
     $('speed').textContent = speed == null ? '—' : Math.round(speed);
     $('marker-id').textContent = `#${pose.markerId}`;
   } else {
     missingFrames += 1;
-    if (calibrationDistanceMm !== null) {
+    if (!depthReference) {
       calibrationSamples = [];
-      setCalibrationStatus(`HOLD STILL 0/${CALIBRATION_FRAMES}`);
+      setCalibrationStatus('SHOW MARKER');
+      $('depth-hint').textContent = 'Keep the full marker visible and hold it still to set the starting position.';
     }
     if (missingFrames >= 3) {
       previousPose = null;
@@ -236,8 +239,7 @@ function stopSource() {
   source = null;
   $('video-file').value = '';
   previousPose = null;
-  currentPose = null;
-  resetDepthCalibration('Start the camera, measure the lens-to-marker distance, then calibrate while holding the marker still.');
+  resetDepthCalibration('Start the camera or demo, then show the marker.');
   path = [];
   frameCount = 0;
   $('frame-count').textContent = '0';
@@ -270,16 +272,14 @@ async function startDemo() {
     await markerImage.decode();
     let frame = 0;
     const render = () => {
-      frame += 1;
+      frame = depthReference ? frame + 1 : 0;
       context.fillStyle = '#dce8e3';
       context.fillRect(0, 0, canvas.width, canvas.height);
-      const x = 320 + Math.sin(frame / 24) * 130;
-      const y = 240 + Math.cos(frame / 37) * 75;
-      const side = 130 + Math.sin(frame / 31) * 32;
+      const { x, y, sidePx, angleRad } = demoMarkerState(frame);
       context.save();
       context.translate(x, y);
-      context.rotate(Math.sin(frame / 39) * 0.2);
-      context.drawImage(markerImage, -side / 2, -side / 2, side, side);
+      context.rotate(angleRad);
+      context.drawImage(markerImage, -sidePx / 2, -sidePx / 2, sidePx, sidePx);
       context.restore();
     };
     render();
@@ -325,7 +325,7 @@ function startProcessing(kind) {
   setStatus('LOOKING FOR MARKER', 'searching');
   setTracking('Looking for marker', kind === 'file' ? `Play a video that shows ${markerDescription()}.` : kind === 'demo' ? 'Detecting a generated moving marker.' : `Show ${markerDescription()} to the camera.`);
   lastProcessedMs = 0;
-  if ($('reference-distance').value.trim()) beginDepthCalibration();
+  beginDepthCalibration();
   scheduleFrame();
 }
 
@@ -369,14 +369,13 @@ $('dictionary').addEventListener('change', () => {
   dictionaryName = $('dictionary').value;
   detector = createDetector(dictionaryName);
   previousPose = null;
-  currentPose = null;
-  resetDepthCalibration('The marker family changed. Hold the new marker still and recalibrate Z.');
+  resetDepthCalibration('The marker family changed. Hold the new marker still to set a new starting position.');
   path = [];
   drawPreview();
   clearMeasurements();
   $('camera-label').textContent = familyDetails[dictionaryName].camera;
   if (source === 'demo') startDemo();
-  else if (source && $('reference-distance').value.trim()) beginDepthCalibration();
+  else if (source) beginDepthCalibration();
 });
 
 function markerDataUrl() {

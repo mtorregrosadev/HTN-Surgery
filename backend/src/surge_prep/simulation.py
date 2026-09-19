@@ -360,6 +360,16 @@ class SofaSimulator(Simulator):
         resting = root.tissue.dofs.rest_position.value
         for triangle in root.tissue.surface.topology.triangles.value:
             indices = [int(index) for index in triangle]
+            rest_points = [resting[index] for index in indices]
+            on_external_wall = any(
+                all(
+                    abs(abs(float(point[axis])) - 40.0) < 1e-4
+                    for point in rest_points
+                )
+                for axis in (0, 2)
+            ) or all(float(point[1]) < -15.9 for point in rest_points)
+            if on_external_wall:
+                continue
             mean_y = sum(float(resting[index][1]) for index in indices) / 3.0
             if mean_y >= -3.0:
                 layer = "skin"

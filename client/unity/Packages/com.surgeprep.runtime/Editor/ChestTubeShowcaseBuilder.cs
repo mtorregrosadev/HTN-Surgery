@@ -211,7 +211,7 @@ namespace SurgePrep.Editor
 
             var window = new GameObject("RegistrationAnchor_ProcedureWindow");
             window.transform.SetParent(tableTop, false);
-            window.transform.localPosition = new Vector3(0.12f, 0.31f, 0.18f);
+            window.transform.localPosition = new Vector3(0.12f, 0.345f, 0.38f);
             window.transform.localRotation = Quaternion.identity;
 
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
@@ -314,19 +314,19 @@ namespace SurgePrep.Editor
             );
             ClothPanel(
                 "Medial chest drape", root.transform,
-                new Vector3(-0.15f, 0.335f, 0.25f), new Vector2(0.40f, 0.52f), 0.012f, drape, 1.7f
+                new Vector3(-0.15f, 0.365f, 0.38f), new Vector2(0.40f, 0.52f), 0.012f, drape, 1.7f
             );
             ClothPanel(
                 "Lateral chest drape", root.transform,
-                new Vector3(0.29f, 0.305f, 0.25f), new Vector2(0.20f, 0.52f), 0.01f, drape, 3.1f
+                new Vector3(0.29f, 0.34f, 0.38f), new Vector2(0.20f, 0.52f), 0.01f, drape, 3.1f
             );
             ClothPanel(
                 "Cranial window drape", root.transform,
-                new Vector3(0.12f, 0.31f, 0.445f), new Vector2(0.13f, 0.13f), 0.007f, drape, 4.6f
+                new Vector3(0.12f, 0.35f, 0.545f), new Vector2(0.13f, 0.13f), 0.007f, drape, 4.6f
             );
             ClothPanel(
                 "Caudal window drape", root.transform,
-                new Vector3(0.12f, 0.30f, 0.055f), new Vector2(0.13f, 0.13f), 0.007f, drape, 5.4f
+                new Vector3(0.12f, 0.34f, 0.215f), new Vector2(0.13f, 0.13f), 0.007f, drape, 5.4f
             );
         }
 

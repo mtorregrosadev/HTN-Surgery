@@ -1,0 +1,14 @@
+{
+  "name": "SurgePrep.Editor",
+  "rootNamespace": "SurgePrep.Editor",
+  "references": ["SurgePrep.Runtime"],
+  "includePlatforms": ["Editor"],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

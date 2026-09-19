@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -8,14 +9,19 @@ namespace SurgePrep
         [SerializeField] private Transform toolTransform;
         [SerializeField, Min(1f)] private float interpolationSpeed = 20f;
         [SerializeField] private Material tissueMaterial;
+        [SerializeField] private Material toolMaterial;
 
         private readonly Dictionary<string, MeshView> meshes =
             new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
         private Quaternion toolTargetRotation = Quaternion.identity;
 
+        public SimulationSnapshotDto LatestSnapshot { get; private set; }
+        public event Action<SimulationSnapshotDto> SnapshotReceived;
+
         public void SetTarget(SimulationSnapshotDto snapshot)
         {
+            LatestSnapshot = snapshot;
             if (snapshot.tool != null)
             {
                 toolTargetPosition = CoordinateFrame.Position(snapshot.tool.positionMm);
@@ -25,17 +31,31 @@ namespace SurgePrep
             {
                 GetOrCreateMesh(state).SetTarget(state);
             }
+            SnapshotReceived?.Invoke(snapshot);
         }
 
         private void Awake()
         {
             if (toolTransform == null)
             {
-                var tool = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                tool.name = "Authoritative SOFA Tool";
-                tool.transform.SetParent(transform, false);
-                tool.transform.localScale = new Vector3(0.006f, 0.04f, 0.006f);
-                toolTransform = tool.transform;
+                var tip = new GameObject("Authoritative SOFA Tool Tip");
+                tip.transform.SetParent(transform, false);
+                toolTransform = tip.transform;
+
+                var shaft = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                shaft.name = "Blunt Training Tool";
+                shaft.transform.SetParent(tip.transform, false);
+                shaft.transform.localPosition = new Vector3(0f, 0.035f, 0f);
+                shaft.transform.localScale = new Vector3(0.004f, 0.035f, 0.004f);
+                var collider = shaft.GetComponent<Collider>();
+                if (collider != null)
+                {
+                    Destroy(collider);
+                }
+                if (toolMaterial != null)
+                {
+                    shaft.GetComponent<MeshRenderer>().sharedMaterial = toolMaterial;
+                }
             }
         }
 
@@ -64,7 +84,10 @@ namespace SurgePrep
             child.transform.SetParent(transform, false);
             var filter = child.AddComponent<MeshFilter>();
             var renderer = child.AddComponent<MeshRenderer>();
-            renderer.sharedMaterial = tissueMaterial;
+            if (tissueMaterial != null)
+            {
+                renderer.sharedMaterial = tissueMaterial;
+            }
             var created = new MeshView(filter);
             meshes.Add(state.objectId, created);
             return created;

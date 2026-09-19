@@ -81,7 +81,10 @@ instead of copying backend-internal models.
 The runnable Scalpel relay under `controller/` separates hardware ingestion
 from client subscriptions. The embedded Unity package under `client/unity/`
 consumes those subscriptions, interpolates the authoritative tool pose and
-deformable SOFA surface, and is ready to host inside an OpenXR/XREAL project.
+deformable simulation surface, and is ready to host inside an OpenXR/XREAL
+project. Its `Surge Prep > Build Chest-Tube Showcase` editor command creates a
+computer- and XR-ready layered chest scene from the curated anatomy source set,
+with a live target/force HUD and blunt-tool rehearsal flow.
 
 For API-only development, the default in-memory simulator preserves the same
 request/response shape. The demo must switch to the `sofa` backend so SOFA is

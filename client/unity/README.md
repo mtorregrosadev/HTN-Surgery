@@ -68,6 +68,13 @@ Copy the printed session ID into `ScalpelStreamClient`. Enter Play Mode and the
 tool plus interactive tissue will move from live controller snapshots. Stop the
 synthetic stream with Ctrl+C; it will complete the session and print metrics.
 
+For a hands-on laptop demo, add `--manual` to that command and keep the Terminal
+window focused while Unity remains visible. Use `W/A/S/D` to move over the
+target, Space to make or release contact, `[` and `]` to change force, `R` to
+reset, and `Q` to complete the attempt. This is explicitly a synthetic input
+fallback; the physical demo replaces it with controller-routed OAK-D and ESP32
+readings.
+
 The default Compose stack uses the deterministic memory simulation adapter so
 the whole team can run the presentation without a native SOFA install. It
 exercises the real API, controller, MongoDB, Unity transport, mesh streaming,

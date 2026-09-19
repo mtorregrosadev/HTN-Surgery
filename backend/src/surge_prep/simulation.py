@@ -142,9 +142,10 @@ class SofaSimulator(Simulator):
     """In-process bridge to a native SOFA Python scene."""
 
     name = "sofa-native"
-    # Two authoritative 10 ms solves let contact constraints settle while
-    # Unity interpolates between returned states.
-    network_substeps = 2
+    # One authoritative 10 ms solve per sample keeps the CPU-only scene
+    # responsive; carving gets three additional collision/topology steps only
+    # when a physical cut is actually eligible.
+    network_substeps = 1
     layer_nodes = {
         "skin": "skin",
         "subcutaneous": "subcutaneous",

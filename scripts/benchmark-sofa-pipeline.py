@@ -49,7 +49,7 @@ async def benchmark() -> None:
         (-15.0, 1.0),
         (-15.0, 0.0),
         (-15.0, -1.0),
-        *[(float(x), -1.0) for x in range(-15, 16, 2)],
+        *[(float(x), -2.0) for x in range(-15, 16, 2)],
     ]
     step_ms: list[float] = []
     serialization_ms: list[float] = []

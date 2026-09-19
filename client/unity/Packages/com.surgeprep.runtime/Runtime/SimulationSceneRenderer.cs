@@ -98,31 +98,60 @@ namespace SurgePrep
         {
             scalpelVisual = new GameObject("Scalpel visual");
             scalpelVisual.transform.SetParent(tip, false);
-            CreateReadableScalpel(scalpelVisual.transform);
+            scalpelVisual.transform.localPosition = Vector3.zero;
+            scalpelVisual.transform.localRotation = Quaternion.identity;
+            if (scalpelModel != null)
+            {
+                var imported = Instantiate(scalpelModel, scalpelVisual.transform);
+                imported.name = "Supplied CAD scalpel — tip registered";
+                imported.transform.localPosition = ScalpelGeometry.ModelToToolPosition;
+                imported.transform.localRotation = ScalpelGeometry.ModelToToolRotation;
+                imported.transform.localScale = Vector3.one;
+            }
+            else
+            {
+                CreateReadableScalpel(scalpelVisual.transform);
+            }
 
             dissectorVisual = new GameObject("Blunt dissector visual");
             dissectorVisual.transform.SetParent(tip, false);
+            dissectorVisual.transform.localPosition = Vector3.zero;
+            dissectorVisual.transform.localRotation = Quaternion.identity;
+            Primitive(
+                "Left blunt tip", PrimitiveType.Sphere, dissectorVisual.transform,
+                new Vector3(-0.0018f, 0f, 0f), Vector3.one * 0.0044f
+            );
+            Primitive(
+                "Right blunt tip", PrimitiveType.Sphere, dissectorVisual.transform,
+                new Vector3(0.0018f, 0f, 0f), Vector3.one * 0.0044f
+            );
             var leftJaw = Primitive(
                 "Left blunt jaw", PrimitiveType.Capsule, dissectorVisual.transform,
-                new Vector3(-0.004f, 0.048f, 0f), new Vector3(0.0035f, 0.04f, 0.0035f)
+                new Vector3(-0.0042f, 0.044f, 0f), new Vector3(0.0032f, 0.040f, 0.0032f)
             );
             leftJaw.transform.localRotation = Quaternion.Euler(0f, 0f, -4f);
             var rightJaw = Primitive(
                 "Right blunt jaw", PrimitiveType.Capsule, dissectorVisual.transform,
-                new Vector3(0.004f, 0.048f, 0f), new Vector3(0.0035f, 0.04f, 0.0035f)
+                new Vector3(0.0042f, 0.044f, 0f), new Vector3(0.0032f, 0.040f, 0.0032f)
             );
             rightJaw.transform.localRotation = Quaternion.Euler(0f, 0f, 4f);
             Primitive(
-                "Dissector stop", PrimitiveType.Sphere, dissectorVisual.transform,
-                new Vector3(0f, 0.006f, 0f), Vector3.one * 0.011f
+                "Dissector guard", PrimitiveType.Cube, dissectorVisual.transform,
+                new Vector3(0f, 0.083f, 0f), new Vector3(0.020f, 0.006f, 0.012f)
             );
             Primitive(
                 "Dissector handle", PrimitiveType.Cylinder, dissectorVisual.transform,
-                new Vector3(0f, 0.078f, 0f), new Vector3(0.007f, 0.018f, 0.007f)
+                new Vector3(0f, 0.108f, 0f), new Vector3(0.008f, 0.026f, 0.008f)
             );
 
             tubeVisual = new GameObject("Chest tube visual");
             tubeVisual.transform.SetParent(tip, false);
+            tubeVisual.transform.localPosition = Vector3.zero;
+            tubeVisual.transform.localRotation = Quaternion.identity;
+            Primitive(
+                "Chest tube rounded tip", PrimitiveType.Sphere, tubeVisual.transform,
+                Vector3.zero, Vector3.one * 0.0064f
+            );
             Primitive(
                 "Training chest tube", PrimitiveType.Cylinder, tubeVisual.transform,
                 new Vector3(0f, 0.055f, 0f), new Vector3(0.0064f, 0.055f, 0.0064f)
@@ -181,7 +210,7 @@ namespace SurgePrep
             );
             var blade = Primitive(
                 "Scalpel blade", PrimitiveType.Cube, parent,
-                new Vector3(0.005f, 0.014f, 0f), new Vector3(0.016f, 0.028f, 0.0024f)
+                new Vector3(0f, 0.014f, 0f), new Vector3(0.016f, 0.028f, 0.0024f)
             );
             var renderer = blade.GetComponent<MeshRenderer>();
             if (renderer != null)
@@ -203,8 +232,11 @@ namespace SurgePrep
             PaintNamed(scalpelVisual, "Scalpel guard", new Color(0.12f, 0.12f, 0.13f));
             PaintNamed(dissectorVisual, "Left blunt jaw", new Color(0.72f, 0.74f, 0.76f));
             PaintNamed(dissectorVisual, "Right blunt jaw", new Color(0.72f, 0.74f, 0.76f));
-            PaintNamed(dissectorVisual, "Dissector stop", new Color(0.18f, 0.42f, 0.70f));
+            PaintNamed(dissectorVisual, "Left blunt tip", new Color(0.72f, 0.74f, 0.76f));
+            PaintNamed(dissectorVisual, "Right blunt tip", new Color(0.72f, 0.74f, 0.76f));
+            PaintNamed(dissectorVisual, "Dissector guard", new Color(0.18f, 0.42f, 0.70f));
             PaintNamed(dissectorVisual, "Dissector handle", new Color(0.18f, 0.42f, 0.70f));
+            PaintNamed(tubeVisual, "Chest tube rounded tip", new Color(0.82f, 0.62f, 0.28f));
             PaintNamed(tubeVisual, "Training chest tube", new Color(0.82f, 0.62f, 0.28f));
             PaintNamed(tubeVisual, "Tube hub", new Color(0.18f, 0.42f, 0.70f));
             PaintNamed(tubeVisual, "Tube stripe", new Color(0.93f, 0.94f, 0.95f));

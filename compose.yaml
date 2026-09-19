@@ -1,0 +1,32 @@
+services:
+  mongodb:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: surge_prep
+    ports:
+      - "27017:27017"
+    volumes:
+      - surge-prep-mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      SURGE_PREP_MONGODB_URI: mongodb://mongodb:27017
+      SURGE_PREP_MONGODB_DATABASE: surge_prep
+      SURGE_PREP_SIMULATION_BACKEND: memory
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+volumes:
+  surge-prep-mongodb:
+

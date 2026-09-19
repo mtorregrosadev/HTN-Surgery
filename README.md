@@ -69,6 +69,19 @@ An illustrative normalized sample (the exact contract is still to be finalized):
 
 ## Components
 
+### Current backend implementation
+
+The runnable Python service under `backend/` exposes the controller-facing
+versioned REST and WebSocket API, owns session validation and deterministic
+metrics, persists through a MongoDB adapter, and drives SOFA through an isolated
+simulation adapter. Shared payload schemas live under `contracts/v1/`; embedded,
+controller, and VR work should generate or validate DTOs against those contracts
+instead of copying backend-internal models.
+
+For API-only development, the default in-memory simulator preserves the same
+request/response shape. The demo must switch to the `sofa` backend so SOFA is
+authoritative. See `backend/README.md` for setup and controller flow.
+
 ### Physical setup
 
 - Blunt plastic training stylus or spatula

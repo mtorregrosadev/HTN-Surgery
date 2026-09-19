@@ -280,21 +280,33 @@ export class SignalSmoother {
 }
 
 export function isPurpleColor(r, g, b) {
-  // Reject blown-out white glare, extreme darkness, or non-dominant blue
-  if (b < 55 || b > 238) return false;
-  // Lilac plastic: Blue is the dominant channel, Red is secondary, Green is lowest
-  if (b < r + 4 || b < g + 10 || r < g - 2) return false;
+  // Reject pure white glare, deep shadow/black, or extreme lightness
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  const delta = max - min;
-  if (delta < 12) return false;
-  const sat = delta / max;
-  if (sat < 0.12 || sat > 0.85) return false;
+  if (max < 45 || max > 250) return false;
 
-  // Hue calculation (where max === b)
-  let h = ((r - g) / delta + 4) * 60;
-  if (h < 0) h += 360;
-  return h >= 245 && h <= 292;
+  const delta = max - min;
+  if (delta < 18) return false; // Reject greys / neutrals
+
+  const sat = delta / max;
+  if (sat < 0.15) return false; // Reject washed-out low-saturation tones
+
+  // In purple/violet/magenta/lilac, Green is suppressed compared to Red and Blue
+  if (g >= r - 6 && g >= b - 6) return false;
+  if (g > (r + b) * 0.46) return false;
+
+  // Standard HSV Hue calculation (0 to 360 degrees)
+  let h = 0;
+  if (max === r) {
+    h = ((g - b) / delta + (g < b ? 6 : 0)) * 60;
+  } else if (max === g) {
+    return false; // Green cannot be dominant for purple
+  } else {
+    h = ((r - g) / delta + 4) * 60;
+  }
+
+  // Full purple / violet / magenta / lilac spectrum: 240° to 345°
+  return h >= 240 && h <= 345;
 }
 
 export function detectPurpleScalpel(imageData, options = {}) {
@@ -377,7 +389,7 @@ export function detectPurpleScalpel(imageData, options = {}) {
         const aspect = major / minor;
 
         // Scalpel tool must be elongated and of reasonable size
-        if (count >= minPixels && major >= 24 && aspect >= 1.35) {
+        if (count >= minPixels && major >= 18 && aspect >= 1.2) {
           components.push({
             label: currentLabel,
             count,

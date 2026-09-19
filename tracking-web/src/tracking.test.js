@@ -250,6 +250,8 @@ test('isPurpleColor distinguishes purple hues from other colors and neutrals', (
   assert.equal(isPurpleColor(120, 30, 170), true);
   assert.equal(isPurpleColor(200, 100, 220), true);
   assert.equal(isPurpleColor(80, 20, 95), true);
+  assert.equal(isPurpleColor(170, 50, 150), true); // Warm reddish-purple scalpel
+  assert.equal(isPurpleColor(180, 70, 180), true); // Magenta/violet plastic
   // Non-purples
   assert.equal(isPurpleColor(30, 80, 220), false); // Blue
   assert.equal(isPurpleColor(220, 50, 40), false); // Red

@@ -415,7 +415,7 @@ function processFrame(timestampMs) {
     const pose = markerPose2d(marker, timestampMs);
     const rawScalpel = detectPurpleScalpel(pixels, {
       step: 2,
-      minPixels: 14,
+      minPixels: 10,
       previousTip: lastScalpelTip,
     });
     let scalpel = null;

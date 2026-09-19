@@ -259,8 +259,6 @@ void setup() {
     }
   } else {
     Serial.printf("SSD1306 OLED initialized at 0x%02X\n", foundAddress);
-    display.ssd1306_command(SSD1306_SETCONTRAST);
-    display.ssd1306_command(0xFF); // Maximum contrast/brightness for camera visibility
   }
 
   renderCurrentMode();

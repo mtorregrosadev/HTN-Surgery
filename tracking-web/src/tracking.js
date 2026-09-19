@@ -11,7 +11,7 @@ export const DICTIONARIES = {
 };
 export const DEFAULT_DICTIONARY = DICTIONARIES.OPENCV_5X5_250;
 export const TARGET_MARKER_ID = 0;
-export const MAX_PATH_POINTS = 50;
+export const MAX_PATH_POINTS = 180;
 export const CALIBRATION_FRAMES = 8;
 
 AR.DICTIONARIES[DICTIONARIES.OPENCV_4X4_50] = {
@@ -41,17 +41,16 @@ export function markerSvg(dictionaryName = DEFAULT_DICTIONARY) {
 
 export function selectMarker(markers, dictionaryName = DEFAULT_DICTIONARY) {
   const validMarkers = markers.filter((marker) => marker.hammingDistance <= MAX_CORRECTION_BITS[dictionaryName]);
-  if (!validMarkers.length) return null;
-  const target = validMarkers.find((marker) => marker.id === TARGET_MARKER_ID);
-  if (target) return target;
-  if (dictionaryName === DICTIONARIES.SURGE_PREP) return null;
-  return validMarkers.reduce((largest, marker) => {
-    const size = marker.corners.reduce((sum, corner, index) => {
-      const next = marker.corners[(index + 1) % 4];
-      return sum + Math.hypot(next.x - corner.x, next.y - corner.y);
-    }, 0);
-    return !largest || size > largest.size ? { marker, size } : largest;
-  }, null)?.marker ?? null;
+  if (dictionaryName !== DICTIONARIES.SURGE_PREP) {
+    return validMarkers.reduce((largest, marker) => {
+      const size = marker.corners.reduce((sum, corner, index) => {
+        const next = marker.corners[(index + 1) % 4];
+        return sum + Math.hypot(next.x - corner.x, next.y - corner.y);
+      }, 0);
+      return !largest || size > largest.size ? { marker, size } : largest;
+    }, null)?.marker ?? null;
+  }
+  return validMarkers.find((marker) => marker.id === TARGET_MARKER_ID) ?? null;
 }
 
 export function markerPose2d(marker, timestampMs) {

@@ -86,26 +86,16 @@ function beginDepthCalibration() {
   $('position-z').textContent = '—';
 }
 
-let isProcessing = false;
-let animationFrameId = 0;
-let lastDomUpdateMs = 0;
-
 function drawPath(context, points, scaleX, scaleY) {
-  const count = points.length;
-  if (count < 2) return;
-  context.save();
+  if (points.length < 2) return;
+  context.beginPath();
+  context.moveTo(points[0].x * scaleX, points[0].y * scaleY);
+  for (const point of points.slice(1)) context.lineTo(point.x * scaleX, point.y * scaleY);
+  context.strokeStyle = '#a7edba';
+  context.lineWidth = 2.5;
   context.lineJoin = 'round';
   context.lineCap = 'round';
-  for (let i = 1; i < count; i += 1) {
-    const progress = i / count;
-    context.strokeStyle = `rgba(167, 237, 186, ${Math.max(0.15, progress * 0.95)})`;
-    context.lineWidth = 1.5 + progress * 2.0;
-    context.beginPath();
-    context.moveTo(points[i - 1].x * scaleX, points[i - 1].y * scaleY);
-    context.lineTo(points[i].x * scaleX, points[i].y * scaleY);
-    context.stroke();
-  }
-  context.restore();
+  context.stroke();
 }
 
 function drawPreview() {
@@ -146,17 +136,16 @@ function drawOverlay(pose) {
 }
 
 function processFrame(timestampMs) {
-  if (!source || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  if (!source || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || timestampMs - lastProcessedMs < 32) return;
+  lastProcessedMs = timestampMs;
   processingContext.drawImage(video, 0, 0, processingCanvas.width, processingCanvas.height);
   const pixels = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
   const markers = detector.detect(pixels);
   const marker = selectMarker(markers, dictionaryName);
   frameCount += 1;
+  $('frame-count').textContent = String(frameCount);
 
   const pose = markerPose2d(marker, timestampMs);
-  const now = performance.now();
-  const shouldUpdateDom = now - lastDomUpdateMs >= 60;
-
   if (pose) {
     missingFrames = 0;
     if (depthReference && depthReference.markerId !== pose.markerId) {
@@ -178,24 +167,18 @@ function processFrame(timestampMs) {
     const speed = movementSpeed(previousPose, pose);
     previousPose = pose;
     path = appendPath(path, pose);
-
-    if (shouldUpdateDom) {
-      lastDomUpdateMs = now;
-      setStatus('MARKER FOUND', 'detected');
-      setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
-      $('frame-count').textContent = String(frameCount);
-      $('position-x').textContent = Math.round(pose.x);
-      $('position-y').textContent = Math.round(pose.y);
-      const zPercent = depthReference?.markerId === pose.markerId
-        ? relativeDepthPercent(depthReference, pose.sizePx) : null;
-      const roundedZ = zPercent == null ? null : Math.round(zPercent);
-      $('position-z').textContent = roundedZ == null ? '—' : `${roundedZ > 0 ? '+' : ''}${roundedZ}%`;
-      $('marker-size').textContent = Math.round(pose.sizePx);
-      $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
-      $('speed').textContent = speed == null ? '—' : Math.round(speed);
-      $('marker-id').textContent = `#${pose.markerId}`;
-      drawPreview();
-    }
+    setStatus('MARKER FOUND', 'detected');
+    setTracking('Motion detected', `Marker #${pose.markerId} is visible to the camera.`);
+    $('position-x').textContent = Math.round(pose.x);
+    $('position-y').textContent = Math.round(pose.y);
+    const zPercent = depthReference?.markerId === pose.markerId
+      ? relativeDepthPercent(depthReference, pose.sizePx) : null;
+    const roundedZ = zPercent == null ? null : Math.round(zPercent);
+    $('position-z').textContent = roundedZ == null ? '—' : `${roundedZ > 0 ? '+' : ''}${roundedZ}%`;
+    $('marker-size').textContent = Math.round(pose.sizePx);
+    $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
+    $('speed').textContent = speed == null ? '—' : Math.round(speed);
+    $('marker-id').textContent = `#${pose.markerId}`;
   } else {
     missingFrames += 1;
     if (!depthReference) {
@@ -205,47 +188,44 @@ function processFrame(timestampMs) {
     }
     if (missingFrames >= 3) {
       previousPose = null;
-      if (shouldUpdateDom) {
-        lastDomUpdateMs = now;
-        setStatus('MARKER LOST', 'searching');
-        const hint = markers.length
-          ? dictionaryName === DICTIONARIES.SURGE_PREP
-            ? 'This marker does not match Surge Prep #0. Select the family shown by your marker generator, or use the marker from this page.'
-            : 'The square is not a reliable match. Check the exact marker family in your generator, then keep its white margin visible.'
-          : detector.candidates.length
-            ? 'A square is visible, but its code does not match. Check the marker family above.'
-            : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
-        setTracking('Looking for marker', hint);
-        clearMeasurements();
-        drawPreview();
-      }
+      setStatus('MARKER LOST', 'searching');
+      const hint = markers.length
+        ? dictionaryName === DICTIONARIES.SURGE_PREP
+          ? 'This marker does not match Surge Prep #0. Select the family shown by your marker generator, or use the marker from this page.'
+          : 'The square is not a reliable match. Check the exact marker family in your generator, then keep its white margin visible.'
+        : detector.candidates.length
+          ? 'A square is visible, but its code does not match. Check the marker family above.'
+          : 'Keep a clear white margin around the full black square; avoid glare and fill less of the frame.';
+      setTracking('Looking for marker', hint);
+      clearMeasurements();
     }
   }
   drawOverlay(pose);
-}
-
-function onFrame(timestampMs) {
-  if (!source) return;
-  scheduleFrame();
-  if (isProcessing) return;
-  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-  isProcessing = true;
-  try {
-    processFrame(timestampMs);
-  } finally {
-    isProcessing = false;
-  }
+  drawPreview();
 }
 
 function scheduleFrame() {
   if (!source) return;
-  animationFrameId = requestAnimationFrame(onFrame);
+  if (typeof video.requestVideoFrameCallback === 'function') {
+    frameCallbackKind = 'video';
+    frameCallbackId = video.requestVideoFrameCallback((now) => {
+      processFrame(now);
+      scheduleFrame();
+    });
+  } else {
+    frameCallbackKind = 'animation';
+    frameCallbackId = requestAnimationFrame((now) => {
+      processFrame(now);
+      scheduleFrame();
+    });
+  }
 }
 
 function stopSource() {
-  if (animationFrameId) cancelAnimationFrame(animationFrameId);
-  animationFrameId = 0;
-  isProcessing = false;
+  if (frameCallbackKind === 'video') video.cancelVideoFrameCallback(frameCallbackId);
+  else if (frameCallbackKind === 'animation') cancelAnimationFrame(frameCallbackId);
+  frameCallbackId = 0;
+  frameCallbackKind = null;
   stream?.getTracks().forEach((track) => track.stop());
   stream = null;
   if (demoTimer) clearInterval(demoTimer);
@@ -333,12 +313,11 @@ async function startVideo() {
 
 function startProcessing(kind) {
   source = kind;
-  const targetWidth = Math.min(video.videoWidth || 640, 360);
-  processingCanvas.width = targetWidth;
-  processingCanvas.height = Math.round(targetWidth * (video.videoHeight || 480) / (video.videoWidth || 640));
+  processingCanvas.width = Math.min(video.videoWidth, 480);
+  processingCanvas.height = Math.round(processingCanvas.width * video.videoHeight / video.videoWidth);
   overlay.width = processingCanvas.width;
   overlay.height = processingCanvas.height;
-  $('camera-stage').style.aspectRatio = `${video.videoWidth || 4} / ${video.videoHeight || 3}`;
+  $('camera-stage').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
   $('empty-state').hidden = true;
   $('camera-button').innerHTML = kind === 'camera' ? 'Stop camera <span>■</span>' : 'Start camera <span>↗</span>';
   $('video-button').textContent = kind === 'file' ? 'Stop video' : 'Open video file';
@@ -346,7 +325,6 @@ function startProcessing(kind) {
   setStatus('LOOKING FOR MARKER', 'searching');
   setTracking('Looking for marker', kind === 'file' ? `Play a video that shows ${markerDescription()}.` : kind === 'demo' ? 'Detecting a generated moving marker.' : `Show ${markerDescription()} to the camera.`);
   lastProcessedMs = 0;
-  lastDomUpdateMs = 0;
   beginDepthCalibration();
   scheduleFrame();
 }
@@ -360,16 +338,9 @@ async function startCamera() {
   try {
     stopSource();
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          width: { ideal: 640, max: 1280 },
-          height: { ideal: 480, max: 720 },
-          frameRate: { ideal: 30, max: 60 },
-        },
-      });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment', width: { ideal: 960 }, height: { ideal: 720 } } });
     } catch (error) {
-      if (error.name !== 'NotFoundError' && error.name !== 'OverconstrainedError') throw error;
+      if (error.name !== 'NotFoundError') throw error;
       stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
     }
     video.srcObject = stream;

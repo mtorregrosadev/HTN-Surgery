@@ -78,11 +78,12 @@ class TrainingService:
         if session.status != SessionStatus.active:
             raise HTTPException(status.HTTP_409_CONFLICT, "Session is not active")
         samples = await self.store.list_samples(session_id)
+        snapshots = await self.store.list_snapshots(session_id)
         session.status = SessionStatus.completed
         session.completed_at = utc_now()
         await self.simulator.end_session(session_id)
         await self.store.save_session(session)
-        return SessionResult(session=session, metrics=self.calculate_metrics(samples))
+        return SessionResult(session=session, metrics=self.calculate_metrics(samples, snapshots))
 
     async def replay(self, session_id: str) -> list[SimulationSnapshot]:
         await self.require_session(session_id)
@@ -95,7 +96,19 @@ class TrainingService:
         return session
 
     @staticmethod
-    def calculate_metrics(samples: list[ToolSample]) -> SessionMetrics:
+    def calculate_metrics(
+        samples: list[ToolSample], snapshots: list[SimulationSnapshot] | None = None
+    ) -> SessionMetrics:
+        snapshots = snapshots or []
+        incision_length = max(
+            (snapshot.tissue.incision_length_mm for snapshot in snapshots), default=0.0
+        )
+        incision_depth = max(
+            (snapshot.tissue.incision_depth_mm for snapshot in snapshots), default=0.0
+        )
+        incision_progress = max(
+            (snapshot.tissue.incision_progress for snapshot in snapshots), default=0.0
+        )
         if not samples:
             return SessionMetrics(
                 sample_count=0, duration_ms=0, contact_time_ms=0,
@@ -103,6 +116,9 @@ class TrainingService:
                 mean_target_offset_mm=0, peak_target_offset_mm=0,
                 force_consistency_n=0, controlled_contact_percent=0,
                 illustrative_score_percent=0,
+                incision_length_mm=incision_length,
+                max_incision_depth_mm=incision_depth,
+                incision_progress_percent=incision_progress * 100,
             )
         contact_samples = [sample for sample in samples if sample.contact]
         intervals = [
@@ -140,4 +156,7 @@ class TrainingService:
             force_consistency_n=force_consistency,
             controlled_contact_percent=controlled_percent,
             illustrative_score_percent=illustrative_score,
+            incision_length_mm=incision_length,
+            max_incision_depth_mm=incision_depth,
+            incision_progress_percent=incision_progress * 100,
         )

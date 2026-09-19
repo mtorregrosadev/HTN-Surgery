@@ -46,4 +46,6 @@ def test_controller_websocket_receives_simulation_snapshot():
         assert snapshot["tool"]["forceN"] == 1.2
         assert snapshot["events"] == ["contact-start"]
         assert snapshot["deformableMeshes"][0]["objectId"] == "training-membrane"
-        assert len(snapshot["deformableMeshes"][0]["verticesMm"]) == 33
+        assert len(snapshot["deformableMeshes"][0]["verticesMm"]) == 104
+        assert snapshot["tissue"]["interactionMode"] == "contact"
+        assert snapshot["tissue"]["incisionLengthMm"] == 0

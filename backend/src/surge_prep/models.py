@@ -99,6 +99,10 @@ class ToolState(ApiModel):
 
 class TissueState(ApiModel):
     deformation_mm: float = Field(ge=0)
+    incision_progress: float = Field(default=0, ge=0, le=1)
+    incision_length_mm: float = Field(default=0, ge=0)
+    incision_depth_mm: float = Field(default=0, ge=0)
+    interaction_mode: str = "approach"
 
 
 class DeformableMeshState(ApiModel):
@@ -140,6 +144,9 @@ class SessionMetrics(ApiModel):
     force_consistency_n: float
     controlled_contact_percent: float
     illustrative_score_percent: float
+    incision_length_mm: float = 0
+    max_incision_depth_mm: float = 0
+    incision_progress_percent: float = 0
 
 
 class SessionResult(ApiModel):

@@ -22,8 +22,16 @@
     },
     "tissue": {
       "type": "object", "additionalProperties": false,
-      "required": ["deformationMm"],
-      "properties": { "deformationMm": { "type": "number", "minimum": 0 } }
+      "required": ["deformationMm", "incisionProgress", "incisionLengthMm", "incisionDepthMm", "interactionMode"],
+      "properties": {
+        "deformationMm": { "type": "number", "minimum": 0 },
+        "incisionProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "incisionLengthMm": { "type": "number", "minimum": 0 },
+        "incisionDepthMm": { "type": "number", "minimum": 0 },
+        "interactionMode": {
+          "enum": ["approach", "contact", "cutting", "low-force", "excessive-force", "outside-target"]
+        }
+      }
     },
     "deformableMeshes": {
       "type": "array",

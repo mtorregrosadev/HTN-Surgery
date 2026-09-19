@@ -20,7 +20,10 @@ CELL_WIDTH_MM = 3.0
 CORRIDOR_HALF_WIDTH_MM = 6.0
 # Calibrated against the native constraint response from the localized FEM
 # scene. Physical hardware force thresholds remain a separate calibration.
-MINIMUM_REACTION_N = 0.01
+# Native blade-edge contact distributes constraint force across a line rather
+# than concentrating it at the old sphere. Treat any stable solver force above
+# numerical noise as contact; hardware coaching thresholds remain separate.
+MINIMUM_REACTION_N = 0.001
 MAXIMUM_REACTION_N = 3.0
 CUT_THRESHOLD_MM = 0.5
 REACTION_PER_MM = 0.38
@@ -247,6 +250,32 @@ class LayeredChestState:
                 events.append("stage-completed")
         mode = "cutting" if opening.cut_cells else "contact"
         return mode, events, blocked_by_rib
+
+    def record_sofa_cut(
+        self, layer_id: str, sample: ToolSample, penetration_mm: float
+    ) -> list[str]:
+        """Observe an authoritative SOFA topology change for metrics/staging.
+
+        This state object no longer grants permission for native carving. It
+        records what SOFA actually removed so replay and scoring remain
+        deterministic without pretending a Python counter is tissue physics.
+        """
+        if layer_id not in self.layers:
+            return []
+        if not in_corridor(sample.position_mm.x, sample.position_mm.z):
+            self.outside_corridor_contacts += 1
+            return ["outside-corridor-cut"]
+        opening = self.layers[layer_id]
+        previous = len(opening.cut_cells)
+        cell = corridor_cell(sample.position_mm.x)
+        opening.cut_cells.add(cell)
+        opening.depths_mm[cell] = max(
+            opening.depths_mm.get(cell, 0.0), penetration_mm
+        )
+        events = ["layer-opened" if previous == 0 else "incision-extended"]
+        if opening.opened and previous / cell_count() < 0.4:
+            events.append("stage-completed")
+        return events
 
     def active_layer_for_depth(self, penetration_mm: float) -> str:
         y_mm = SURFACE_Y_MM - penetration_mm

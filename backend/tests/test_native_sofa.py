@@ -54,7 +54,7 @@ async def test_native_sofa_owns_contact_force_deformation_and_topology() -> None
     await simulator.begin_session("native-test")
     try:
         snapshots = []
-        for sequence, y_mm in enumerate((5.0, 2.5, 1.8, 1.0, 0.0), start=1):
+        for sequence, y_mm in enumerate((5.0, 2.5, 1.0, 0.0, -0.25), start=1):
             snapshots.append(await simulator.step(sample(sequence, y_mm)))
         contact = snapshots[-1]
         assert contact.simulation_backend == "sofa-native"

@@ -156,7 +156,6 @@ namespace SurgePrep.Editor
             var fat = Material("Subcutaneous", new Color(0.9f, 0.78f, 0.55f), 0.0f, 0.22f);
             var pleura = Material("Pleura", new Color(0.72f, 0.7f, 0.68f), 0.0f, 0.5f);
             var incision = Material("IncisionChannel", new Color(0.35f, 0.08f, 0.08f), 0.0f, 0.55f);
-            var pressure = TransparentMaterial("PressureIndicator", new Color(0.05f, 1f, 0.65f, 0.7f));
             var tool = Material("TrainingTool", new Color(0.72f, 0.74f, 0.76f), 0.7f, 0.55f);
             var drape = Material("SurgicalDrape", new Color(0.055f, 0.24f, 0.32f), 0.0f, 0.24f);
             var metal = Material("BrushedMetal", new Color(0.62f, 0.64f, 0.66f), 0.85f, 0.55f);
@@ -243,7 +242,6 @@ namespace SurgePrep.Editor
             SetObject(renderer, "incisionMaterial", incision);
             SetObject(renderer, "scalpelModel", scalpelModel);
             SetObject(renderer, "toolMaterial", tool);
-            SetObject(renderer, "pressureIndicatorMaterial", pressure);
             SetObject(renderer, "incisionGuide", CreateTargetGuide(simulation.transform, target));
             SetObject(stream, "sceneRenderer", renderer);
             SetObject(manualDemo, "sceneRenderer", renderer);

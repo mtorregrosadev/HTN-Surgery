@@ -14,6 +14,7 @@ from .layered_chest import (
     LayeredChestState,
     exposed_surface_y_mm,
     in_corridor,
+    in_patch,
     pose_contact,
     tool_state_from_pose,
 )
@@ -137,7 +138,7 @@ class SofaSimulator(Simulator):
     name = "sofa-native"
     # Two 10 ms implicit steps let contact settle while keeping the local loop
     # interactive at showcase input rates.
-    network_substeps = 2
+    network_substeps = 3
 
     def __init__(self, scene_path: str, step_ms: int = 10) -> None:
         self.scene_path = Path(scene_path).resolve()
@@ -215,30 +216,14 @@ class SofaSimulator(Simulator):
                 sample.orientation.qx, sample.orientation.qy,
                 sample.orientation.qz, sample.orientation.qw,
             ]
-            radius = self._tool_radius_mm(sample.tool_id)
-            # SOFA's standard pipeline is discrete, not continuous collision
-            # detection. Keep a collision proxy coupled to the tracked target
-            # at the tissue boundary so a deeply pressed physical input cannot
-            # tunnel completely through the mapped surface between updates.
-            exposed_surface_y = 0.0
-            if target_pose[1] < exposed_surface_y + radius + 0.5:
-                target_pose[1] -= 0.5
-            target_pose[1] = max(
-                target_pose[1], exposed_surface_y - 0.9 * radius
-            )
+            # SOFA's standard pipeline is discrete. Interpolate the complete
+            # tracked blade pose over fixed substeps rather than moving a
+            # spherical proxy or silently clamping the user's instrument.
             previous_pose = state.applied_tool_pose
             reactions: list[float] = []
             contacts: list[bool] = []
             deformations: list[float] = []
-            input_layer = chest.active_layer_for_depth(
-                max(0.0, radius - sample.position_mm.y)
-            )
-            root.carvingManager.active.value = (
-                state.carving_layer == "skin"
-                and state.carving_layer == input_layer
-                and self._tool_matches_layer(sample.tool_id, state.carving_layer)
-                and in_corridor(sample.position_mm.x, sample.position_mm.z)
-            )
+            root.carvingManager.active.value = False
             for substep in range(self.network_substeps):
                 fraction = (substep + 1) / self.network_substeps
                 proxy_pose = [
@@ -263,11 +248,7 @@ class SofaSimulator(Simulator):
             contact = any(contacts)
             deformation = max(deformations, default=0.0)
             contact_point = self._nearest_surface_point(root, sample)
-            penetration = (
-                max(0.0, self._tool_radius_mm(sample.tool_id) - sample.position_mm.y)
-                if contact
-                else 0.0
-            )
+            penetration = max(0.0, -sample.position_mm.y) if contact else 0.0
             events: list[str] = []
             if contact and not state.previous_contact:
                 events.append("first-contact")
@@ -280,15 +261,11 @@ class SofaSimulator(Simulator):
             if blocked:
                 events.append("protected-anatomy")
             carving_step = 0
-            if (
-                mode == "cutting"
-                and active_layer == "skin"
-                and chest.layers[active_layer].opened
-                and self._should_carve(
-                    sample, chest, contact, reaction, active_layer
-                )
+            if active_layer == "skin" and self._should_carve(
+                sample, chest, contact, reaction, active_layer
             ):
                 state.carving_layer = active_layer
+                tetrahedra_before_carving = len(root.tissue.topology.tetrahedra.value)
                 root.carvingManager.active.value = True
                 carving_pose = target_pose.copy()
                 carving_pose[1] -= 0.35
@@ -296,6 +273,9 @@ class SofaSimulator(Simulator):
                 self._simulation.animate(root, 0.01)
                 root.carvingManager.active.value = False
                 carving_step = 1
+                if len(root.tissue.topology.tetrahedra.value) < tetrahedra_before_carving:
+                    events.extend(chest.record_sofa_cut(active_layer, sample, penetration))
+                    mode = "cutting"
             state.tick += self.network_substeps + carving_step
             tetrahedra = len(root.tissue.topology.tetrahedra.value)
             if tetrahedra < state.previous_tetrahedra:
@@ -324,15 +304,6 @@ class SofaSimulator(Simulator):
 
     def _apply_tool(self, root: Any, sample: ToolSample, tool_pose: list) -> None:
         root.tool.dofs.position.value = tool_pose
-        root.tool.collision.sphere.radius.value = self._tool_radius_mm(sample.tool_id)
-
-    @staticmethod
-    def _tool_radius_mm(tool_id: str) -> float:
-        return {
-            "scalpel": 1.6,
-            "blunt-dissector": 2.4,
-            "chest-tube": 3.2,
-        }.get(tool_id, 2.0)
 
     @staticmethod
     def _reaction_force_n(root: Any) -> float:
@@ -363,7 +334,7 @@ class SofaSimulator(Simulator):
             and SofaSimulator._tool_matches_layer(
                 sample.tool_id, layer_id or chest.current_layer()
             )
-            and in_corridor(sample.position_mm.x, sample.position_mm.z)
+            and in_patch(sample.position_mm.x, sample.position_mm.z)
             and 0.001 <= reaction_n <= 3.0
         )
 

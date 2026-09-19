@@ -12,6 +12,19 @@ GRID_RESOLUTION = [13, 7, 13]
 TISSUE_YOUNG_MODULUS_MPA = 0.20
 TISSUE_POISSON_RATIO = 0.45
 
+# The supplied CAD scalpel is registered to a tip-origin tool frame. This
+# polyline follows its physical lower blade edge in millimetres. It replaces
+# the old spherical proxy so collision, carving, replay, and the Unity visual
+# all refer to the same geometry.
+SCALPEL_CUTTING_EDGE_MM = [
+    [0.0, 0.0, 0.0],
+    [0.0, 4.758, 0.809],
+    [0.0, 14.5, 1.12],
+    [0.0, 24.0, 1.28],
+    [0.0, 33.0, 2.65],
+]
+SCALPEL_CUTTING_EDGE_SEGMENTS = [[index, index + 1] for index in range(4)]
+
 
 def createScene(root, carving_active=False):
     root.dt = 0.01
@@ -172,18 +185,38 @@ def createScene(root, carving_active=False):
     collision.addObject(
         "MechanicalObject",
         template="Vec3d",
-        name="particle",
-        position=[[0.0, 0.0, 0.0]],
+        name="bladeEdgeDofs",
+        position=SCALPEL_CUTTING_EDGE_MM,
     )
     collision.addObject(
-        "SphereCollisionModel",
-        name="sphere",
-        radius=1.6,
+        "EdgeSetTopologyContainer",
+        name="bladeEdgeTopology",
+        edges=SCALPEL_CUTTING_EDGE_SEGMENTS,
+    )
+    collision.addObject(
+        "LineCollisionModel",
+        name="bladeEdge",
         simulated=False,
         moving=True,
         tags="CarvingTool",
     )
-    collision.addObject("RigidMapping", input="@../dofs", output="@particle")
+    # The real blade is approximately 0.5 mm thick. A sub-millimetre sphere
+    # envelope on the measured edge gives the constraint solver a stable
+    # contact thickness without reverting to the old 3.2 mm-wide tip sphere.
+    collision.addObject(
+        "SphereCollisionModel",
+        name="bladeThickness",
+        radius=0.28,
+        simulated=False,
+        moving=True,
+    )
+    collision.addObject(
+        "PointCollisionModel",
+        name="bladePoints",
+        simulated=False,
+        moving=True,
+    )
+    collision.addObject("RigidMapping", input="@../dofs", output="@bladeEdgeDofs")
 
     root.addObject(
         "CarvingManager",
@@ -191,6 +224,6 @@ def createScene(root, carving_active=False):
         active=carving_active,
         carvingDistance=-0.05,
         narrowPhaseDetection="@narrowPhase",
-        toolModel="@tool/collision/sphere",
+        toolModel="@tool/collision/bladeEdge",
     )
     return root

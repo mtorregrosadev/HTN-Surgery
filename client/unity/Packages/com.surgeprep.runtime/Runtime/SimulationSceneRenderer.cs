@@ -15,19 +15,14 @@ namespace SurgePrep
         [SerializeField] private Material pleuraMaterial;
         [SerializeField] private Material incisionMaterial;
         [SerializeField] private Material toolMaterial;
-        [SerializeField] private Material pressureIndicatorMaterial;
         [SerializeField] private LineRenderer incisionGuide;
 
         private readonly Dictionary<string, MeshView> meshes = new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
         private Quaternion toolTargetRotation = Quaternion.identity;
-        private Transform pressureIndicator;
-        private Transform contactMarker;
-        private Transform toolShadow;
         private GameObject scalpelVisual;
         private GameObject dissectorVisual;
         private GameObject tubeVisual;
-        private Material pressureIndicatorInstance;
         private IncrementalWoundRenderer woundRenderer;
 
         public SimulationSnapshotDto LatestSnapshot { get; private set; }
@@ -46,7 +41,6 @@ namespace SurgePrep
                     toolTransform.localPosition = toolTargetPosition;
                     toolTransform.localRotation = toolTargetRotation;
                 }
-                UpdateContactVisuals(snapshot);
             }
             DeformableMeshDto skin = null;
             foreach (var state in snapshot.deformableMeshes ?? new DeformableMeshDto[0])
@@ -111,13 +105,8 @@ namespace SurgePrep
             {
                 var imported = Instantiate(scalpelModel, scalpelVisual.transform);
                 imported.name = "Supplied SolidWorks scalpel";
-                // The OBJ is authored in metres along +X with its blade tip at
-                // X=-159.158 mm. Register that tip to SOFA's local origin and
-                // rotate the handle onto Unity's +Y tool axis.
-                imported.transform.localPosition = new Vector3(
-                    0.0016f, 0.159158f, -0.0055f
-                );
-                imported.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+                imported.transform.localPosition = ScalpelGeometry.ModelToToolPosition;
+                imported.transform.localRotation = ScalpelGeometry.ModelToToolRotation;
                 imported.transform.localScale = Vector3.one;
             }
             else
@@ -163,25 +152,6 @@ namespace SurgePrep
             }
             UpdateToolVisual("scalpel");
 
-            var indicator = Primitive("Contact pressure indicator", PrimitiveType.Sphere, tip,
-                Vector3.zero, Vector3.one * 0.008f);
-            pressureIndicator = indicator.transform;
-            if (pressureIndicatorMaterial != null)
-            {
-                pressureIndicatorInstance = new Material(pressureIndicatorMaterial);
-                indicator.GetComponent<MeshRenderer>().sharedMaterial = pressureIndicatorInstance;
-            }
-            indicator.SetActive(false);
-
-            var marker = Primitive("SOFA contact marker", PrimitiveType.Sphere, transform,
-                Vector3.zero, Vector3.one * 0.0045f);
-            contactMarker = marker.transform;
-            marker.SetActive(false);
-
-            var shadow = Primitive("Instrument depth cue", PrimitiveType.Cylinder, transform,
-                Vector3.zero, new Vector3(0.012f, 0.0004f, 0.012f));
-            toolShadow = shadow.transform;
-
         }
 
         private void UpdateToolVisual(string toolId)
@@ -205,50 +175,6 @@ namespace SurgePrep
             var collider = created.GetComponent<Collider>();
             if (collider != null) Destroy(collider);
             return created;
-        }
-
-        private void UpdateContactVisuals(SimulationSnapshotDto snapshot)
-        {
-            var tool = snapshot.tool;
-            if (pressureIndicator != null)
-            {
-                pressureIndicator.gameObject.SetActive(tool.contact);
-                pressureIndicator.localScale = Vector3.one * (0.006f + tool.reactionForceN * 0.004f);
-                if (pressureIndicatorInstance != null)
-                {
-                    var colour = tool.reactionForceN > 1.2f
-                        ? new Color(1f, 0.08f, 0.03f, 0.75f)
-                        : tool.reactionForceN < 0.3f
-                            ? new Color(0.2f, 0.55f, 1f, 0.65f)
-                            : new Color(0.05f, 1f, 0.65f, 0.7f);
-                    if (pressureIndicatorInstance.HasProperty("_BaseColor"))
-                        pressureIndicatorInstance.SetColor("_BaseColor", colour);
-                    if (pressureIndicatorInstance.HasProperty("_Color"))
-                        pressureIndicatorInstance.SetColor("_Color", colour);
-                }
-            }
-            if (contactMarker != null)
-            {
-                contactMarker.gameObject.SetActive(tool.contact);
-                if (tool.contact)
-                {
-                    var point = tool.contactPointMm != null
-                        ? RegisteredPosition(tool.contactPointMm)
-                        : RegisteredPosition(tool.positionMm);
-                    contactMarker.localPosition = point;
-                }
-            }
-            if (toolShadow != null)
-            {
-                var tip = RegisteredPosition(tool.positionMm);
-                toolShadow.localPosition = new Vector3(
-                    tip.x,
-                    ChestSurfaceRegistration.OffsetMetres(
-                        tool.positionMm.x, tool.positionMm.z
-                    ) + 0.0004f,
-                    tip.z
-                );
-            }
         }
 
         private void Update()

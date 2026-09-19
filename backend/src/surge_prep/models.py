@@ -135,6 +135,11 @@ class SessionMetrics(ApiModel):
     contact_time_ms: int
     peak_force_n: float
     mean_contact_force_n: float
+    mean_target_offset_mm: float
+    peak_target_offset_mm: float
+    force_consistency_n: float
+    controlled_contact_percent: float
+    illustrative_score_percent: float
 
 
 class SessionResult(ApiModel):

@@ -28,7 +28,7 @@ async def run(controller_url: str, sample_limit: int) -> None:
         session_response = await client.post(
             "/v1/sessions",
             json={
-                "exerciseId": "training-pad-demo",
+                "exerciseId": "chest-tube-access-demo",
                 "calibrationId": calibration["calibrationId"],
                 "toolId": "blunt-stylus-1",
                 "deviceId": "synthetic-hardware",
@@ -48,8 +48,14 @@ async def run(controller_url: str, sample_limit: int) -> None:
         async with connect(stream_url, max_size=1024 * 1024) as socket:
             while sample_limit == 0 or sequence < sample_limit:
                 elapsed = time.monotonic() - started
-                cycle = (math.sin(elapsed * 2.0) + 1.0) / 2.0
-                force_n = round(cycle * 1.5, 3)
+                phase = elapsed % 20.0
+                if phase < 5.0:
+                    approach = 1.0 - phase / 5.0
+                    radius_mm = 30.0 * approach
+                    force_n = 0.0
+                else:
+                    radius_mm = 2.0 + math.sin(elapsed * 1.7) * 1.2
+                    force_n = round(0.75 + math.sin(elapsed * 2.3) * 0.16, 3)
                 sample = {
                     "contractVersion": "1.0",
                     "sessionId": session_id,
@@ -59,9 +65,9 @@ async def run(controller_url: str, sample_limit: int) -> None:
                     "sequence": sequence,
                     "timestampMs": int(elapsed * 1000),
                     "positionMm": {
-                        "x": math.sin(elapsed) * 20.0,
+                        "x": math.sin(elapsed * 0.8) * radius_mm,
                         "y": 16.0 - force_n * 2.0,
-                        "z": math.cos(elapsed) * 20.0,
+                        "z": math.cos(elapsed * 0.8) * radius_mm,
                     },
                     "orientation": {"qx": 0, "qy": 0, "qz": 0, "qw": 1},
                     "forceN": force_n,

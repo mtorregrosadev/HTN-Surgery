@@ -48,4 +48,7 @@ async def test_session_round_trip_and_metrics():
     result = await service.complete_session(session.session_id)
     assert result.metrics.sample_count == 3
     assert result.metrics.peak_force_n == 2.0
+    assert result.metrics.mean_target_offset_mm == pytest.approx(3.16227766)
+    assert result.metrics.controlled_contact_percent == 50.0
+    assert result.metrics.illustrative_score_percent == pytest.approx(67.09430585)
     assert len(await service.replay(session.session_id)) == 3

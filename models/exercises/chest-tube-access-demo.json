@@ -1,0 +1,28 @@
+{
+  "exerciseId": "chest-tube-access-demo",
+  "version": 1,
+  "title": "Chest-tube access rehearsal",
+  "status": "draft-instructor-review-required",
+  "scope": "Landmark identification and blunt-tool approach on a synthetic surface only",
+  "target": {
+    "description": "Illustrative lateral-chest target to be reviewed against locally approved triangle-of-safety teaching guidance",
+    "positionMm": { "x": 0, "y": 0, "z": 0 },
+    "radiusMm": 10
+  },
+  "illustrativeRubric": {
+    "forceRangeN": { "minimum": 0.3, "maximum": 1.2 },
+    "targetingWeight": 0.5,
+    "controlledForceWeight": 0.3,
+    "forceConsistencyWeight": 0.2
+  },
+  "safety": {
+    "trainingPrototypeOnly": true,
+    "instructorReviewRequired": true,
+    "realPatientsProhibited": true,
+    "realClinicalInstrumentsProhibited": true
+  },
+  "references": [
+    "https://www.rightdecisions.scot.nhs.uk/south-east-scotland-major-trauma-guidelines/cardiothoracics/chest-drain-insertion/",
+    "https://doclibrary-rcht.cornwall.nhs.uk/DocumentsLibrary/RoyalCornwallHospitalsTrust/Clinical/Respiratory/InsertionAndManagementOfChestDrainsClinicalGuideline.pdf"
+  ]
+}

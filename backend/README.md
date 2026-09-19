@@ -59,3 +59,9 @@ REST `POST /v1/sessions/{sessionId}/samples` is also available for diagnostics.
 Snapshots include the authoritative tool pose plus deformable surface vertices
 and triangle topology for immersive rendering. The controller broadcasts these
 snapshots to Unity; clients must not open this API WebSocket directly.
+
+Completing a session returns deterministic force, contact-time, target-offset,
+and force-consistency metrics plus an illustrative composite score. The draft
+weights and force range are recorded in
+`../models/exercises/chest-tube-access-demo.json`; they require qualified
+instructor review and are not clinical thresholds.

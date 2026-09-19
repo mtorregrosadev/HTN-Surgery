@@ -229,21 +229,24 @@ void applyPullMode() {
 int contactCandidateCount = 0;
 int releaseCandidateCount = 0;
 
+void updateThresholds() {
+  contactThresholdHigh = adcZeroBaseline + 80;
+  contactThresholdLow  = adcZeroBaseline + 35;
+}
+
 void calibrateAdcZero() {
   if (!pressure.isAdc) return;
-  delay(150); // Allow circuit to settle
+  delay(100); // Allow circuit to settle
   long sum = 0;
-  const int samples = 40;
+  const int samples = 30;
   for (int i = 0; i < samples; i++) {
     sum += analogRead(activePressurePin);
-    delay(4);
+    delay(3);
   }
   adcZeroBaseline = (int)(sum / samples);
-  // Wide deadband: touch requires baseline + 300 (min 400), release is baseline + 150 (min 200)
-  contactThresholdHigh = max(400, adcZeroBaseline + 300);
-  contactThresholdLow  = max(200, adcZeroBaseline + 150);
+  updateThresholds();
   smoothedRaw = (float)adcZeroBaseline;
-  Serial.printf("\n[Calibrated] FSR-402 baseline: %d (Touch threshold: %d, Release: %d)\n\n",
+  Serial.printf("\n[Calibrated] FSR-402 baseline: %d (Touch: >=%d, Release: <=%d)\n\n",
                 adcZeroBaseline, contactThresholdHigh, contactThresholdLow);
 }
 
@@ -268,23 +271,47 @@ bool updatePressureSensor() {
   bool contact = pressure.isContact;
 
   if (pressure.isAdc) {
-    // 16x oversampling to reject AC mains noise & electrical ripple
+    // 8x oversampling to reject AC mains ripple
     long sum = 0;
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 8; i++) {
       sum += analogRead(activePressurePin);
     }
-    raw = (int)(sum / 16);
+    raw = (int)(sum / 8);
 
-    // Low-pass exponential moving average filter
-    smoothedRaw = 0.85f * smoothedRaw + 0.15f * (float)raw;
+    // Responsive EMA filter (60% history, 40% new sample)
+    smoothedRaw = 0.60f * smoothedRaw + 0.40f * (float)raw;
     int currentRaw = (int)smoothedRaw;
 
-    // Multi-cycle persistence filter (must sustain for 4 cycles = ~80ms)
+    // Automatic downward tare: if physical reading is below baseline,
+    // immediately adapt baseline down to prevent sensor deafness from touch-at-boot
+    if (currentRaw < adcZeroBaseline) {
+      adcZeroBaseline = currentRaw;
+      updateThresholds();
+    }
+
+    // Slow ambient drift compensation when completely idle for > 1.5s
+    if (!pressure.isContact && (now - pressure.lastChangeMs > 1500)) {
+      if (currentRaw < contactThresholdLow) {
+        static unsigned long lastDriftMs = 0;
+        if (now - lastDriftMs > 300) {
+          lastDriftMs = now;
+          if (currentRaw > adcZeroBaseline) {
+            adcZeroBaseline++;
+            updateThresholds();
+          } else if (currentRaw < adcZeroBaseline) {
+            adcZeroBaseline--;
+            updateThresholds();
+          }
+        }
+      }
+    }
+
+    // 2-cycle persistence filter (40ms response, filters transient glitch spikes)
     if (!pressure.isContact) {
       if (currentRaw >= contactThresholdHigh) {
         contactCandidateCount++;
         releaseCandidateCount = 0;
-        if (contactCandidateCount >= 4) {
+        if (contactCandidateCount >= 2) {
           contact = true;
         }
       } else {
@@ -292,18 +319,14 @@ bool updatePressureSensor() {
       }
     } else {
       if (currentRaw <= contactThresholdLow) {
-        releaseCandidateCount++;
-        contactCandidateCount = 0;
-        if (releaseCandidateCount >= 4) {
-          contact = false;
-        }
-      } else {
+        contact = false;
         releaseCandidateCount = 0;
+        contactCandidateCount = 0;
       }
     }
 
     int delta = max(0, currentRaw - adcZeroBaseline);
-    int span = max(200, 4095 - adcZeroBaseline);
+    int span = max(150, 4095 - adcZeroBaseline);
     pressure.forceEstimateN = contact ? ((float)delta / (float)span * 10.0f) : 0.0f;
   } else {
     raw = digitalRead(activePressurePin);
@@ -315,9 +338,9 @@ bool updatePressureSensor() {
   pressure.sampleCount++;
   pressure.lastSampleMs = now;
 
-  // Debounced state transition (at least 60ms between toggles)
+  // Debounced state transition (40ms debounce)
   bool stateChanged = false;
-  if (contact != pressure.isContact && (now - pressure.lastChangeMs > 60)) {
+  if (contact != pressure.isContact && (now - pressure.lastChangeMs > 40)) {
     pressure.isContact = contact;
     pressure.lastChangeMs = now;
     stateChanged = true;
@@ -332,8 +355,8 @@ bool updatePressureSensor() {
                     now);
     } else if (cleanOutputMode) {
       if (pressure.isContact) {
-        Serial.printf("\n>>> [TOUCH] Engaged (Force: %.2f N | raw: %d)\n",
-                      pressure.forceEstimateN, pressure.rawValue);
+        Serial.printf("\n>>> [TOUCH] Engaged (Force: %.2f N | raw: %d | delta: %+d)\n",
+                      pressure.forceEstimateN, pressure.rawValue, pressure.rawValue - adcZeroBaseline);
       } else {
         Serial.printf("--- [RELEASE] Sensor idle (0.00 N)\n\n");
       }
@@ -358,7 +381,7 @@ void streamPressureToTerminal() {
   // Calm, clean stream mode: quiet when idle, sleek ASCII bar when pressing
   if (cleanOutputMode && !jsonTerminal) {
     if (pressure.isContact) {
-      if (now - lastStreamMs < 250) return; // 4Hz clean updates while pressing
+      if (now - lastStreamMs < 150) return; // ~6.6Hz clean updates while pressing
       lastStreamMs = now;
 
       char bar[16];
@@ -368,14 +391,14 @@ void streamPressureToTerminal() {
       bar[11] = ']';
       bar[12] = '\0';
 
-      Serial.printf("[FSR] %5.2f N  %s  (raw: %4d)\n",
-                    pressure.forceEstimateN, bar, pressure.rawValue);
+      Serial.printf("[FSR] %5.2f N  %s  (raw: %4d | delta: %+d)\n",
+                    pressure.forceEstimateN, bar, pressure.rawValue, pressure.rawValue - adcZeroBaseline);
     } else {
-      // Unobtrusive heartbeat once every 3 seconds while idle
-      if (now - lastStreamMs < 3000) return;
+      // Idle heartbeat every 2 seconds with live raw reading so user sees what resting value is
+      if (now - lastStreamMs < 2000) return;
       lastStreamMs = now;
-      Serial.printf("[FSR] Idle (ready) | baseline: %d | Pin %d\n",
-                    adcZeroBaseline, activePressurePin);
+      Serial.printf("[FSR] Idle (ready) | raw: %4d | base: %4d | thresh: %4d | Pin %d\n",
+                    pressure.rawValue, adcZeroBaseline, contactThresholdHigh, activePressurePin);
     }
     return;
   }

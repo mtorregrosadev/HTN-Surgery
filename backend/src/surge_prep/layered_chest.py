@@ -139,7 +139,9 @@ class LayerOpening:
 
     @property
     def opened(self) -> bool:
-        return self.progress >= 0.5
+        # Five 3 mm cells form a sufficient localized tract while preserving
+        # intact tissue at both corridor ends.
+        return self.progress >= 0.4
 
 
 @dataclass
@@ -185,6 +187,16 @@ class LayeredChestState:
         blocked_by_rib = hits_protected_rib(
             sample.position_mm.x, sample.position_mm.y, sample.position_mm.z
         )
+        if (
+            sample.tool_id == "chest-tube"
+            and self.layers["pleura"].opened
+            and in_corridor(sample.position_mm.x, sample.position_mm.z)
+            and sample.position_mm.y <= -10.0
+        ):
+            if not self.tube_placed:
+                self.tube_placed = True
+                events.extend(["stage-completed", "session-completed"])
+            return "tube-placement", events, blocked_by_rib
         if not contact:
             for layer in self.layers.values():
                 layer.previous_x_mm = None
@@ -200,15 +212,6 @@ class LayeredChestState:
         active = self._active_layer_for_depth(penetration_mm)
         required = LAYER_TOOLS[active]
         if sample.tool_id != required:
-            if sample.tool_id == "chest-tube":
-                if self.layers["pleura"].opened and in_corridor(
-                    sample.position_mm.x, sample.position_mm.z
-                ):
-                    if not self.tube_placed:
-                        self.tube_placed = True
-                        events.append("stage-completed")
-                        events.append("session-completed")
-                    return "contact", events, blocked_by_rib
             self.layer_violations += 1
             events.append("layer-violation")
             return "contact", events, blocked_by_rib

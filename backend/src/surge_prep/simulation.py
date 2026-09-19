@@ -133,7 +133,9 @@ class SofaSimulator(Simulator):
     """In-process bridge to a native SOFA Python scene."""
 
     name = "sofa-native"
-    network_substeps = 3
+    # Two 10 ms implicit steps let contact settle while keeping the local loop
+    # interactive at showcase input rates.
+    network_substeps = 2
 
     def __init__(self, scene_path: str, step_ms: int = 10) -> None:
         self.scene_path = Path(scene_path).resolve()
@@ -203,6 +205,7 @@ class SofaSimulator(Simulator):
             if state is None:
                 raise RuntimeError("SOFA session has not been initialized")
             root = state.root
+            chest = self._chests[sample.session_id]
             tool_pose = [[
                 sample.position_mm.x, sample.position_mm.y, sample.position_mm.z,
                 sample.orientation.qx, sample.orientation.qy,
@@ -215,17 +218,24 @@ class SofaSimulator(Simulator):
             preliminary_reaction = self._reaction_force_n(root)
             preliminary_contact = self._has_contact(root, preliminary_reaction)
             root.carvingManager.active.value = self._should_carve(
-                sample, preliminary_contact, preliminary_reaction
+                sample, chest, preliminary_contact, preliminary_reaction
             )
             self._simulation.animate(root, 0.01)
             root.carvingManager.active.value = False
             state.tick += self.network_substeps
-            chest = self._chests[sample.session_id]
             reaction = self._reaction_force_n(root)
+            if not math.isfinite(reaction):
+                raise RuntimeError(
+                    "SOFA contact solver became non-finite; stop the session and reset the tool."
+                )
             contact = self._has_contact(root, reaction)
             deformation = self._maximum_deformation_mm(root)
             contact_point = self._nearest_surface_point(root, sample)
-            penetration = deformation if contact else 0.0
+            penetration = (
+                max(0.0, self._tool_radius_mm(sample.tool_id) - sample.position_mm.y)
+                if contact
+                else 0.0
+            )
             events: list[str] = []
             if contact and not state.previous_contact:
                 events.append("first-contact")
@@ -256,8 +266,15 @@ class SofaSimulator(Simulator):
 
     def _apply_tool(self, root: Any, sample: ToolSample, tool_pose: list) -> None:
         root.tool.dofs.position.value = tool_pose
-        radius = {"scalpel": 1.6, "blunt-dissector": 2.4, "chest-tube": 3.2}.get(sample.tool_id, 2.0)
-        root.tool.collision.sphere.radius.value = radius
+        root.tool.collision.sphere.radius.value = self._tool_radius_mm(sample.tool_id)
+
+    @staticmethod
+    def _tool_radius_mm(tool_id: str) -> float:
+        return {
+            "scalpel": 1.6,
+            "blunt-dissector": 2.4,
+            "chest-tube": 3.2,
+        }.get(tool_id, 2.0)
 
     @staticmethod
     def _reaction_force_n(root: Any) -> float:
@@ -277,13 +294,22 @@ class SofaSimulator(Simulator):
 
     @staticmethod
     def _should_carve(
-        sample: ToolSample, contact: bool, reaction_n: float
+        sample: ToolSample,
+        chest: LayeredChestState,
+        contact: bool,
+        reaction_n: float,
     ) -> bool:
+        layer_tool = {
+            "skin": "scalpel",
+            "subcutaneous": "blunt-dissector",
+            "intercostal-muscle": "blunt-dissector",
+            "pleura": "scalpel",
+        }
         return (
             contact
-            and sample.tool_id == "scalpel"
+            and sample.tool_id == layer_tool[chest.current_layer()]
             and in_corridor(sample.position_mm.x, sample.position_mm.z)
-            and 0.04 <= reaction_n <= 1.5
+            and 0.12 <= reaction_n <= 1.5
         )
 
     @staticmethod
@@ -312,6 +338,10 @@ class SofaSimulator(Simulator):
             ),
         )
         point = current[nearest]
+        if not all(math.isfinite(float(value)) for value in point):
+            raise RuntimeError(
+                "SOFA tissue state became non-finite; stop the session and reset the scene."
+            )
         return Vector3(x=float(point[0]), y=float(point[1]), z=float(point[2]))
 
     @staticmethod

@@ -9,7 +9,7 @@ millimetres; elastic modulus is N/mm² (MPa), and reported contact lambda is N.
 PATCH_HALF_MM = 40.0
 PATCH_DEPTH_MM = 16.0
 GRID_RESOLUTION = [13, 7, 13]
-TISSUE_YOUNG_MODULUS_MPA = 0.35
+TISSUE_YOUNG_MODULUS_MPA = 0.20
 TISSUE_POISSON_RATIO = 0.45
 
 

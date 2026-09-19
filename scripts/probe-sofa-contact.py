@@ -129,7 +129,7 @@ def create_scene(root):
     tissue.addObject(
         "TetrahedralCorotationalFEMForceField",
         name="fem",
-        youngModulus=0.35,
+        youngModulus=0.20,
         poissonRatio=0.45,
         method="large",
     )

@@ -26,10 +26,15 @@ def configure_native_sofa() -> None:
     checker.configure_paths(root)
 
 
-def sample(sequence: int, y_mm: float, x_mm: float = 0.0) -> ToolSample:
+def sample(
+    sequence: int,
+    y_mm: float,
+    x_mm: float = 0.0,
+    tool_id: str = "scalpel",
+) -> ToolSample:
     return ToolSample(
         session_id="native-test",
-        tool_id="scalpel",
+        tool_id=tool_id,
         device_id="test-device",
         calibration_id="test-calibration",
         sequence=sequence,
@@ -81,6 +86,103 @@ async def test_native_sofa_owns_contact_force_deformation_and_topology() -> None
         assert max(
             mesh.topology_revision for mesh in carved.deformable_meshes
         ) > before_revision
+    finally:
+        await simulator.end_session("native-test")
+        await simulator.close()
+
+
+@pytest.mark.asyncio
+async def test_native_sofa_completes_layered_opening_from_physical_contact() -> None:
+    configure_native_sofa()
+    simulator = SofaSimulator(str(REPOSITORY / "simulation" / "sofa_scene.py"))
+    await simulator.start()
+    await simulator.begin_session("native-test")
+    sequence = 1
+    snapshot = None
+    try:
+        for y_mm in (5.0, 2.5, 1.8, 1.0, 0.0, -1.0):
+            snapshot = await simulator.step(sample(sequence, y_mm, -15.0))
+            sequence += 1
+        for x_mm in range(-15, 16):
+            snapshot = await simulator.step(sample(sequence, -1.0, float(x_mm)))
+            sequence += 1
+        assert snapshot is not None
+        skin = next(
+            layer for layer in snapshot.tissue.layers if layer.layer_id == "skin"
+        )
+        assert skin.opening_progress >= 0.5
+        assert skin.opened
+        assert snapshot.tissue.active_layer in ("subcutaneous", "none")
+
+        for y_mm in (0.0, -1.0, -2.0, -3.0):
+            snapshot = await simulator.step(
+                sample(sequence, y_mm, 15.0, "blunt-dissector")
+            )
+            sequence += 1
+        for x_mm in range(15, -16, -1):
+            snapshot = await simulator.step(
+                sample(sequence, -3.0, float(x_mm), "blunt-dissector")
+            )
+            sequence += 1
+        subcutaneous = next(
+            layer
+            for layer in snapshot.tissue.layers
+            if layer.layer_id == "subcutaneous"
+        )
+        assert subcutaneous.opened
+
+        for y_mm in (-4.0, -5.0, -6.0, -7.0, -8.0):
+            snapshot = await simulator.step(
+                sample(sequence, y_mm, -15.0, "blunt-dissector")
+            )
+            sequence += 1
+        for x_mm in range(-15, 16):
+            snapshot = await simulator.step(
+                sample(sequence, -8.0, float(x_mm), "blunt-dissector")
+            )
+            sequence += 1
+        muscle = next(
+            layer
+            for layer in snapshot.tissue.layers
+            if layer.layer_id == "intercostal-muscle"
+        )
+        assert muscle.opened
+
+        for y_mm in (-9.0, -10.0, -11.0, -12.0, -13.0):
+            snapshot = await simulator.step(
+                sample(sequence, y_mm, 15.0, "scalpel")
+            )
+            sequence += 1
+        for x_mm in range(15, -16, -1):
+            snapshot = await simulator.step(
+                sample(sequence, -13.0, float(x_mm), "scalpel")
+            )
+            sequence += 1
+        pleura = next(
+            layer for layer in snapshot.tissue.layers if layer.layer_id == "pleura"
+        )
+        if not pleura.opened:
+            for x_mm in range(-15, 16):
+                snapshot = await simulator.step(
+                    sample(sequence, -14.0, float(x_mm), "scalpel")
+                )
+                sequence += 1
+            pleura = next(
+                layer
+                for layer in snapshot.tissue.layers
+                if layer.layer_id == "pleura"
+            )
+        assert pleura.opened
+
+        for y_mm in (-9.0, -10.0, -11.0):
+            snapshot = await simulator.step(
+                sample(sequence, y_mm, -15.0, "chest-tube")
+            )
+            sequence += 1
+            if snapshot.procedure_stage == "complete":
+                break
+        assert snapshot.procedure_stage == "complete"
+        assert "session-completed" in snapshot.events
     finally:
         await simulator.end_session("native-test")
         await simulator.close()

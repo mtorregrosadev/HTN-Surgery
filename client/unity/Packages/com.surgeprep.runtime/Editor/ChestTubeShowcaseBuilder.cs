@@ -400,20 +400,31 @@ namespace SurgePrep.Editor
 
         private static void CreateTargetGuide(Transform parent, Material material)
         {
-            var guide = new GameObject("Illustrative target corridor - instructor review required");
+            var guide = new GameObject("Curved incision guide - instructor review required");
             guide.transform.SetParent(parent, false);
             guide.transform.localPosition = Vector3.zero;
             var line = guide.AddComponent<LineRenderer>();
             line.useWorldSpace = false;
-            line.loop = true;
-            line.positionCount = 4;
-            line.startWidth = 0.0012f;
-            line.endWidth = 0.0012f;
+            line.loop = false;
+            line.positionCount = 17;
+            line.startWidth = 0.0015f;
+            line.endWidth = 0.0015f;
             line.sharedMaterial = material;
-            line.SetPosition(0, new Vector3(-0.018f, 0.001f, -0.006f));
-            line.SetPosition(1, new Vector3(0.018f, 0.001f, -0.006f));
-            line.SetPosition(2, new Vector3(0.018f, 0.001f, 0.006f));
-            line.SetPosition(3, new Vector3(-0.018f, 0.001f, 0.006f));
+            for (var index = 0; index < line.positionCount; index++)
+            {
+                var t = index / (float)(line.positionCount - 1);
+                var xMm = Mathf.Lerp(-18f, 18f, t);
+                var zMm = -3f + 6f * Mathf.Sin(t * Mathf.PI);
+                var y = ChestSurfaceRegistration.OffsetMetres(xMm, zMm) + 0.0015f;
+                line.SetPosition(
+                    index,
+                    new Vector3(
+                        xMm * CoordinateFrame.MillimetresToMetres,
+                        y,
+                        -zMm * CoordinateFrame.MillimetresToMetres
+                    )
+                );
+            }
         }
 
         private static GameObject Cube(

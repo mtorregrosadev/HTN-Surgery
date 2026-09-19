@@ -17,15 +17,6 @@ namespace SurgePrep
         [SerializeField] private Material pressureIndicatorMaterial;
         [SerializeField] private Material bloodMaterial;
 
-        private static readonly float[,] ChestSurfaceOffsetsMm =
-        {
-            { 3f, -3f, -15f, -42f, -78f },
-            { 11f, 7f, -2f, -25f, -74f },
-            { 11f, 6f, 0f, -17f, -56f },
-            { 6f, -1f, -12f, -25f, -57f },
-            { -1f, -7f, -23f, -32f, -56f },
-        };
-
         private readonly Dictionary<string, MeshView> meshes = new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
         private Quaternion toolTargetRotation = Quaternion.identity;
@@ -233,7 +224,9 @@ namespace SurgePrep
                 var tip = RegisteredPosition(tool.positionMm);
                 toolShadow.localPosition = new Vector3(
                     tip.x,
-                    ChestSurfaceOffsetMetres(tool.positionMm.x, tool.positionMm.z) + 0.0004f,
+                    ChestSurfaceRegistration.OffsetMetres(
+                        tool.positionMm.x, tool.positionMm.z
+                    ) + 0.0004f,
                     tip.z
                 );
             }
@@ -273,33 +266,9 @@ namespace SurgePrep
             var position = CoordinateFrame.Position(source);
             if (source != null)
             {
-                position.y += ChestSurfaceOffsetMetres(source.x, source.z);
+                position.y += ChestSurfaceRegistration.OffsetMetres(source.x, source.z);
             }
             return position;
-        }
-
-        // BodyParts3D's right lateral chest is strongly curved, while the SOFA
-        // patch intentionally uses a regular local grid. This measured height
-        // field registers the authoritative displacement onto that anatomy.
-        private static float ChestSurfaceOffsetMetres(float xMm, float zMm)
-        {
-            var gridX = Mathf.Clamp((xMm + 40f) / 20f, 0f, 4f);
-            var gridZ = Mathf.Clamp((zMm + 40f) / 20f, 0f, 4f);
-            var x0 = Mathf.Min(Mathf.FloorToInt(gridX), 3);
-            var z0 = Mathf.Min(Mathf.FloorToInt(gridZ), 3);
-            var xBlend = gridX - x0;
-            var zBlend = gridZ - z0;
-            var near = Mathf.Lerp(
-                ChestSurfaceOffsetsMm[z0, x0],
-                ChestSurfaceOffsetsMm[z0, x0 + 1],
-                xBlend
-            );
-            var far = Mathf.Lerp(
-                ChestSurfaceOffsetsMm[z0 + 1, x0],
-                ChestSurfaceOffsetsMm[z0 + 1, x0 + 1],
-                xBlend
-            );
-            return (Mathf.Lerp(near, far, zBlend) + 0.5f) * CoordinateFrame.MillimetresToMetres;
         }
 
         private MeshView GetOrCreateMesh(DeformableMeshDto state)

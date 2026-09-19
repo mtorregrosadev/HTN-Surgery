@@ -21,7 +21,6 @@ namespace SurgePrep.Editor
 
         private static readonly string[] AnatomyFiles =
         {
-            "FJ2810_BP22617_FMA7163_Skin.obj",
             "FJ3178_BP22232_FMA7487_Body of sternum.obj",
             "FJ3290_BP22794_FMA7486_Manubrium.obj",
             "FJ3153_BP22299_FMA7488_Xiphoid process.obj",
@@ -176,11 +175,17 @@ namespace SurgePrep.Editor
             var room = CreateOperatingRoom(wall, floor, metal, steel, plastic, rubber, mattress, drape);
             var tableTop = room.transform.Find("RegistrationAnchor_Table");
 
-            var anatomy = new GameObject("Supine training mannequin");
-            anatomy.transform.SetParent(tableTop, false);
-            anatomy.transform.localRotation = Quaternion.Euler(180f, 90f, 0f);
-            anatomy.transform.localPosition = new Vector3(0f, 0.12f, 0.05f);
-            var skinLayer = Layer("Skin layer", anatomy.transform);
+            var mannequin = new GameObject("Supine training mannequin");
+            mannequin.transform.SetParent(tableTop, false);
+            var skinLayer = Layer("Silicone mannequin shell", mannequin.transform);
+            CreateMannequinShell(skinLayer, skin);
+
+            var anatomy = new GameObject("Registered internal anatomy");
+            anatomy.transform.SetParent(mannequin.transform, false);
+            // BodyParts3D is Z-up. Keep anatomical Z along the table and flip
+            // anterior Y upward, with the feet near the table's negative end.
+            anatomy.transform.localRotation = Quaternion.Euler(0f, 0f, 180f);
+            anatomy.transform.localPosition = new Vector3(0f, 0.13f, -0.82f);
             var muscleLayer = Layer("Muscle layer", anatomy.transform);
             var boneLayer = Layer("Bone layer", anatomy.transform);
             var cartilageLayer = Layer("Cartilage layer", anatomy.transform);
@@ -200,19 +205,17 @@ namespace SurgePrep.Editor
                 var instance = PrefabUtility.InstantiatePrefab(prefab, parent) as GameObject;
                 instance.name = FriendlyName(file);
                 AssignMaterial(instance, MaterialFor(file, bone, cartilage, muscle, diaphragm, skin));
-                if (file.Contains("Skin"))
-                {
-                    CropSkinToTorso(instance);
-                }
             }
-            muscleLayer.gameObject.SetActive(true);
-            boneLayer.gameObject.SetActive(true);
-            CreateDrapes(anatomy.transform, drape);
+            muscleLayer.gameObject.SetActive(false);
+            boneLayer.gameObject.SetActive(false);
+            cartilageLayer.gameObject.SetActive(false);
+            diaphragmLayer.gameObject.SetActive(false);
+            CreateDrapes(tableTop, drape);
 
             var window = new GameObject("RegistrationAnchor_ProcedureWindow");
             window.transform.SetParent(tableTop, false);
-            window.transform.localPosition = new Vector3(0.14f, 0.28f, 0.04f);
-            window.transform.localRotation = Quaternion.Euler(0f, 90f, -90f);
+            window.transform.localPosition = new Vector3(0.205f, 0.31f, 0.18f);
+            window.transform.localRotation = Quaternion.identity;
 
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
             simulation.transform.SetParent(window.transform, false);
@@ -234,7 +237,7 @@ namespace SurgePrep.Editor
             SetObject(hud, "sceneRenderer", renderer);
             SetObject(hud, "manualDemo", manualDemo);
             CreateTargetGuide(simulation.transform, target);
-            CreateInstrumentHome(window.transform, tool);
+            CreateInstrumentHome(room.transform, tool);
 
             var camera = CreateCamera();
             CreateLighting(window.transform);
@@ -302,22 +305,86 @@ namespace SurgePrep.Editor
             return room;
         }
 
-        private static void CreateDrapes(Transform anatomy, Material drape)
+        private static void CreateMannequinShell(Transform parent, Material skin)
         {
-            Cube("Drape caudal", anatomy, new Vector3(0f, 0.02f, -0.55f), new Vector3(0.7f, 0.02f, 0.9f), drape);
-            Cube("Drape cranial", anatomy, new Vector3(0f, 0.02f, 0.55f), new Vector3(0.7f, 0.02f, 0.7f), drape);
-            Cube("Drape contralateral", anatomy, new Vector3(-0.22f, 0.03f, 0f), new Vector3(0.28f, 0.02f, 1.4f), drape);
-            Cube("Drape window frame", anatomy, new Vector3(0.18f, 0.035f, 0.05f), new Vector3(0.16f, 0.004f, 0.22f), drape);
+            Capsule(
+                "Silicone torso", parent,
+                new Vector3(0f, 0.20f, 0.18f),
+                new Vector3(0.48f, 0.54f, 0.31f),
+                Quaternion.Euler(90f, 0f, 0f), skin
+            );
+            Sphere(
+                "Silicone head", parent,
+                new Vector3(0f, 0.19f, 0.79f),
+                new Vector3(0.25f, 0.22f, 0.29f), skin
+            );
+            Capsule(
+                "Left arm", parent,
+                new Vector3(-0.31f, 0.15f, 0.08f),
+                new Vector3(0.12f, 0.40f, 0.12f),
+                Quaternion.Euler(90f, 0f, 0f), skin
+            );
+            Capsule(
+                "Right arm", parent,
+                new Vector3(0.31f, 0.15f, 0.08f),
+                new Vector3(0.12f, 0.40f, 0.12f),
+                Quaternion.Euler(90f, 0f, 0f), skin
+            );
+            Capsule(
+                "Left leg", parent,
+                new Vector3(-0.13f, 0.14f, -0.52f),
+                new Vector3(0.17f, 0.48f, 0.17f),
+                Quaternion.Euler(90f, 0f, 0f), skin
+            );
+            Capsule(
+                "Right leg", parent,
+                new Vector3(0.13f, 0.14f, -0.52f),
+                new Vector3(0.17f, 0.48f, 0.17f),
+                Quaternion.Euler(90f, 0f, 0f), skin
+            );
+        }
+
+        private static void CreateDrapes(Transform table, Material drape)
+        {
+            var root = new GameObject("Fitted surgical drapes");
+            root.transform.SetParent(table, false);
+            const float y = 0.305f;
+            // Lower-body blanket plus four fitted pieces around a
+            // 120 x 110 mm right lateral-chest procedure window.
+            Cube(
+                "Lower body drape", root.transform,
+                new Vector3(0f, y, -0.48f), new Vector3(0.70f, 0.018f, 0.72f), drape
+            );
+            Cube(
+                "Medial chest drape", root.transform,
+                new Vector3(-0.105f, y, 0.24f), new Vector3(0.47f, 0.018f, 0.48f), drape
+            );
+            Cube(
+                "Lateral outer drape", root.transform,
+                new Vector3(0.335f, y, 0.24f), new Vector3(0.13f, 0.018f, 0.48f), drape
+            );
+            Cube(
+                "Window cranial drape", root.transform,
+                new Vector3(0.215f, y, 0.395f), new Vector3(0.11f, 0.018f, 0.17f), drape
+            );
+            Cube(
+                "Window caudal drape", root.transform,
+                new Vector3(0.215f, y, 0.065f), new Vector3(0.11f, 0.018f, 0.17f), drape
+            );
         }
 
         private static void CreateInstrumentHome(Transform parent, Material tool)
         {
             var home = new GameObject("RegistrationAnchor_InstrumentHome");
             home.transform.SetParent(parent, false);
-            home.transform.localPosition = new Vector3(0.08f, 0.04f, 0f);
-            Cube("Tray scalpel", parent, new Vector3(0.22f, 0.02f, 0.12f), new Vector3(0.12f, 0.01f, 0.02f), tool);
-            Cube("Tray dissector", parent, new Vector3(0.22f, 0.02f, 0.16f), new Vector3(0.12f, 0.01f, 0.02f), tool);
-            Cube("Tray tube", parent, new Vector3(0.22f, 0.025f, 0.2f), new Vector3(0.14f, 0.012f, 0.012f), tool);
+            home.transform.localPosition = new Vector3(1.15f, 0.77f, 0.35f);
+            Cube("Tray scalpel", home.transform, new Vector3(-0.12f, 0.02f, 0f), new Vector3(0.18f, 0.012f, 0.025f), tool);
+            Cube("Tray dissector", home.transform, new Vector3(0.08f, 0.02f, 0f), new Vector3(0.18f, 0.012f, 0.025f), tool);
+            Capsule(
+                "Tray tube", home.transform,
+                new Vector3(0f, 0.025f, 0.10f), new Vector3(0.025f, 0.20f, 0.025f),
+                Quaternion.Euler(0f, 0f, 90f), tool
+            );
         }
 
         private static Camera CreateCamera()
@@ -413,6 +480,52 @@ namespace SurgePrep.Editor
                 UnityEngine.Object.DestroyImmediate(collider);
             }
             return cube;
+        }
+
+        private static GameObject Capsule(
+            string name,
+            Transform parent,
+            Vector3 position,
+            Vector3 scale,
+            Quaternion rotation,
+            Material material
+        )
+        {
+            var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            capsule.name = name;
+            capsule.transform.SetParent(parent, false);
+            capsule.transform.localPosition = position;
+            capsule.transform.localRotation = rotation;
+            capsule.transform.localScale = scale;
+            capsule.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var collider = capsule.GetComponent<Collider>();
+            if (collider != null)
+            {
+                UnityEngine.Object.DestroyImmediate(collider);
+            }
+            return capsule;
+        }
+
+        private static GameObject Sphere(
+            string name,
+            Transform parent,
+            Vector3 position,
+            Vector3 scale,
+            Material material
+        )
+        {
+            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.name = name;
+            sphere.transform.SetParent(parent, false);
+            sphere.transform.localPosition = position;
+            sphere.transform.localScale = scale;
+            sphere.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var collider = sphere.GetComponent<Collider>();
+            if (collider != null)
+            {
+                UnityEngine.Object.DestroyImmediate(collider);
+            }
+            return sphere;
         }
 
         private static Transform Layer(string name, Transform parent)

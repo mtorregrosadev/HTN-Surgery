@@ -23,7 +23,6 @@ namespace SurgePrep
         private GameObject scalpelVisual;
         private GameObject dissectorVisual;
         private GameObject tubeVisual;
-        private IncrementalWoundRenderer woundRenderer;
 
         public SimulationSnapshotDto LatestSnapshot { get; private set; }
         public event Action<SimulationSnapshotDto> SnapshotReceived;
@@ -42,15 +41,12 @@ namespace SurgePrep
                     toolTransform.localRotation = toolTargetRotation;
                 }
             }
-            DeformableMeshDto skin = null;
             foreach (var state in snapshot.deformableMeshes ?? new DeformableMeshDto[0])
             {
-                if (state.objectId == "layer-skin") skin = state;
                 var view = GetOrCreateMesh(state);
-                view.SetTarget(state, snapshot.tissue);
+                view.SetTarget(state);
                 view.SetVisible(LayerVisible(state.objectId, snapshot));
             }
-            woundRenderer.SetTarget(snapshot.tissue, skin);
             UpdateIncisionGuide(snapshot);
             SnapshotReceived?.Invoke(snapshot);
         }
@@ -89,12 +85,6 @@ namespace SurgePrep
                 toolTransform = tip.transform;
                 CreateToolVisuals(tip.transform);
             }
-            woundRenderer = gameObject.GetComponent<IncrementalWoundRenderer>();
-            if (woundRenderer == null)
-            {
-                woundRenderer = gameObject.AddComponent<IncrementalWoundRenderer>();
-            }
-            woundRenderer.Initialize(incisionMaterial);
         }
 
         private void CreateToolVisuals(Transform tip)
@@ -299,7 +289,6 @@ namespace SurgePrep
             private readonly string objectId;
             private Vector3[] target = new Vector3[0];
             private int topologyRevision = -1;
-            private int incisionRevision = -1;
 
             public MeshView(MeshFilter filter, string objectId)
             {
@@ -315,7 +304,7 @@ namespace SurgePrep
                 if (owner != null) owner.SetActive(visible);
             }
 
-            public void SetTarget(DeformableMeshDto state, TissueStateDto tissue)
+            public void SetTarget(DeformableMeshDto state)
             {
                 target = new Vector3[state.verticesMm.Length];
                 for (var index = 0; index < target.Length; index++)
@@ -326,43 +315,18 @@ namespace SurgePrep
                 {
                     mesh.vertices = target;
                 }
-                var nextIncisionRevision = objectId == "layer-skin" && tissue != null
-                    ? Mathf.RoundToInt(tissue.incisionLengthMm * 10f)
-                        ^ (Mathf.RoundToInt(tissue.incisionProgress * 1000f) << 12)
-                    : 0;
-                if (
-                    topologyRevision != state.topologyRevision
-                    || incisionRevision != nextIncisionRevision
-                )
+                if (topologyRevision != state.topologyRevision)
                 {
                     mesh.triangles = CoordinateFrame.ReflectedTriangles(
-                        VisibleTriangles(state, tissue)
+                        AnatomyFieldTriangles(state)
                     );
                     topologyRevision = state.topologyRevision;
-                    incisionRevision = nextIncisionRevision;
                 }
             }
 
-            private int[] VisibleTriangles(
-                DeformableMeshDto state, TissueStateDto tissue
-            )
+            private static int[] AnatomyFieldTriangles(DeformableMeshDto state)
             {
-                if (
-                    objectId != "layer-skin"
-                    || tissue == null
-                    || tissue.incisionProgress <= 0.02f
-                    || tissue.incisionLengthMm <= 0.5f
-                )
-                {
-                    return state.triangleIndices;
-                }
                 var visible = new List<int>(state.triangleIndices.Length);
-                var halfLengthMm = Mathf.Clamp(
-                    tissue.incisionLengthMm * 0.5f, 1f, 18f
-                );
-                var halfWidthMm = Mathf.Lerp(
-                    0.9f, 3.45f, Mathf.Clamp01(tissue.incisionProgress)
-                );
                 for (var index = 0; index + 2 < state.triangleIndices.Length; index += 3)
                 {
                     var a = state.verticesMm[state.triangleIndices[index]];
@@ -370,11 +334,9 @@ namespace SurgePrep
                     var c = state.verticesMm[state.triangleIndices[index + 2]];
                     var xMm = (a.x + b.x + c.x) / 3f;
                     var zMm = (a.z + b.z + c.z) / 3f;
-                    var pathT = Mathf.InverseLerp(-18f, 18f, xMm);
-                    var pathZMm = -3f + 6f * Mathf.Sin(pathT * Mathf.PI);
-                    var insideWound = Mathf.Abs(xMm) <= halfLengthMm
-                        && Mathf.Abs(zMm - pathZMm) <= halfWidthMm;
-                    if (insideWound) continue;
+                    var ellipse = xMm * xMm / (39f * 39f)
+                        + zMm * zMm / (35f * 35f);
+                    if (ellipse > 1f) continue;
                     visible.Add(state.triangleIndices[index]);
                     visible.Add(state.triangleIndices[index + 1]);
                     visible.Add(state.triangleIndices[index + 2]);

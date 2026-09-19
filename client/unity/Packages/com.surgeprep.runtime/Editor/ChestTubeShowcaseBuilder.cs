@@ -729,9 +729,11 @@ namespace SurgePrep.Editor
                     var b = sourceTriangles[index + 1];
                     var c = sourceTriangles[index + 2];
                     var centre = (vertices[a] + vertices[b] + vertices[c]) / 3f;
-                    var insideProcedureWindow =
-                        Mathf.Abs(centre.x + 0.12f * sourceUnitsPerMetre) <= 0.041f * sourceUnitsPerMetre
-                        && Mathf.Abs(centre.z - 1.20f * sourceUnitsPerMetre) <= 0.041f * sourceUnitsPerMetre
+                    var localX = (centre.x + 0.12f * sourceUnitsPerMetre)
+                        / (0.039f * sourceUnitsPerMetre);
+                    var localZ = (centre.z - 1.20f * sourceUnitsPerMetre)
+                        / (0.035f * sourceUnitsPerMetre);
+                    var insideProcedureWindow = localX * localX + localZ * localZ <= 1f
                         && centre.y < -0.10f * sourceUnitsPerMetre;
                     if (!insideProcedureWindow)
                     {
@@ -743,7 +745,7 @@ namespace SurgePrep.Editor
 
                 var windowed = new Mesh
                 {
-                    name = "BodyParts3D skin with procedure window",
+                    name = "BodyParts3D skin with anatomy-shaped procedure field",
                     indexFormat = source.indexFormat,
                     vertices = vertices,
                     normals = source.normals,

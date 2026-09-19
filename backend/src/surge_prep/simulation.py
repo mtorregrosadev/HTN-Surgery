@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from collections import defaultdict
 import importlib.util
+import math
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -83,28 +84,24 @@ class MemorySimulator(Simulator):
 
     @staticmethod
     def _training_pad_mesh(deformation_mm: float) -> DeformableMeshState:
-        coordinates = (-40.0, 0.0, 40.0)
-        vertices = [
-            Vector3(x=x, y=-deformation_mm if x == 0 and z == 0 else 0.0, z=z)
-            for z in coordinates
-            for x in coordinates
+        segments = 32
+        radius_mm = 21.0
+        vertices = [Vector3(x=0.0, y=-deformation_mm, z=0.0)]
+        vertices.extend(
+            Vector3(
+                x=math.cos(index * math.tau / segments) * radius_mm,
+                y=0.0,
+                z=math.sin(index * math.tau / segments) * radius_mm,
+            )
+            for index in range(segments)
+        )
+        triangles = [
+            vertex
+            for index in range(segments)
+            for vertex in (0, index + 1, (index + 1) % segments + 1)
         ]
-        triangles: list[int] = []
-        for row in range(2):
-            for column in range(2):
-                lower_left = row * 3 + column
-                triangles.extend(
-                    [
-                        lower_left,
-                        lower_left + 3,
-                        lower_left + 1,
-                        lower_left + 1,
-                        lower_left + 3,
-                        lower_left + 4,
-                    ]
-                )
         return DeformableMeshState(
-            object_id="training-pad",
+            object_id="training-membrane",
             topology_revision=1,
             vertices_mm=vertices,
             triangle_indices=triangles,

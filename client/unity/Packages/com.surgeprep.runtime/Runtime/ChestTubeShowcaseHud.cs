@@ -14,17 +14,9 @@ namespace SurgePrep
         private GUIStyle valueStyle;
         private GUIStyle smallStyle;
 
-        private void Awake()
-        {
-            titleStyle = Style(22, FontStyle.Bold, Color.white);
-            labelStyle = Style(13, FontStyle.Normal, new Color(0.65f, 0.72f, 0.78f));
-            valueStyle = Style(17, FontStyle.Bold, Color.white);
-            smallStyle = Style(12, FontStyle.Normal, new Color(0.7f, 0.76f, 0.8f));
-            smallStyle.wordWrap = true;
-        }
-
         private void OnGUI()
         {
+            EnsureStyles();
             var panel = new Rect(24, 24, 360, 336);
             DrawRect(panel, new Color(0.025f, 0.045f, 0.065f, 0.94f));
             DrawRect(new Rect(panel.x, panel.y, 5, panel.height), new Color(0.1f, 0.85f, 0.78f));
@@ -95,6 +87,19 @@ namespace SurgePrep
                 "Training prototype • Illustrative rubric • Instructor review required",
                 smallStyle
             );
+        }
+
+        private void EnsureStyles()
+        {
+            if (titleStyle != null)
+            {
+                return;
+            }
+            titleStyle = Style(22, FontStyle.Bold, Color.white);
+            labelStyle = Style(13, FontStyle.Normal, new Color(0.65f, 0.72f, 0.78f));
+            valueStyle = Style(17, FontStyle.Bold, Color.white);
+            smallStyle = Style(12, FontStyle.Normal, new Color(0.7f, 0.76f, 0.8f));
+            smallStyle.wordWrap = true;
         }
 
         private static GUIStyle Style(int size, FontStyle fontStyle, Color colour)

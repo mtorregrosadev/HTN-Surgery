@@ -145,7 +145,9 @@ namespace SurgePrep.Editor
             var diaphragm = Material("Diaphragm", new Color(0.42f, 0.14f, 0.3f), 0.0f, 0.32f);
             var skin = TransparentMaterial("Skin", new Color(0.82f, 0.43f, 0.35f, 0.11f));
             var target = Material("Target", new Color(0.05f, 0.95f, 0.78f), 0.0f, 0.65f);
-            var tissue = Material("InteractiveTissue", new Color(0.54f, 0.06f, 0.09f), 0.0f, 0.32f);
+            var tissue = TransparentMaterial(
+                "InteractiveTissue", new Color(0.3f, 0.025f, 0.04f, 0.58f)
+            );
             var tool = Material("TrainingTool", new Color(0.65f, 0.72f, 0.78f), 0.65f, 0.7f);
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);

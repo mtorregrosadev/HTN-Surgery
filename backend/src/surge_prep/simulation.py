@@ -38,15 +38,21 @@ class MemorySimulator(Simulator):
     def __init__(self, step_ms: int = 10) -> None:
         self.step_ms = step_ms
         self.ticks: dict[str, int] = defaultdict(int)
+        self.last_contact: dict[str, bool] = {}
 
     async def begin_session(self, session_id: str) -> None:
         self.ticks[session_id] = 0
+        self.last_contact[session_id] = False
 
     async def step(self, sample: ToolSample) -> SimulationSnapshot:
         self.ticks[sample.session_id] += 1
         tick = self.ticks[sample.session_id]
         deformation = min(sample.force_n * 1.5, 12.0) if sample.contact else 0.0
-        events = ["contact-start"] if sample.contact and tick == 1 else []
+        previous_contact = self.last_contact[sample.session_id]
+        events = []
+        if sample.contact != previous_contact:
+            events.append("contact-start" if sample.contact else "contact-end")
+        self.last_contact[sample.session_id] = sample.contact
         return SimulationSnapshot(
             session_id=sample.session_id,
             tick=tick,
@@ -62,6 +68,7 @@ class MemorySimulator(Simulator):
 
     async def end_session(self, session_id: str) -> None:
         self.ticks.pop(session_id, None)
+        self.last_contact.pop(session_id, None)
 
 
 class SofaSimulator(Simulator):

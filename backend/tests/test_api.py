@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+import pytest
 
 from surge_prep.app import create_app
 from surge_prep.simulation import MemorySimulator
@@ -45,3 +47,31 @@ def test_controller_websocket_receives_simulation_snapshot():
         assert snapshot["tick"] == 1
         assert snapshot["tool"]["forceN"] == 1.2
 
+
+def test_controller_websocket_closes_with_reason_for_unhealthy_source():
+    app = create_app(MemoryStore(), MemorySimulator())
+    with TestClient(app) as client:
+        calibration = client.post(
+            "/v1/calibrations",
+            json={"deviceId": "esp32-1", "transform": IDENTITY, "rmsErrorMm": 0.5},
+        ).json()
+        session = client.post(
+            "/v1/sessions",
+            json={
+                "exerciseId": "demo", "calibrationId": calibration["calibrationId"],
+                "toolId": "stylus-1", "deviceId": "esp32-1",
+            },
+        ).json()
+        with client.websocket_connect(f"/v1/sessions/{session['sessionId']}/stream") as socket:
+            socket.send_json({
+                "sessionId": session["sessionId"], "toolId": "stylus-1",
+                "deviceId": "esp32-1", "calibrationId": calibration["calibrationId"],
+                "sequence": 1, "timestampMs": 10,
+                "positionMm": {"x": 0, "y": 10, "z": 0},
+                "orientation": {"qx": 0, "qy": 0, "qz": 0, "qw": 1},
+                "forceN": 0, "contact": False, "sourceHealthy": False,
+            })
+            with pytest.raises(WebSocketDisconnect) as error:
+                socket.receive_json()
+        assert error.value.code == 1008
+        assert "unhealthy" in error.value.reason

@@ -55,3 +55,11 @@ keeping the API contracts unchanged.
 6. `GET /v1/sessions/{sessionId}/replay`
 
 REST `POST /v1/sessions/{sessionId}/samples` is also available for diagnostics.
+Samples with an unhealthy source, zero tracking quality, a revoked calibration,
+an old sequence, or a timestamp earlier than the last accepted sample are
+rejected before simulation and storage. The WebSocket closes with code 1008 and
+a reason for rejected samples (1007 for malformed payloads); the controller
+should surface that reason and reconnect only after the source is valid. The
+development simulator emits `contact-start` and `contact-end` when contact
+changes, including after initial hover. It is only a contract-compatible
+fallback, not an authoritative SOFA physics demo.

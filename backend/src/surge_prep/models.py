@@ -71,6 +71,7 @@ class Session(SessionCreate):
     created_at: datetime
     completed_at: datetime | None = None
     last_sequence: int | None = None
+    last_timestamp_ms: int | None = None
 
 
 class ToolSample(ApiModel):
@@ -139,4 +140,3 @@ def utc_now() -> datetime:
 
 def mongo_document(model: ApiModel) -> dict[str, Any]:
     return model.model_dump(by_alias=True, mode="json")
-

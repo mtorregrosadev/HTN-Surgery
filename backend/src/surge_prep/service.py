@@ -62,11 +62,19 @@ class TrainingService:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Tool or device does not match session")
         if sample.calibration_id != session.calibration_id:
             raise HTTPException(status.HTTP_409_CONFLICT, "Calibration does not match session")
+        calibration = await self.store.get_calibration(session.calibration_id)
+        if calibration is None or not calibration.valid:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Session calibration is no longer valid")
+        if not sample.source_healthy or sample.quality <= 0:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Tool source is unhealthy or tracking is invalid")
         if session.last_sequence is not None and sample.sequence <= session.last_sequence:
             raise HTTPException(status.HTTP_409_CONFLICT, "Sample sequence must increase")
+        if session.last_timestamp_ms is not None and sample.timestamp_ms < session.last_timestamp_ms:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Sample timestamp must not move backwards")
         sample.received_at_ms = int(time.time() * 1000)
         snapshot = await self.simulator.step(sample)
         session.last_sequence = sample.sequence
+        session.last_timestamp_ms = sample.timestamp_ms
         await self.store.save_sample(sample)
         await self.store.save_snapshot(snapshot)
         await self.store.save_session(session)
@@ -114,4 +122,3 @@ class TrainingService:
             peak_force_n=max(forces, default=0),
             mean_contact_force_n=sum(forces) / len(forces) if forces else 0,
         )
-

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from .config import Settings
 from .models import (
@@ -89,6 +90,10 @@ def create_app(store: Store | None = None, simulator: Simulator | None = None) -
                 await websocket.send_json(snapshot.model_dump(by_alias=True, mode="json"))
         except WebSocketDisconnect:
             return
+        except (ValidationError, ValueError):
+            await websocket.close(code=1007, reason="Malformed tool sample")
+        except HTTPException as error:
+            await websocket.close(code=1008, reason=str(error.detail))
 
     return app
 

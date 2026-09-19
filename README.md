@@ -85,8 +85,17 @@ consumes those subscriptions, interpolates the authoritative tool pose and
 deformable simulation surface, and is ready to host inside an OpenXR/XREAL
 project. Its `Surge Prep > Build Chest-Tube Showcase` editor command creates a
 computer- and XR-ready layered chest scene from the curated anatomy source set,
-with a live target/force HUD and blunt-tool rehearsal flow. The localized interaction region is an ~80 × 80 mm layered chest patch. Native
-SOFA owns collision, deformation, reaction force, and bounded topology change.
+with a live target/force HUD and blunt-tool rehearsal flow. Native SOFA derives
+broad torso contact from a downsampled version of the same registered
+BodyParts3D skin, while four stacked curved FEM layers provide a 32 mm
+localized chest wall (skin, fat, intercostal muscle, pleura) with through-thickness
+elements, rib hard-stops, and a visible wound trough driven by SOFA contact.
+The surgical field is elliptical; Unity shows the high-resolution BodyParts3D
+layers through a procedure window rather than hiding them. Registered
+non-carvable rib bands stop unsafe deep motion. WASD remains a pose-only
+fallback; calibrated hardware uses the same 1.1 tool-sample contract. The
+material parameters and progression thresholds are
+illustrative prototype values, not clinically validated tissue properties.
 The memory adapter is for tests and teammates without SOFA and must be labelled
 SOFA OFFLINE in the showcase.
 

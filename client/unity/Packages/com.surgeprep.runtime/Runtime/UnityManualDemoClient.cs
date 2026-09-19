@@ -36,6 +36,15 @@ namespace SurgePrep
         private float xMm;
         private float yMm = 12f;
         private float zMm;
+        // SOFA/right-handed millimetres: 40° about +X lays the handle back
+        // so the CAD blade meets the chest instead of standing as a needle.
+        private static readonly QuaternionDto IncisionHold = new QuaternionDto
+        {
+            qx = 0.34202014f,
+            qy = 0f,
+            qz = 0f,
+            qw = 0.93969262f
+        };
         private string toolId = "scalpel";
         private long sequence;
         private string calibrationId;
@@ -114,8 +123,7 @@ namespace SurgePrep
                 }
                 if (snapshot.sessionDegraded)
                 {
-                    frozen = true;
-                    Status = "SOFA session degraded";
+                    Status = "SOFA stream recovering…";
                 }
                 sceneRenderer.SetTarget(snapshot);
             }
@@ -148,8 +156,14 @@ namespace SurgePrep
             {
                 xMm += api.x;
                 zMm += api.z;
+                // Keyboard testing can traverse the registered torso. Only
+                // the subtle surgical field is carvable.
+                xMm = Mathf.Clamp(xMm, -150f, 150f);
+                zMm = Mathf.Clamp(zMm, -260f, 260f);
                 yMm += raise * movementSpeedMmPerSecond * Time.unscaledDeltaTime;
-                yMm = Mathf.Clamp(yMm, -16f, 28f);
+                // Keyboard sandbox only. Calibrated hardware pose is not clamped
+                // here; SOFA contact, ribs, and the tissue volume stop the tool.
+                yMm = Mathf.Clamp(yMm, -80f, 40f);
                 if (ShowcaseInput.Pressed(KeyCode.Alpha1)) toolId = "scalpel";
                 if (ShowcaseInput.Pressed(KeyCode.Alpha2)) toolId = "blunt-dissector";
                 if (ShowcaseInput.Pressed(KeyCode.Alpha3)) toolId = "chest-tube";
@@ -277,7 +291,9 @@ namespace SurgePrep
                 : "ws://" + controllerUrl.Substring(controllerUrl.IndexOf("://", StringComparison.Ordinal) + 3);
             var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/hardware-stream");
             await socket.ConnectAsync(uri, token);
-            Status = SofaNative ? "LIVE — pose-only WASD" : "SOFA OFFLINE";
+            Status = SofaNative
+                ? "LIVE — WASD fallback; calibrated hardware uses the same pose contract"
+                : "SOFA OFFLINE";
 
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
@@ -305,7 +321,7 @@ namespace SurgePrep
             lock (stateLock)
             {
                 sampleX = xMm;
-                sampleY = frozen ? yMm : yMm;
+                sampleY = yMm;
                 sampleZ = zMm;
                 sampleTool = toolId;
             }
@@ -319,11 +335,11 @@ namespace SurgePrep
                 sequence = sequence++,
                 timestampMs = clock.ElapsedMilliseconds,
                 positionMm = new Vector3Dto { x = sampleX, y = sampleY, z = sampleZ },
-                orientation = new QuaternionDto { qx = 0f, qy = 0f, qz = 0f, qw = 1f },
+                orientation = IncisionHold,
                 forceN = 0f,
                 contact = false,
-                quality = frozen ? 0.1f : 1f,
-                sourceHealthy = !frozen,
+                quality = 1f,
+                sourceHealthy = true,
                 inputMode = "pose-only",
                 forceMeasurementValid = false
             };

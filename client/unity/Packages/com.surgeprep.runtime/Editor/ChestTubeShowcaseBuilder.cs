@@ -18,41 +18,16 @@ namespace SurgePrep.Editor
         private const string MaterialRoot = ShowcaseRoot + "/Materials";
         private const string GeneratedRoot = ShowcaseRoot + "/Generated";
         private const string SceneRoot = ShowcaseRoot + "/Scenes";
+        private const string ScalpelModelPath =
+            "Packages/com.surgeprep.runtime/Runtime/Models/Scalpel/scalepl.obj";
 
-        private static readonly string[] AnatomyFiles =
+        private static string[] ListAnatomyFiles(string source)
         {
-            "FJ2810_BP22617_FMA7163_Skin.obj",
-            "FJ3178_BP22232_FMA7487_Body of sternum.obj",
-            "FJ3290_BP22794_FMA7486_Manubrium.obj",
-            "FJ3153_BP22299_FMA7488_Xiphoid process.obj",
-            "FJ3237_BP23283_FMA13323_Left clavicle.obj",
-            "FJ3362_BP23174_FMA13322_Right clavicle.obj",
-            "FJ3231_BP22488_FMA8148_Left fourth rib.obj",
-            "FJ3232_BP22285_FMA8093_Left fifth rib.obj",
-            "FJ3233_BP22298_FMA8202_Left sixth rib.obj",
-            "FJ3234_BP22332_FMA8256_Left seventh rib.obj",
-            "FJ3235_BP23684_FMA8310_Left eighth rib.obj",
-            "FJ3340_BP22336_FMA7957_Right fourth rib.obj",
-            "FJ3342_BP22307_FMA8066_Right fifth rib.obj",
-            "FJ3344_BP22272_FMA8175_Right sixth rib.obj",
-            "FJ3346_BP22330_FMA8229_Right seventh rib.obj",
-            "FJ3347_BP23993_FMA8283_Right eighth rib.obj",
-            "FJ3248_BP22751_FMA8167_Left fourth costal cartilage.obj",
-            "FJ3251_BP21380_FMA8112_Left fifth costal cartilage.obj",
-            "FJ3254_BP21377_FMA8221_Left sixth costal cartilage.obj",
-            "FJ3255_BP22753_FMA8275_Left seventh costal cartilage.obj",
-            "FJ3339_BP21410_FMA7976_Right fourth costal cartilage.obj",
-            "FJ3341_BP21376_FMA8070_Right fifth costal cartilage.obj",
-            "FJ3343_BP22071_FMA8194_Right sixth costal cartilage.obj",
-            "FJ3345_BP21381_FMA8248_Right seventh costal cartilage.obj",
-            "FJ1451M_BP23614_FMA9756_External intercostal muscle.obj",
-            "FJ1451_BP23614_FMA9756_External intercostal muscle.obj",
-            "FJ1456M_BP23831_FMA13376_Left pectoralis minor.obj",
-            "FJ1456_BP23886_FMA13375_Right pectoralis minor.obj",
-            "FJ1464M_BP24065_FMA79980_Sternocostal part of left pectoralis major.obj",
-            "FJ1464_BP23276_FMA79979_Sternocostal part of right pectoralis major.obj",
-            "FJ3131_BP23131_FMA13295_Diaphragm.obj"
-        };
+            return Directory.GetFiles(source, "*.obj")
+                .Select(Path.GetFileName)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
 
         [MenuItem("Surge Prep/Build Chest-Tube Showcase")]
         public static void BuildShowcase()
@@ -76,7 +51,15 @@ namespace SurgePrep.Editor
 
             try
             {
-                ImportAnatomy(source);
+                var files = ListAnatomyFiles(source);
+                if (!files.Any(file => file.Contains("_Skin.obj")))
+                {
+                    throw new FileNotFoundException(
+                        "High-resolution BodyParts3D skin is missing",
+                        Path.Combine(source, "FJ2810_BP22617_FMA7163_Skin.obj")
+                    );
+                }
+                ImportAnatomy(source, files);
                 CreateScene();
             }
             catch (Exception error)
@@ -104,16 +87,16 @@ namespace SurgePrep.Editor
             return Directory.Exists(source) ? source : null;
         }
 
-        private static void ImportAnatomy(string source)
+        private static void ImportAnatomy(string source, string[] files)
         {
             Directory.CreateDirectory(AnatomyRoot);
-            for (var index = 0; index < AnatomyFiles.Length; index++)
+            for (var index = 0; index < files.Length; index++)
             {
-                var file = AnatomyFiles[index];
+                var file = files[index];
                 EditorUtility.DisplayProgressBar(
                     "Preparing chest anatomy",
                     file,
-                    (float)index / AnatomyFiles.Length
+                    files.Length == 0 ? 1f : (float)index / files.Length
                 );
                 var sourcePath = Path.Combine(source, file);
                 if (!File.Exists(sourcePath))
@@ -138,23 +121,28 @@ namespace SurgePrep.Editor
 
         private static void CreateScene()
         {
+            // The showcase relies on freshly generated registration objects.
+            // Reusing scene/domain state can leave an old physics renderer alive.
+            EditorSettings.enterPlayModeOptionsEnabled = false;
             Directory.CreateDirectory(MaterialRoot);
             Directory.CreateDirectory(GeneratedRoot);
             Directory.CreateDirectory(SceneRoot);
+            foreach (var guid in AssetDatabase.FindAssets("ProcedureWindowSkin t:Mesh", new[] { GeneratedRoot }))
+            {
+                AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(guid));
+            }
             var bone = Material("Bone", new Color(0.86f, 0.8f, 0.7f), 0.02f, 0.28f);
             var cartilage = Material("Cartilage", new Color(0.72f, 0.78f, 0.74f), 0.0f, 0.42f);
             var muscle = Material("Muscle", new Color(0.42f, 0.12f, 0.14f), 0.0f, 0.34f);
             var diaphragm = Material("Diaphragm", new Color(0.4f, 0.16f, 0.22f), 0.0f, 0.34f);
-            var skin = Material("SiliconeSkin", new Color(0.83f, 0.66f, 0.56f), 0.0f, 0.38f);
+            var skin = Material("SiliconeSkin", new Color(0.62f, 0.40f, 0.31f), 0.0f, 0.3f);
             var target = Material("Target", new Color(0.2f, 0.55f, 0.62f), 0.0f, 0.45f);
-            var tissue = Material("InteractiveTissue", new Color(0.78f, 0.48f, 0.42f), 0.0f, 0.28f);
+            var tissue = Material("InteractiveTissue", new Color(0.62f, 0.40f, 0.31f), 0.0f, 0.3f);
             var fat = Material("Subcutaneous", new Color(0.9f, 0.78f, 0.55f), 0.0f, 0.22f);
             var pleura = Material("Pleura", new Color(0.72f, 0.7f, 0.68f), 0.0f, 0.5f);
             var incision = Material("IncisionChannel", new Color(0.35f, 0.08f, 0.08f), 0.0f, 0.55f);
-            var blood = TransparentMaterial("BloodDecal", new Color(0.35f, 0.04f, 0.05f, 0.55f));
-            var pressure = TransparentMaterial("PressureIndicator", new Color(0.05f, 1f, 0.65f, 0.7f));
             var tool = Material("TrainingTool", new Color(0.72f, 0.74f, 0.76f), 0.7f, 0.55f);
-            var drape = Material("SurgicalDrape", new Color(0.16f, 0.32f, 0.55f), 0.0f, 0.18f);
+            var drape = Material("SurgicalDrape", new Color(0.055f, 0.24f, 0.32f), 0.0f, 0.24f);
             var metal = Material("BrushedMetal", new Color(0.62f, 0.64f, 0.66f), 0.85f, 0.55f);
             var steel = Material("Stainless", new Color(0.75f, 0.76f, 0.78f), 0.9f, 0.62f);
             var plastic = Material("ClinicalPlastic", new Color(0.9f, 0.91f, 0.92f), 0.05f, 0.4f);
@@ -164,29 +152,33 @@ namespace SurgePrep.Editor
             var mattress = Material("Mattress", new Color(0.93f, 0.93f, 0.94f), 0.0f, 0.2f);
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            RenderSettings.ambientLight = new Color(0.42f, 0.44f, 0.48f);
+            RenderSettings.ambientLight = new Color(0.22f, 0.24f, 0.27f);
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.55f, 0.58f, 0.62f);
-            RenderSettings.ambientEquatorColor = new Color(0.4f, 0.42f, 0.44f);
-            RenderSettings.ambientGroundColor = new Color(0.22f, 0.22f, 0.24f);
-            RenderSettings.fog = true;
+            RenderSettings.ambientSkyColor = new Color(0.32f, 0.35f, 0.39f);
+            RenderSettings.ambientEquatorColor = new Color(0.22f, 0.24f, 0.27f);
+            RenderSettings.ambientGroundColor = new Color(0.1f, 0.11f, 0.13f);
+            RenderSettings.fog = false;
             RenderSettings.fogColor = new Color(0.72f, 0.75f, 0.78f);
             RenderSettings.fogDensity = 0.012f;
 
             var room = CreateOperatingRoom(wall, floor, metal, steel, plastic, rubber, mattress, drape);
             var tableTop = room.transform.Find("RegistrationAnchor_Table");
 
-            var anatomy = new GameObject("Supine training mannequin");
+            var anatomy = new GameObject("Supine BodyParts3D training anatomy");
             anatomy.transform.SetParent(tableTop, false);
-            anatomy.transform.localRotation = Quaternion.Euler(180f, 90f, 0f);
-            anatomy.transform.localPosition = new Vector3(0f, 0.12f, 0.05f);
-            var skinLayer = Layer("Skin layer", anatomy.transform);
+            // BodyParts3D is Z-up. Keep anatomical Z along the table and flip
+            // anterior Y upward, with the feet near the table's negative end.
+            anatomy.transform.localRotation = Quaternion.Euler(0f, 0f, 180f);
+            anatomy.transform.localPosition = new Vector3(0f, 0.14f, -0.82f);
+            var skinLayer = Layer("High-resolution skin", anatomy.transform);
             var muscleLayer = Layer("Muscle layer", anatomy.transform);
             var boneLayer = Layer("Bone layer", anatomy.transform);
             var cartilageLayer = Layer("Cartilage layer", anatomy.transform);
             var diaphragmLayer = Layer("Diaphragm layer", anatomy.transform);
 
-            foreach (var file in AnatomyFiles)
+            var visceraLayer = Layer("Viscera layer", anatomy.transform);
+
+            foreach (var file in ListAnatomyFiles(Path.Combine(Application.dataPath, "SurgePrepShowcase/Anatomy")))
             {
                 var assetPath = AnatomyRoot + "/" + file;
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
@@ -195,24 +187,23 @@ namespace SurgePrep.Editor
                     throw new InvalidOperationException("Unity could not import " + file);
                 }
                 var parent = LayerFor(
-                    file, skinLayer, muscleLayer, boneLayer, cartilageLayer, diaphragmLayer
+                    file, skinLayer, muscleLayer, boneLayer, cartilageLayer, diaphragmLayer, visceraLayer
                 );
                 var instance = PrefabUtility.InstantiatePrefab(prefab, parent) as GameObject;
                 instance.name = FriendlyName(file);
                 AssignMaterial(instance, MaterialFor(file, bone, cartilage, muscle, diaphragm, skin));
-                if (file.Contains("Skin"))
-                {
-                    CropSkinToTorso(instance);
-                }
             }
-            muscleLayer.gameObject.SetActive(true);
-            boneLayer.gameObject.SetActive(true);
-            CreateDrapes(anatomy.transform, drape);
+            muscleLayer.gameObject.SetActive(false);
+            boneLayer.gameObject.SetActive(false);
+            cartilageLayer.gameObject.SetActive(false);
+            diaphragmLayer.gameObject.SetActive(false);
+            visceraLayer.gameObject.SetActive(false);
+            CreateModestyCover(tableTop, drape);
 
             var window = new GameObject("RegistrationAnchor_ProcedureWindow");
             window.transform.SetParent(tableTop, false);
-            window.transform.localPosition = new Vector3(0.14f, 0.28f, 0.04f);
-            window.transform.localRotation = Quaternion.Euler(0f, 90f, -90f);
+            window.transform.localPosition = new Vector3(0.12f, 0.353f, 0.38f);
+            window.transform.localRotation = Quaternion.identity;
             var workspaceSetup = window.AddComponent<WorkspaceConfigurationPanel>();
             SetObject(workspaceSetup, "workspaceAnchor", window.transform);
             window.AddComponent<UnityCameraPreview>();
@@ -220,6 +211,13 @@ namespace SurgePrep.Editor
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
             simulation.transform.SetParent(window.transform, false);
             var renderer = simulation.AddComponent<SimulationSceneRenderer>();
+            var scalpelModel = AssetDatabase.LoadAssetAtPath<GameObject>(ScalpelModelPath);
+            if (scalpelModel == null)
+            {
+                throw new InvalidOperationException(
+                    "Unity could not import the supplied scalpel at " + ScalpelModelPath
+                );
+            }
             var stream = simulation.AddComponent<ScalpelStreamClient>();
             stream.enabled = false;
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
@@ -229,15 +227,14 @@ namespace SurgePrep.Editor
             SetObject(renderer, "muscleMaterial", muscle);
             SetObject(renderer, "pleuraMaterial", pleura);
             SetObject(renderer, "incisionMaterial", incision);
+            SetObject(renderer, "scalpelModel", scalpelModel);
             SetObject(renderer, "toolMaterial", tool);
-            SetObject(renderer, "pressureIndicatorMaterial", pressure);
-            SetObject(renderer, "bloodMaterial", blood);
+            SetObject(renderer, "incisionGuide", CreateTargetGuide(simulation.transform, target));
             SetObject(stream, "sceneRenderer", renderer);
             SetObject(manualDemo, "sceneRenderer", renderer);
             SetObject(hud, "sceneRenderer", renderer);
             SetObject(hud, "manualDemo", manualDemo);
-            CreateTargetGuide(simulation.transform, target);
-            CreateInstrumentHome(window.transform, tool);
+            CreateInstrumentHome(room.transform, tool);
 
             var camera = CreateCamera();
             CreateLighting(window.transform);
@@ -287,10 +284,10 @@ namespace SurgePrep.Editor
             table.transform.localPosition = new Vector3(0f, 0.92f, 0f);
             Cube("Table base", table.transform, new Vector3(0f, -0.55f, 0f), new Vector3(0.42f, 0.7f, 0.42f), metal);
             Cube("Table column", table.transform, new Vector3(0f, -0.22f, 0f), new Vector3(0.16f, 0.4f, 0.16f), steel);
-            Cube("Table top", table.transform, new Vector3(0f, 0f, 0f), new Vector3(0.55f, 0.06f, 1.9f), steel);
-            Cube("Mattress", table.transform, new Vector3(0f, 0.06f, 0f), new Vector3(0.5f, 0.07f, 1.85f), mattress);
-            Cube("Side rail L", table.transform, new Vector3(-0.28f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
-            Cube("Side rail R", table.transform, new Vector3(0.28f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
+            Cube("Table top", table.transform, new Vector3(0f, 0f, 0f), new Vector3(0.78f, 0.06f, 1.9f), steel);
+            Cube("Mattress", table.transform, new Vector3(0f, 0.06f, 0f), new Vector3(0.72f, 0.07f, 1.85f), mattress);
+            Cube("Side rail L", table.transform, new Vector3(-0.405f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
+            Cube("Side rail R", table.transform, new Vector3(0.405f, 0.02f, 0f), new Vector3(0.03f, 0.04f, 1.6f), metal);
             Cube("Table control", table.transform, new Vector3(0.22f, -0.18f, 0.55f), new Vector3(0.12f, 0.04f, 0.18f), plastic);
 
             Cube("Instrument trolley", room.transform, new Vector3(1.15f, 0.72f, 0.35f), new Vector3(0.55f, 0.04f, 0.4f), steel);
@@ -305,22 +302,29 @@ namespace SurgePrep.Editor
             return room;
         }
 
-        private static void CreateDrapes(Transform anatomy, Material drape)
+        private static void CreateModestyCover(Transform table, Material drape)
         {
-            Cube("Drape caudal", anatomy, new Vector3(0f, 0.02f, -0.55f), new Vector3(0.7f, 0.02f, 0.9f), drape);
-            Cube("Drape cranial", anatomy, new Vector3(0f, 0.02f, 0.55f), new Vector3(0.7f, 0.02f, 0.7f), drape);
-            Cube("Drape contralateral", anatomy, new Vector3(-0.22f, 0.03f, 0f), new Vector3(0.28f, 0.02f, 1.4f), drape);
-            Cube("Drape window frame", anatomy, new Vector3(0.18f, 0.035f, 0.05f), new Vector3(0.16f, 0.004f, 0.22f), drape);
+            var root = new GameObject("Pelvic modesty cover");
+            root.transform.SetParent(table, false);
+            ClothPanel(
+                "Fitted genital modesty panel", root.transform,
+                new Vector3(0f, 0.356f, -0.095f), new Vector2(0.28f, 0.20f),
+                0.006f, drape, 0.7f
+            );
         }
 
         private static void CreateInstrumentHome(Transform parent, Material tool)
         {
             var home = new GameObject("RegistrationAnchor_InstrumentHome");
             home.transform.SetParent(parent, false);
-            home.transform.localPosition = new Vector3(0.08f, 0.04f, 0f);
-            Cube("Tray scalpel", parent, new Vector3(0.22f, 0.02f, 0.12f), new Vector3(0.12f, 0.01f, 0.02f), tool);
-            Cube("Tray dissector", parent, new Vector3(0.22f, 0.02f, 0.16f), new Vector3(0.12f, 0.01f, 0.02f), tool);
-            Cube("Tray tube", parent, new Vector3(0.22f, 0.025f, 0.2f), new Vector3(0.14f, 0.012f, 0.012f), tool);
+            home.transform.localPosition = new Vector3(1.15f, 0.77f, 0.35f);
+            Cube("Tray scalpel", home.transform, new Vector3(-0.12f, 0.02f, 0f), new Vector3(0.18f, 0.012f, 0.025f), tool);
+            Cube("Tray dissector", home.transform, new Vector3(0.08f, 0.02f, 0f), new Vector3(0.18f, 0.012f, 0.025f), tool);
+            Capsule(
+                "Tray tube", home.transform,
+                new Vector3(0f, 0.025f, 0.10f), new Vector3(0.025f, 0.20f, 0.025f),
+                Quaternion.Euler(0f, 0f, 90f), tool
+            );
         }
 
         private static Camera CreateCamera()
@@ -333,6 +337,11 @@ namespace SurgePrep.Editor
             camera.fieldOfView = 42f;
             camera.nearClipPlane = 0.02f;
             camera.farClipPlane = 18f;
+            camera.allowHDR = true;
+            camera.allowMSAA = true;
+            QualitySettings.antiAliasing = 4;
+            QualitySettings.shadows = ShadowQuality.All;
+            QualitySettings.shadowResolution = ShadowResolution.High;
             cameraObject.transform.position = new Vector3(0.9f, 2.1f, 1.6f);
             cameraObject.transform.LookAt(new Vector3(0.12f, 1.05f, 0.04f));
             cameraObject.AddComponent<AudioListener>();
@@ -344,7 +353,7 @@ namespace SurgePrep.Editor
             var key = new GameObject("Surgical lamp A");
             var keyLight = key.AddComponent<Light>();
             keyLight.type = LightType.Spot;
-            keyLight.intensity = 3.4f;
+            keyLight.intensity = 1.35f;
             keyLight.range = 6f;
             keyLight.spotAngle = 42f;
             keyLight.color = new Color(0.98f, 0.97f, 0.94f);
@@ -355,7 +364,7 @@ namespace SurgePrep.Editor
             var lampB = new GameObject("Surgical lamp B");
             var fill = lampB.AddComponent<Light>();
             fill.type = LightType.Spot;
-            fill.intensity = 2.2f;
+            fill.intensity = 0.85f;
             fill.range = 6f;
             fill.spotAngle = 48f;
             fill.color = new Color(0.95f, 0.96f, 1f);
@@ -366,7 +375,7 @@ namespace SurgePrep.Editor
             var ambient = new GameObject("OR ambient");
             var ambientLight = ambient.AddComponent<Light>();
             ambientLight.type = LightType.Directional;
-            ambientLight.intensity = 0.35f;
+            ambientLight.intensity = 0.22f;
             ambientLight.color = new Color(0.82f, 0.86f, 0.9f);
             ambientLight.shadows = LightShadows.Soft;
             ambient.transform.rotation = Quaternion.Euler(50f, -20f, 0f);
@@ -382,22 +391,34 @@ namespace SurgePrep.Editor
             probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.OnAwake;
         }
 
-        private static void CreateTargetGuide(Transform parent, Material material)
+        private static LineRenderer CreateTargetGuide(Transform parent, Material material)
         {
-            var guide = new GameObject("Illustrative target corridor - instructor review required");
+            var guide = new GameObject("Curved incision guide - instructor review required");
             guide.transform.SetParent(parent, false);
             guide.transform.localPosition = Vector3.zero;
             var line = guide.AddComponent<LineRenderer>();
             line.useWorldSpace = false;
-            line.loop = true;
-            line.positionCount = 4;
-            line.startWidth = 0.0012f;
-            line.endWidth = 0.0012f;
+            line.loop = false;
+            line.positionCount = 17;
+            line.startWidth = 0.0015f;
+            line.endWidth = 0.0015f;
             line.sharedMaterial = material;
-            line.SetPosition(0, new Vector3(-0.018f, 0.001f, -0.006f));
-            line.SetPosition(1, new Vector3(0.018f, 0.001f, -0.006f));
-            line.SetPosition(2, new Vector3(0.018f, 0.001f, 0.006f));
-            line.SetPosition(3, new Vector3(-0.018f, 0.001f, 0.006f));
+            for (var index = 0; index < line.positionCount; index++)
+            {
+                var t = index / (float)(line.positionCount - 1);
+                var xMm = Mathf.Lerp(-18f, 18f, t);
+                var zMm = -3f + 6f * Mathf.Sin(t * Mathf.PI);
+                var y = ChestSurfaceRegistration.OffsetMetres(xMm, zMm) + 0.0015f;
+                line.SetPosition(
+                    index,
+                    new Vector3(
+                        xMm * CoordinateFrame.MillimetresToMetres,
+                        y,
+                        -zMm * CoordinateFrame.MillimetresToMetres
+                    )
+                );
+            }
+            return line;
         }
 
         private static GameObject Cube(
@@ -418,6 +439,142 @@ namespace SurgePrep.Editor
             return cube;
         }
 
+        private static GameObject ClothPanel(
+            string name,
+            Transform parent,
+            Vector3 position,
+            Vector2 size,
+            float foldAmplitude,
+            Material material,
+            float phase
+        )
+        {
+            const int segmentsX = 12;
+            const int segmentsZ = 12;
+            var vertices = new Vector3[(segmentsX + 1) * (segmentsZ + 1)];
+            var uv = new Vector2[vertices.Length];
+            var triangles = new int[segmentsX * segmentsZ * 6];
+
+            for (var z = 0; z <= segmentsZ; z++)
+            {
+                var z01 = z / (float)segmentsZ;
+                var nz = z01 * 2f - 1f;
+                for (var x = 0; x <= segmentsX; x++)
+                {
+                    var x01 = x / (float)segmentsX;
+                    var nx = x01 * 2f - 1f;
+                    var edge = Mathf.Max(Mathf.Abs(nx), Mathf.Abs(nz));
+                    var folds =
+                        Mathf.Sin(nx * 8f + phase) * foldAmplitude * 0.45f +
+                        Mathf.Sin(nz * 5f - phase) * foldAmplitude * 0.25f;
+                    var edgeDrape = -Mathf.Pow(edge, 5f) * foldAmplitude * 0.45f;
+                    var index = z * (segmentsX + 1) + x;
+                    vertices[index] = new Vector3(
+                        nx * size.x * 0.5f,
+                        folds + edgeDrape,
+                        nz * size.y * 0.5f
+                    );
+                    uv[index] = new Vector2(x01, z01);
+                }
+            }
+
+            var triangle = 0;
+            for (var z = 0; z < segmentsZ; z++)
+            {
+                for (var x = 0; x < segmentsX; x++)
+                {
+                    var a = z * (segmentsX + 1) + x;
+                    var b = a + 1;
+                    var c = a + segmentsX + 1;
+                    var d = c + 1;
+                    triangles[triangle++] = a;
+                    triangles[triangle++] = c;
+                    triangles[triangle++] = b;
+                    triangles[triangle++] = b;
+                    triangles[triangle++] = c;
+                    triangles[triangle++] = d;
+                }
+            }
+
+            var generated = new Mesh
+            {
+                name = name + " mesh",
+                vertices = vertices,
+                uv = uv,
+                triangles = triangles
+            };
+            generated.RecalculateNormals();
+            generated.RecalculateTangents();
+            generated.RecalculateBounds();
+
+            var meshPath = $"{GeneratedRoot}/{name.Replace(" ", string.Empty)}.asset";
+            var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            if (mesh == null)
+            {
+                AssetDatabase.CreateAsset(generated, meshPath);
+                mesh = generated;
+            }
+            else
+            {
+                EditorUtility.CopySerialized(generated, mesh);
+                UnityEngine.Object.DestroyImmediate(generated);
+                EditorUtility.SetDirty(mesh);
+            }
+
+            var panel = new GameObject(name);
+            panel.transform.SetParent(parent, false);
+            panel.transform.localPosition = position;
+            panel.AddComponent<MeshFilter>().sharedMesh = mesh;
+            panel.AddComponent<MeshRenderer>().sharedMaterial = material;
+            return panel;
+        }
+
+        private static GameObject Capsule(
+            string name,
+            Transform parent,
+            Vector3 position,
+            Vector3 scale,
+            Quaternion rotation,
+            Material material
+        )
+        {
+            var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            capsule.name = name;
+            capsule.transform.SetParent(parent, false);
+            capsule.transform.localPosition = position;
+            capsule.transform.localRotation = rotation;
+            capsule.transform.localScale = scale;
+            capsule.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var collider = capsule.GetComponent<Collider>();
+            if (collider != null)
+            {
+                UnityEngine.Object.DestroyImmediate(collider);
+            }
+            return capsule;
+        }
+
+        private static GameObject Sphere(
+            string name,
+            Transform parent,
+            Vector3 position,
+            Vector3 scale,
+            Material material
+        )
+        {
+            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.name = name;
+            sphere.transform.SetParent(parent, false);
+            sphere.transform.localPosition = position;
+            sphere.transform.localScale = scale;
+            sphere.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var collider = sphere.GetComponent<Collider>();
+            if (collider != null)
+            {
+                UnityEngine.Object.DestroyImmediate(collider);
+            }
+            return sphere;
+        }
+
         private static Transform Layer(string name, Transform parent)
         {
             var layer = new GameObject(name);
@@ -431,13 +588,21 @@ namespace SurgePrep.Editor
             Transform muscle,
             Transform bone,
             Transform cartilage,
-            Transform diaphragm
+            Transform diaphragm,
+            Transform viscera
         )
         {
-            if (file.Contains("Skin")) return skin;
-            if (file.Contains("Diaphragm")) return diaphragm;
-            if (file.Contains("cartilage")) return cartilage;
-            if (file.Contains("muscle") || file.Contains("pectoralis")) return muscle;
+            var name = file.ToLowerInvariant();
+            if (name.Contains("skin")) return skin;
+            if (name.Contains("diaphragm")) return diaphragm;
+            if (name.Contains("trachea") || name.Contains("esophagus")) return viscera;
+            if (name.Contains("cartilage") || name.Contains("disk")) return cartilage;
+            if (name.Contains("muscle") || name.Contains("pectoralis")
+                || name.Contains("subclavius") || name.Contains("subscapularis")
+                || name.Contains("levator") || name.Contains("intercostal"))
+            {
+                return muscle;
+            }
             return bone;
         }
 
@@ -522,10 +687,19 @@ namespace SurgePrep.Editor
             Material skin
         )
         {
-            if (file.Contains("Skin")) return skin;
-            if (file.Contains("Diaphragm")) return diaphragm;
-            if (file.Contains("cartilage")) return cartilage;
-            if (file.Contains("muscle") || file.Contains("pectoralis")) return muscle;
+            var name = file.ToLowerInvariant();
+            if (name.Contains("skin")) return skin;
+            if (name.Contains("diaphragm") || name.Contains("trachea") || name.Contains("esophagus"))
+            {
+                return diaphragm;
+            }
+            if (name.Contains("cartilage") || name.Contains("disk")) return cartilage;
+            if (name.Contains("muscle") || name.Contains("pectoralis")
+                || name.Contains("subclavius") || name.Contains("subscapularis")
+                || name.Contains("levator") || name.Contains("intercostal"))
+            {
+                return muscle;
+            }
             return bone;
         }
 
@@ -537,7 +711,7 @@ namespace SurgePrep.Editor
             }
         }
 
-        private static void CropSkinToTorso(GameObject root)
+        private static void CutProcedureWindow(GameObject root)
         {
             var filters = root.GetComponentsInChildren<MeshFilter>(true);
             for (var filterIndex = 0; filterIndex < filters.Length; filterIndex++)
@@ -551,7 +725,7 @@ namespace SurgePrep.Editor
 
                 var vertices = source.vertices;
                 var sourceTriangles = source.triangles;
-                var torsoTriangles = new List<int>();
+                var retainedTriangles = new List<int>(sourceTriangles.Length);
                 var sourceUnitsPerMetre = source.bounds.max.z > 10f ? 1000f : 1f;
                 for (var index = 0; index + 2 < sourceTriangles.Length; index += 3)
                 {
@@ -559,41 +733,43 @@ namespace SurgePrep.Editor
                     var b = sourceTriangles[index + 1];
                     var c = sourceTriangles[index + 2];
                     var centre = (vertices[a] + vertices[b] + vertices[c]) / 3f;
-                    if (
-                        centre.z >= 0.94f * sourceUnitsPerMetre &&
-                        centre.z <= 1.43f * sourceUnitsPerMetre &&
-                        Mathf.Abs(centre.x) <= 0.285f * sourceUnitsPerMetre
-                    )
+                    var localX = (centre.x + 0.12f * sourceUnitsPerMetre)
+                        / (0.030f * sourceUnitsPerMetre);
+                    var localZ = (centre.z - 1.20f * sourceUnitsPerMetre)
+                        / (0.022f * sourceUnitsPerMetre);
+                    var insideProcedureWindow = localX * localX + localZ * localZ <= 1f
+                        && centre.y < -0.10f * sourceUnitsPerMetre;
+                    if (!insideProcedureWindow)
                     {
-                        torsoTriangles.Add(a);
-                        torsoTriangles.Add(b);
-                        torsoTriangles.Add(c);
+                        retainedTriangles.Add(a);
+                        retainedTriangles.Add(b);
+                        retainedTriangles.Add(c);
                     }
                 }
 
-                var cropped = new Mesh
+                var windowed = new Mesh
                 {
-                    name = "High-resolution torso skin",
+                    name = "BodyParts3D skin with anatomy-shaped procedure field",
                     indexFormat = source.indexFormat,
                     vertices = vertices,
                     normals = source.normals,
                     tangents = source.tangents,
                     uv = source.uv,
                 };
-                cropped.SetTriangles(torsoTriangles, 0);
-                cropped.RecalculateBounds();
+                windowed.SetTriangles(retainedTriangles, 0);
+                windowed.RecalculateBounds();
 
-                var path = $"{GeneratedRoot}/TorsoSkin{filterIndex}.asset";
+                var path = $"{GeneratedRoot}/ProcedureWindowSkin{filterIndex}.asset";
                 var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
                 if (existing == null)
                 {
-                    AssetDatabase.CreateAsset(cropped, path);
-                    filter.sharedMesh = cropped;
+                    AssetDatabase.CreateAsset(windowed, path);
+                    filter.sharedMesh = windowed;
                 }
                 else
                 {
-                    EditorUtility.CopySerialized(cropped, existing);
-                    UnityEngine.Object.DestroyImmediate(cropped);
+                    EditorUtility.CopySerialized(windowed, existing);
+                    UnityEngine.Object.DestroyImmediate(windowed);
                     filter.sharedMesh = existing;
                     EditorUtility.SetDirty(existing);
                 }

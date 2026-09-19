@@ -13,8 +13,12 @@ bridge. Showcase physics must not run inside Docker emulation.
 Recorded runtime choices:
 
 - Python **3.12** with SofaPython3 from the official macOS SOFA package.
-- **SofaCarving** (and bounded topology modifiers) only inside the instructor
-  corridor of the ~80 × 80 mm lateral-chest region.
+- **SofaCarving** and dynamic topology on four independent curved tissue
+  layers inside an anatomy-shaped 80 × 72 mm lateral-chest field. The visual
+  field is not rendered as a patch or rectangle.
+- Broad non-carvable torso contact is an invisible, simulation-friendly point
+  shell downsampled from the registered BodyParts3D skin. Protected rib bands
+  are separate SOFA collision geometry and hard-stop deeper tool motion.
 - SOFA steps at **100 Hz** (`dt = 0.01 s`). The controller/Unity network path
   publishes snapshots at **30 Hz**. Unity interpolates for display and
   reconciles to the latest authoritative snapshot.
@@ -49,3 +53,5 @@ client → controller → API → SOFA.
   remaining able to parse stored 1.0 sessions.
 - Hardware calibration stays deferred; the Scalpel controller boundary is not
   bypassed.
+- The high-resolution OBJ is visualization/registration source only. It is
+  never used directly as the deformable FEM volume.

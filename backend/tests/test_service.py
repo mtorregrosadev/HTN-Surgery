@@ -215,3 +215,26 @@ async def test_showcase_tools_can_be_switched():
         _sample(session, calibration, 0, 0, 10, 0, tool_id="blunt-dissector"),
     )
     assert snapshot.tick == 1
+
+
+@pytest.mark.asyncio
+async def test_session_recovers_after_a_timestamp_gap():
+    service, calibration, session = await _session()
+    await service.process_sample(
+        session.session_id,
+        _sample(session, calibration, 0, 0, 10, 0, timestampMs=0),
+    )
+    degraded = await service.process_sample(
+        session.session_id,
+        _sample(session, calibration, 1, 20, -1, 0, timestampMs=1000),
+    )
+    assert degraded.session_degraded
+    assert degraded.tool.position_mm.y == 10
+
+    recovered = await service.process_sample(
+        session.session_id,
+        _sample(session, calibration, 2, 5, -1, 0, timestampMs=1033),
+    )
+    assert not recovered.session_degraded
+    assert recovered.tool.position_mm.x == 5
+    assert "session-recovered" in recovered.events

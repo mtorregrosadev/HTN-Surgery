@@ -8,6 +8,12 @@ using UnityEngine;
 
 namespace SurgePrep
 {
+    /// <summary>
+    /// Receive-only client for calibrated hardware sessions.
+    /// Samples still travel hardware -> controller -> API -> SOFA; this
+    /// component only renders the returned snapshots. Keep WASD
+    /// <see cref="UnityManualDemoClient"/> as the software fallback.
+    /// </summary>
     public sealed class ScalpelStreamClient : MonoBehaviour
     {
         [SerializeField] private string controllerUrl = "ws://localhost:8100";

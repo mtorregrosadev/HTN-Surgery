@@ -23,6 +23,7 @@ namespace SurgePrep
     [Serializable]
     public sealed class ToolStateDto
     {
+        public string toolId;
         public Vector3Dto positionMm;
         public QuaternionDto orientation;
         public float forceN;

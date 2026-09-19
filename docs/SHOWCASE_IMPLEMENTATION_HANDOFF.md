@@ -326,15 +326,17 @@ The build is accepted only when a fresh teammate can:
 - The simulation is a polished training prototype, not clinically validated and
   not advertised with microscopic or medical-device accuracy.
 - Arbitrary destructive full-body cutting is out of scope; the localized
-  procedure region still uses real SOFA collision, FEM deformation, and
-  topology modification.
+  procedure region uses real SOFA collision, four curved FEM layers, and
+  topology modification. Tool contact outside that field uses the registered
+  non-carvable BodyParts3D-derived SOFA shell.
 
 ## Tool frame
 
 Instrument origin is the working tip. `+Y` is along the handle away from the
 tip, `+X` is along the cutting edge, and `+Z` is the blade-face normal. The same
 frame is used for Unity visuals, SOFA collision geometry, the target corridor,
-and the contact marker. Camera orbit must not remap this frame.
+and the protected-anatomy collision geometry. Camera orbit must not remap this
+frame.
 
 ## Coordinate conversion
 

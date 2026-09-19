@@ -8,23 +8,21 @@ namespace SurgePrep
     {
         [SerializeField] private Transform toolTransform;
         [SerializeField, Min(1f)] private float interpolationSpeed = 20f;
+        [SerializeField] private GameObject scalpelModel;
         [SerializeField] private Material tissueMaterial;
         [SerializeField] private Material subcutaneousMaterial;
         [SerializeField] private Material muscleMaterial;
         [SerializeField] private Material pleuraMaterial;
         [SerializeField] private Material incisionMaterial;
         [SerializeField] private Material toolMaterial;
-        [SerializeField] private Material pressureIndicatorMaterial;
-        [SerializeField] private Material bloodMaterial;
+        [SerializeField] private LineRenderer incisionGuide;
 
         private readonly Dictionary<string, MeshView> meshes = new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
         private Quaternion toolTargetRotation = Quaternion.identity;
-        private Transform pressureIndicator;
-        private Transform contactMarker;
-        private Transform toolShadow;
-        private Transform bloodDecal;
-        private Material pressureIndicatorInstance;
+        private GameObject scalpelVisual;
+        private GameObject dissectorVisual;
+        private GameObject tubeVisual;
 
         public SimulationSnapshotDto LatestSnapshot { get; private set; }
         public event Action<SimulationSnapshotDto> SnapshotReceived;
@@ -34,14 +32,14 @@ namespace SurgePrep
             LatestSnapshot = snapshot;
             if (snapshot.tool != null)
             {
-                toolTargetPosition = CoordinateFrame.Position(snapshot.tool.positionMm);
+                toolTargetPosition = RegisteredPosition(snapshot.tool.positionMm);
                 toolTargetRotation = CoordinateFrame.Rotation(snapshot.tool.orientation);
+                UpdateToolVisual(snapshot.tool.toolId);
                 if (CoordinateFrame.ShouldSnap(toolTransform.localPosition, toolTargetPosition))
                 {
                     toolTransform.localPosition = toolTargetPosition;
                     toolTransform.localRotation = toolTargetRotation;
                 }
-                UpdateContactVisuals(snapshot);
             }
             foreach (var state in snapshot.deformableMeshes ?? new DeformableMeshDto[0])
             {
@@ -49,13 +47,22 @@ namespace SurgePrep
                 view.SetTarget(state);
                 view.SetVisible(LayerVisible(state.objectId, snapshot));
             }
+            UpdateIncisionGuide(snapshot);
             SnapshotReceived?.Invoke(snapshot);
         }
 
         private static bool LayerVisible(string objectId, SimulationSnapshotDto snapshot)
         {
-            if (objectId == "layer-skin" || objectId == "wound-channel") return true;
-            var openedSkin = snapshot.tissue != null && snapshot.tissue.incisionProgress > 0.05f;
+            if (objectId == "layer-skin") return true;
+            if (objectId == "wound-channel")
+            {
+                return snapshot.tissue != null
+                    && (snapshot.tissue.incisionDepthMm > 0.2f
+                        || snapshot.tissue.incisionProgress > 0.01f
+                        || snapshot.tissue.interactionMode == "cutting");
+            }
+            var openedSkin = snapshot.tissue != null
+                && (snapshot.tissue.incisionProgress > 0.02f || snapshot.tissue.incisionDepthMm > 0.4f);
             if (objectId == "layer-subcutaneous") return openedSkin;
             var fatOpen = LayerOpened(snapshot, "subcutaneous");
             if (objectId == "layer-intercostal-muscle") return fatOpen;
@@ -83,54 +90,88 @@ namespace SurgePrep
                 var tip = new GameObject("Authoritative SOFA Tool Tip");
                 tip.transform.SetParent(transform, false);
                 toolTransform = tip.transform;
-                CreateBladeVisuals(tip.transform);
+                CreateToolVisuals(tip.transform);
             }
         }
 
-        private void CreateBladeVisuals(Transform tip)
+        private void CreateToolVisuals(Transform tip)
         {
-            var shaft = Primitive("Training blade handle", PrimitiveType.Capsule, tip,
-                new Vector3(0f, 0.065f, 0f), new Vector3(0.007f, 0.05f, 0.007f));
-            var blade = Primitive("Visible blunt training blade", PrimitiveType.Cube, tip,
-                new Vector3(0.002f, 0.012f, 0f), new Vector3(0.012f, 0.024f, 0.0018f));
-            Primitive("Training blade guard", PrimitiveType.Cube, tip,
-                new Vector3(0f, 0.029f, 0f), new Vector3(0.022f, 0.004f, 0.011f));
+            scalpelVisual = new GameObject("Scalpel visual");
+            scalpelVisual.transform.SetParent(tip, false);
+            CreateReadableScalpel(scalpelVisual.transform);
+
+            dissectorVisual = new GameObject("Blunt dissector visual");
+            dissectorVisual.transform.SetParent(tip, false);
+            var leftJaw = Primitive(
+                "Left blunt jaw", PrimitiveType.Capsule, dissectorVisual.transform,
+                new Vector3(-0.004f, 0.048f, 0f), new Vector3(0.0035f, 0.04f, 0.0035f)
+            );
+            leftJaw.transform.localRotation = Quaternion.Euler(0f, 0f, -4f);
+            var rightJaw = Primitive(
+                "Right blunt jaw", PrimitiveType.Capsule, dissectorVisual.transform,
+                new Vector3(0.004f, 0.048f, 0f), new Vector3(0.0035f, 0.04f, 0.0035f)
+            );
+            rightJaw.transform.localRotation = Quaternion.Euler(0f, 0f, 4f);
+            Primitive(
+                "Dissector stop", PrimitiveType.Sphere, dissectorVisual.transform,
+                new Vector3(0f, 0.006f, 0f), Vector3.one * 0.011f
+            );
+
+            tubeVisual = new GameObject("Chest tube visual");
+            tubeVisual.transform.SetParent(tip, false);
+            Primitive(
+                "Training chest tube", PrimitiveType.Cylinder, tubeVisual.transform,
+                new Vector3(0f, 0.055f, 0f), new Vector3(0.0064f, 0.055f, 0.0064f)
+            );
+
             if (toolMaterial != null)
             {
                 foreach (var renderer in tip.GetComponentsInChildren<MeshRenderer>())
                 {
+                    if (renderer.sharedMaterial != null && renderer.sharedMaterial.name == "ScalpelBlade")
+                    {
+                        continue;
+                    }
                     renderer.sharedMaterial = toolMaterial;
                 }
             }
+            UpdateToolVisual("scalpel");
 
-            var indicator = Primitive("Contact pressure indicator", PrimitiveType.Sphere, tip,
-                Vector3.zero, Vector3.one * 0.008f);
-            pressureIndicator = indicator.transform;
-            if (pressureIndicatorMaterial != null)
+        }
+
+        private void UpdateToolVisual(string toolId)
+        {
+            if (scalpelVisual != null) scalpelVisual.SetActive(
+                string.IsNullOrEmpty(toolId) || toolId == "scalpel"
+            );
+            if (dissectorVisual != null) dissectorVisual.SetActive(toolId == "blunt-dissector");
+            if (tubeVisual != null) tubeVisual.SetActive(toolId == "chest-tube");
+        }
+
+        private static void CreateReadableScalpel(Transform parent)
+        {
+            Primitive(
+                "Scalpel handle", PrimitiveType.Capsule, parent,
+                new Vector3(0f, 0.072f, 0f), new Vector3(0.011f, 0.048f, 0.011f)
+            );
+            Primitive(
+                "Scalpel guard", PrimitiveType.Cube, parent,
+                new Vector3(0f, 0.032f, 0f), new Vector3(0.018f, 0.006f, 0.012f)
+            );
+            var blade = Primitive(
+                "Scalpel blade", PrimitiveType.Cube, parent,
+                new Vector3(0.005f, 0.014f, 0f), new Vector3(0.016f, 0.028f, 0.0024f)
+            );
+            var renderer = blade.GetComponent<MeshRenderer>();
+            if (renderer != null)
             {
-                pressureIndicatorInstance = new Material(pressureIndicatorMaterial);
-                indicator.GetComponent<MeshRenderer>().sharedMaterial = pressureIndicatorInstance;
+                var bladeMaterial = new Material(renderer.sharedMaterial)
+                {
+                    name = "ScalpelBlade",
+                    color = new Color(0.82f, 0.84f, 0.86f)
+                };
+                renderer.sharedMaterial = bladeMaterial;
             }
-            indicator.SetActive(false);
-
-            var marker = Primitive("SOFA contact marker", PrimitiveType.Sphere, transform,
-                Vector3.zero, Vector3.one * 0.0045f);
-            contactMarker = marker.transform;
-            marker.SetActive(false);
-
-            var shadow = Primitive("Instrument depth cue", PrimitiveType.Cylinder, transform,
-                Vector3.zero, new Vector3(0.012f, 0.0004f, 0.012f));
-            toolShadow = shadow.transform;
-
-            var blood = Primitive("Controlled blood decal", PrimitiveType.Quad, transform,
-                new Vector3(0f, -0.001f, 0f), Vector3.one * 0.018f);
-            blood.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            bloodDecal = blood.transform;
-            if (bloodMaterial != null)
-            {
-                blood.GetComponent<MeshRenderer>().sharedMaterial = bloodMaterial;
-            }
-            blood.SetActive(false);
         }
 
         private static GameObject Primitive(
@@ -145,49 +186,6 @@ namespace SurgePrep
             var collider = created.GetComponent<Collider>();
             if (collider != null) Destroy(collider);
             return created;
-        }
-
-        private void UpdateContactVisuals(SimulationSnapshotDto snapshot)
-        {
-            var tool = snapshot.tool;
-            if (pressureIndicator != null)
-            {
-                pressureIndicator.gameObject.SetActive(tool.contact);
-                pressureIndicator.localScale = Vector3.one * (0.006f + tool.reactionForceN * 0.004f);
-                if (pressureIndicatorInstance != null)
-                {
-                    var colour = tool.reactionForceN > 1.2f
-                        ? new Color(1f, 0.08f, 0.03f, 0.75f)
-                        : tool.reactionForceN < 0.3f
-                            ? new Color(0.2f, 0.55f, 1f, 0.65f)
-                            : new Color(0.05f, 1f, 0.65f, 0.7f);
-                    if (pressureIndicatorInstance.HasProperty("_BaseColor"))
-                        pressureIndicatorInstance.SetColor("_BaseColor", colour);
-                    if (pressureIndicatorInstance.HasProperty("_Color"))
-                        pressureIndicatorInstance.SetColor("_Color", colour);
-                }
-            }
-            if (contactMarker != null)
-            {
-                contactMarker.gameObject.SetActive(tool.contact);
-                if (tool.contact)
-                {
-                    var point = tool.contactPointMm != null
-                        ? CoordinateFrame.Position(tool.contactPointMm)
-                        : CoordinateFrame.Position(tool.positionMm);
-                    contactMarker.localPosition = point;
-                }
-            }
-            if (toolShadow != null)
-            {
-                var tip = CoordinateFrame.Position(tool.positionMm);
-                toolShadow.localPosition = new Vector3(tip.x, 0.0004f, tip.z);
-            }
-            if (bloodDecal != null && snapshot.tissue != null)
-            {
-                var show = snapshot.tissue.incisionProgress > 0.08f;
-                bloodDecal.gameObject.SetActive(show);
-            }
         }
 
         private void Update()
@@ -214,6 +212,67 @@ namespace SurgePrep
             }
         }
 
+        private void UpdateIncisionGuide(SimulationSnapshotDto snapshot)
+        {
+            if (incisionGuide == null) return;
+            var incisionStarted = snapshot.tissue != null
+                && snapshot.tissue.incisionProgress > 0.03f;
+            incisionGuide.gameObject.SetActive(!incisionStarted);
+            if (incisionStarted) return;
+
+            DeformableMeshDto skin = null;
+            foreach (var state in snapshot.deformableMeshes ?? new DeformableMeshDto[0])
+            {
+                if (state != null && state.objectId == "layer-skin")
+                {
+                    skin = state;
+                    break;
+                }
+            }
+
+            incisionGuide.positionCount = 17;
+            for (var index = 0; index < incisionGuide.positionCount; index++)
+            {
+                var t = index / (float)(incisionGuide.positionCount - 1);
+                var xMm = Mathf.Lerp(-18f, 18f, t);
+                var zMm = -3f + 6f * Mathf.Sin(t * Mathf.PI);
+                var y = ChestSurfaceRegistration.OffsetMetres(xMm, zMm);
+                if (skin != null && skin.verticesMm != null && skin.verticesMm.Length > 0)
+                {
+                    Vector3Dto nearest = null;
+                    var nearestSquared = float.PositiveInfinity;
+                    foreach (var vertex in skin.verticesMm)
+                    {
+                        var dx = vertex.x - xMm;
+                        var dz = vertex.z - zMm;
+                        var squared = dx * dx + dz * dz;
+                        if (squared < nearestSquared)
+                        {
+                            nearestSquared = squared;
+                            nearest = vertex;
+                        }
+                    }
+                    if (nearest != null)
+                    {
+                        y = nearest.y * CoordinateFrame.MillimetresToMetres;
+                    }
+                }
+                incisionGuide.SetPosition(
+                    index,
+                    new Vector3(
+                        xMm * CoordinateFrame.MillimetresToMetres,
+                        y + 0.0008f,
+                        -zMm * CoordinateFrame.MillimetresToMetres
+                    )
+                );
+            }
+        }
+
+        private static Vector3 RegisteredPosition(Vector3Dto source)
+        {
+            return CoordinateFrame.Position(source);
+        }
+
         private MeshView GetOrCreateMesh(DeformableMeshDto state)
         {
             if (meshes.TryGetValue(state.objectId, out var existing))
@@ -225,7 +284,7 @@ namespace SurgePrep
             var filter = child.AddComponent<MeshFilter>();
             var renderer = child.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = MaterialFor(state.objectId);
-            var created = new MeshView(filter);
+            var created = new MeshView(filter, state.objectId);
             meshes.Add(state.objectId, created);
             return created;
         }
@@ -243,12 +302,14 @@ namespace SurgePrep
         {
             private readonly Mesh mesh;
             private readonly GameObject owner;
+            private readonly string objectId;
             private Vector3[] target = new Vector3[0];
             private int topologyRevision = -1;
 
-            public MeshView(MeshFilter filter)
+            public MeshView(MeshFilter filter, string objectId)
             {
                 owner = filter.gameObject;
+                this.objectId = objectId;
                 mesh = new Mesh { name = "SOFA deformable surface" };
                 mesh.MarkDynamic();
                 filter.sharedMesh = mesh;
@@ -261,20 +322,57 @@ namespace SurgePrep
 
             public void SetTarget(DeformableMeshDto state)
             {
-                target = new Vector3[state.verticesMm.Length];
-                for (var index = 0; index < target.Length; index++)
+                var nextTarget = new Vector3[state.verticesMm.Length];
+                for (var index = 0; index < nextTarget.Length; index++)
                 {
-                    target[index] = CoordinateFrame.Position(state.verticesMm[index]);
+                    if (!Finite(state.verticesMm[index]))
+                    {
+                        return;
+                    }
+                    nextTarget[index] = RegisteredPosition(state.verticesMm[index]);
                 }
+                target = nextTarget;
                 if (mesh.vertexCount != target.Length)
                 {
                     mesh.vertices = target;
                 }
                 if (topologyRevision != state.topologyRevision)
                 {
-                    mesh.triangles = CoordinateFrame.ReflectedTriangles(state.triangleIndices);
+                    mesh.triangles = CoordinateFrame.ReflectedTriangles(
+                        objectId.Contains("wound") || objectId.Contains("incision")
+                            ? state.triangleIndices
+                            : AnatomyFieldTriangles(state)
+                    );
                     topologyRevision = state.topologyRevision;
                 }
+            }
+
+            private static bool Finite(Vector3Dto value)
+            {
+                return value != null
+                    && !float.IsNaN(value.x) && !float.IsInfinity(value.x)
+                    && !float.IsNaN(value.y) && !float.IsInfinity(value.y)
+                    && !float.IsNaN(value.z) && !float.IsInfinity(value.z);
+            }
+
+            private static int[] AnatomyFieldTriangles(DeformableMeshDto state)
+            {
+                var visible = new List<int>(state.triangleIndices.Length);
+                for (var index = 0; index + 2 < state.triangleIndices.Length; index += 3)
+                {
+                    var a = state.verticesMm[state.triangleIndices[index]];
+                    var b = state.verticesMm[state.triangleIndices[index + 1]];
+                    var c = state.verticesMm[state.triangleIndices[index + 2]];
+                    var xMm = (a.x + b.x + c.x) / 3f;
+                    var zMm = (a.z + b.z + c.z) / 3f;
+                    var ellipse = xMm * xMm / (30f * 30f)
+                        + zMm * zMm / (22f * 22f);
+                    if (ellipse > 1f) continue;
+                    visible.Add(state.triangleIndices[index]);
+                    visible.Add(state.triangleIndices[index + 1]);
+                    visible.Add(state.triangleIndices[index + 2]);
+                }
+                return visible.ToArray();
             }
 
             public void Interpolate(float amount)

@@ -4,6 +4,234 @@ Surge Prep is a physical-digital surgical-skills trainer for safe, repeatable pr
 
 This is a training prototype, not a medical device. It does not replace qualified instructors, supervised simulation, clinical observation, or clinical judgment. Never attach prototype electronics to a real clinical instrument or use the system on a person.
 
+## Start here: reproduce the showcase on another Mac
+
+The repository contains the API, controller, SOFA scene, contracts, anatomy,
+and a reusable Unity package. The generated Unity project is deliberately not
+committed. Each developer creates a small Unity project and links the package
+from this checkout, so package changes remain shared without committing
+machine-specific Unity files.
+
+The known-good development environment is:
+
+| Dependency | Tested version | Why it is needed |
+| --- | --- | --- |
+| macOS on Apple Silicon | Current demo machine | Runs Unity, SOFA, and Xcode |
+| Git | Current | Clones the repository and lets Unity resolve packages |
+| Docker Desktop + Compose | Current | Runs MongoDB |
+| Python | 3.12 | Runs the API/controller and matches the project SOFA environment |
+| [SOFA](https://github.com/sofa-framework/sofa/releases/tag/v26.06.00) | 26.06.00 macOS | Authoritative contact, deformation, force, and carving |
+| Unity Hub + Unity Editor | 6000.6.2f1, Apple Silicon | Renders the desktop/XR client |
+| Unity template | Universal 3D | Known-good render pipeline for the generated scene |
+| Xcode + Unity iOS Build Support | Optional | Only required for an iPhone build |
+
+Later patch releases may work, but use these versions first when reproducing
+the demo under time pressure.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/mtorregrosadev/HTN-Surgery.git surgery-htn
+cd surgery-htn
+git switch main
+```
+
+Confirm that the curated anatomy exists. The scene builder expects these files
+to remain inside the checkout:
+
+```bash
+test -f bodyparts3d_highres/FJ2810_BP22617_FMA7163_Skin.obj && echo "anatomy ready"
+```
+
+### 2. Create the shared Python environment
+
+Install Python 3.12 first if it is unavailable. With Homebrew:
+
+```bash
+brew install python@3.12
+```
+
+Then create one environment for the native demo and install both services:
+
+```bash
+python3.12 -m venv .venv-sofa
+.venv-sofa/bin/python -m pip install --upgrade pip
+.venv-sofa/bin/python -m pip install numpy scipy
+.venv-sofa/bin/python -m pip install -e './backend[dev]' -e './controller[dev]'
+```
+
+Do not commit `.venv-sofa`; it is intentionally ignored.
+
+### 3. Install and validate native SOFA
+
+Download the official macOS archive for SOFA 26.06.00, extract it, and keep it
+at the default location below:
+
+```text
+~/SOFA/SOFA_v26.06.00_MacOS/
+```
+
+The distribution must include `SofaPython3` and `SofaCarving`. If SOFA lives
+somewhere else, set its absolute path before running any project scripts:
+
+```bash
+export SURGE_PREP_SOFA_ROOT=/absolute/path/to/SOFA_v26.06.00_MacOS
+```
+
+Run the full native smoke test:
+
+```bash
+.venv-sofa/bin/python scripts/check-native-sofa.py
+```
+
+Success ends with a contact/deformation/carving message. Do not continue with
+the showcase if this check fails: the in-memory simulator is useful for API
+development but is not the physics shown in the pitch.
+
+### 4. Create and link the Unity project
+
+1. In Unity Hub, install Unity `6000.6.2f1` for Apple Silicon. Desktop preview
+   needs the Mac build module; also select **iOS Build Support** if this machine
+   will build for an iPhone.
+2. Create a new **Universal 3D** project. It may live anywhere outside the
+   repository; `~/SurgePrepXR` is a simple choice.
+3. Open **Window > Package Management > Package Manager**.
+4. Select **+ > Install package from disk**.
+5. Choose this file from the cloned repository:
+
+   ```text
+   client/unity/Packages/com.surgeprep.runtime/package.json
+   ```
+
+6. Wait for Unity to finish compiling. The top menu should now contain
+   **Surge Prep**.
+7. Leave Play Mode and select **Surge Prep > Build Chest-Tube Showcase**.
+8. Wait for the anatomy import to finish. Unity creates and opens:
+
+   ```text
+   Assets/SurgePrepShowcase/Scenes/ChestTubeShowcase.unity
+   ```
+
+The package must stay linked to the repository. Copying only `package.json`
+will fail because the builder resolves `bodyparts3d_highres/` relative to the
+linked package.
+
+### 5. Start the native showcase stack
+
+Open a terminal at the repository root and make sure Docker Desktop is running:
+
+```bash
+docker compose version
+./scripts/start-showcase.sh
+```
+
+That single script:
+
+1. starts MongoDB in Docker;
+2. verifies native SOFA and SofaCarving;
+3. starts the API at `http://127.0.0.1:8000`;
+4. starts the Scalpel controller at `http://127.0.0.1:8100`; and
+5. refuses to start if the API does not report `sofa-native`.
+
+Verify the two service boundaries before opening the demo:
+
+```bash
+curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8100/health
+```
+
+Both responses should be healthy and mention `sofa-native`. Logs are written
+to `.logs/api.log` and `.logs/controller.log`.
+
+### 6. Run the desktop demonstration
+
+Return to Unity, open the generated `ChestTubeShowcase` scene, press **Play**,
+and click once inside the **Game** view. The current keyboard client creates
+its own calibration and session, so there is no session ID to paste.
+
+| Input | Action |
+| --- | --- |
+| `W A S D` | Move the tool across the chest in screen space |
+| `Q / E` | Raise or lower the tool |
+| `1 / 2 / 3` | Scalpel / blunt dissector / chest tube |
+| Mouse drag | Orbit around the room |
+| Mouse wheel | Zoom |
+| Middle-mouse drag | Pan |
+| `F / C / O` | Procedure close-up / surgeon view / room view |
+| `K` | Toggle the anatomy cutaway |
+| `Tab` | Hide or show guidance |
+| `V` | Desktop-only side-by-side phone-view preview |
+| `R` twice | Reset the attempt |
+
+Contact and force are calculated by SOFA. `Space`, `[` and `]` are not physics
+controls. Lower the selected tool until the blade or tip reaches the tissue,
+then move along the highlighted corridor.
+
+To verify that live transport and physics are still working:
+
+```bash
+.venv-sofa/bin/python scripts/check-live-physics.py
+```
+
+### 7. Stop cleanly
+
+Exit Unity Play Mode and run:
+
+```bash
+./scripts/stop-showcase.sh
+docker compose down
+```
+
+The first command stops the host API and controller. The second stops MongoDB;
+omit it when the team wants MongoDB to remain warm between demo runs.
+
+### Optional: API-only development without native SOFA
+
+Teammates working on contracts, persistence, or controller integration can run
+the containerized memory adapter:
+
+```bash
+docker compose --profile memory-dev up --build
+```
+
+OpenAPI is available at `http://localhost:8000/docs`. This mode uses real
+MongoDB but does **not** use native SOFA and must never be presented as the
+physics demo.
+
+### Optional: iPhone/Cardboard direction
+
+The checked-in `PhoneVrRig` provides a desktop side-by-side preview when `V` is
+pressed. It is not yet a packaged iOS VR build. For real iPhone head tracking
+and lens distortion, install the official
+[Google Cardboard XR Plugin for Unity](https://developers.google.com/cardboard/develop/unity/quickstart),
+enable its iOS loader through XR Plug-in Management, build in landscape through
+Xcode, and retain the same client -> controller -> API -> SOFA boundary.
+
+An iPhone cannot use `ws://localhost:8100` to reach the Mac. A phone build must
+use the Mac's LAN address, and the controller must be intentionally bound to a
+LAN interface. Keep the desktop path as the reliable fallback until that
+network and iOS signing path has been tested on the actual phone.
+
+### Common setup problems
+
+| Symptom | Fix |
+| --- | --- |
+| **Surge Prep** menu is missing | Confirm the local package appears in Package Manager and let compilation finish. Check Unity's Console for the first compiler error. |
+| Builder says anatomy is missing | Reinstall the package from this checkout; do not copy the package into an unrelated directory. Confirm `bodyparts3d_highres/` exists. |
+| `SofaPython3 did not import` | Use `.venv-sofa/bin/python`, Python 3.12, and the matching macOS SOFA archive. Set `SURGE_PREP_SOFA_ROOT` explicitly. |
+| `SofaCarving plugin was not found` | Reinstall the full SOFA 26.06 distribution and rerun `check-native-sofa.py`. |
+| MongoDB repeatedly prints connection messages | Normal connection logging is noisy. Check `docker compose ps`; do not follow `docker compose logs -f` during the pitch. |
+| Unity shows **SOFA OFFLINE** | Stop Play Mode, run `./scripts/start-showcase.sh`, verify both health endpoints, and enter Play Mode again. |
+| Unity scene looks stale after pulling changes | Leave Play Mode and rerun **Surge Prep > Build Chest-Tube Showcase**. |
+| Port 8000, 8100, or 27017 is busy | Run `./scripts/stop-showcase.sh`, then inspect the port owner with `lsof -nP -iTCP:<port> -sTCP:LISTEN`. |
+| Tool moves but the tissue does not respond | Verify the HUD says **SOFA NATIVE**, lower with `E`, and check `.logs/api.log` for a finite-solver or connection error. |
+
+Run backend and controller tests after changing contracts or transport:
+
+```bash
+.venv-sofa/bin/python -m pytest backend/tests controller/tests
+```
+
 ## Hackathon goal
 
 Build one convincing end-to-end exercise:

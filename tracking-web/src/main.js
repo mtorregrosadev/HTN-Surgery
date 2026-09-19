@@ -163,47 +163,63 @@ function drawOverlay(pose, scalpel) {
   overlayContext.clearRect(0, 0, overlay.width, overlay.height);
   drawPath(overlayContext, path, 1, 1);
 
-  // 1. Draw Purple Scalpel if detected
+  // 1. Draw Purple Scalpel TIP (detectar el final, no tot)
   if (scalpel) {
     overlayContext.save();
-    const pad = 6;
-    const bx = Math.max(0, scalpel.minX - pad);
-    const by = Math.max(0, scalpel.minY - pad);
-    const bw = Math.min(overlay.width - bx, scalpel.width + pad * 2);
-    const bh = Math.min(overlay.height - by, scalpel.height + pad * 2);
+    const tx = scalpel.tipX;
+    const ty = scalpel.tipY;
 
-    // Glowing purple bounding box
+    // Sleek blade spine line towards base (max 45px to show blade direction)
+    const distToBase = Math.hypot(scalpel.baseX - tx, scalpel.baseY - ty);
+    if (distToBase > 10) {
+      const bladeLen = Math.min(45, distToBase);
+      const dirX = (scalpel.baseX - tx) / distToBase;
+      const dirY = (scalpel.baseY - ty) / distToBase;
+
+      overlayContext.strokeStyle = 'rgba(217, 102, 255, 0.65)';
+      overlayContext.lineWidth = 3;
+      overlayContext.lineCap = 'round';
+      overlayContext.beginPath();
+      overlayContext.moveTo(tx, ty);
+      overlayContext.lineTo(tx + dirX * bladeLen, ty + dirY * bladeLen);
+      overlayContext.stroke();
+    }
+
+    // High-precision surgical tip reticle
     overlayContext.strokeStyle = '#d966ff';
     overlayContext.lineWidth = 2;
-    overlayContext.strokeRect(bx, by, bw, bh);
-
-    // Scalpel Centroid
-    overlayContext.fillStyle = '#d966ff';
     overlayContext.beginPath();
-    overlayContext.arc(scalpel.x, scalpel.y, 4, 0, Math.PI * 2);
-    overlayContext.fill();
-
-    // Scalpel Tip
-    overlayContext.strokeStyle = '#ffffff';
-    overlayContext.lineWidth = 2;
-    overlayContext.beginPath();
-    overlayContext.arc(scalpel.tipX, scalpel.tipY, 6, 0, Math.PI * 2);
+    overlayContext.arc(tx, ty, 9, 0, Math.PI * 2);
     overlayContext.stroke();
-    overlayContext.fillStyle = '#f0b3ff';
+
+    // Crosshairs on the tip
     overlayContext.beginPath();
-    overlayContext.arc(scalpel.tipX, scalpel.tipY, 3, 0, Math.PI * 2);
+    overlayContext.moveTo(tx - 14, ty); overlayContext.lineTo(tx - 9, ty);
+    overlayContext.moveTo(tx + 9, ty); overlayContext.lineTo(tx + 14, ty);
+    overlayContext.moveTo(tx, ty - 14); overlayContext.lineTo(tx, ty - 9);
+    overlayContext.moveTo(tx, ty + 9); overlayContext.lineTo(tx, ty + 14);
+    overlayContext.stroke();
+
+    // Inner bright tip focal point
+    overlayContext.fillStyle = '#ffffff';
+    overlayContext.beginPath();
+    overlayContext.arc(tx, ty, 3, 0, Math.PI * 2);
     overlayContext.fill();
 
-    // Label badge
-    const badgeY = by > 24 ? by - 24 : by + bh + 4;
+    // Compact floating tip badge
+    const badgeW = 95;
+    const badgeH = 18;
+    const badgeX = tx + 14 + badgeW > overlay.width ? tx - badgeW - 14 : tx + 14;
+    const badgeY = ty - 9 < 15 ? ty + 12 : ty - 9;
     overlayContext.fillStyle = '#220b33';
-    overlayContext.fillRect(bx, badgeY, 130, 20);
+    overlayContext.fillRect(badgeX, badgeY - 11, badgeW, badgeH);
     overlayContext.strokeStyle = '#d966ff';
     overlayContext.lineWidth = 1;
-    overlayContext.strokeRect(bx, badgeY, 130, 20);
+    overlayContext.strokeRect(badgeX, badgeY - 11, badgeW, badgeH);
     overlayContext.fillStyle = '#f0b3ff';
-    overlayContext.font = 'bold 11px monospace';
-    overlayContext.fillText('✂ SCALPEL · LILA', bx + 8, badgeY + 14);
+    overlayContext.font = 'bold 10px monospace';
+    overlayContext.fillText('✂ SCALPEL TIP', badgeX + 6, badgeY + 2);
+
     overlayContext.restore();
   }
 

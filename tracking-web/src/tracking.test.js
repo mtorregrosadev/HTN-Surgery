@@ -276,8 +276,9 @@ test('detectPurpleScalpel locates centroid, bounding box, tip, and angle', () =>
   }
   const scalpel = detectPurpleScalpel({ width, height, data }, { step: 2, minPixels: 10 });
   assert.ok(scalpel);
-  assert.equal(Math.round(scalpel.x), 100);
-  assert.equal(Math.round(scalpel.y), 50);
+  assert.equal(Math.round(scalpel.centroidX), 100);
+  assert.equal(Math.round(scalpel.centroidY), 50);
+  assert.ok(scalpel.tipX <= 65 || scalpel.tipX >= 135);
   assert.equal(scalpel.minX, 60);
   assert.equal(scalpel.maxX, 140);
   assert.equal(scalpel.minY, 40);

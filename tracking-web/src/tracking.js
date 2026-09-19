@@ -214,98 +214,239 @@ export function appendPath(path, pose, isContinuous = true) {
 }
 
 export function isPurpleColor(r, g, b) {
+  // Reject blown-out white glare, extreme darkness, or non-dominant blue
+  if (b < 55 || b > 238) return false;
+  // Lilac plastic: Blue is the dominant channel, Red is secondary, Green is lowest
+  if (b < r + 4 || b < g + 10 || r < g - 2) return false;
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const delta = max - min;
-  if (max < 38 || delta < 22) return false;
-  if (delta / max < 0.20) return false;
-  if (g > r * 0.90 || g > b * 0.90) return false;
-  let h = 0;
-  if (max === r) h = ((g - b) / delta) % 6;
-  else if (max === g) return false;
-  else h = (r - g) / delta + 4;
-  h = Math.round(h * 60);
+  if (delta < 12) return false;
+  const sat = delta / max;
+  if (sat < 0.12 || sat > 0.85) return false;
+
+  // Hue calculation (where max === b)
+  let h = ((r - g) / delta + 4) * 60;
   if (h < 0) h += 360;
-  return h >= 245 && h <= 345;
+  return h >= 245 && h <= 292;
 }
 
 export function detectPurpleScalpel(imageData, options = {}) {
   if (!imageData || !imageData.data) return null;
   const { width, height, data } = imageData;
   const step = options.step ?? 2;
-  const minPixels = options.minPixels ?? 15;
+  const minPixels = options.minPixels ?? 30;
 
-  let count = 0;
-  let sumX = 0;
-  let sumY = 0;
-  let minX = width;
-  let minY = height;
-  let maxX = 0;
-  let maxY = 0;
-
+  // 1. Scan and collect lilac pixels
+  const pts = [];
   for (let y = 0; y < height; y += step) {
     const rowOffset = y * width * 4;
     for (let x = 0; x < width; x += step) {
       const idx = rowOffset + x * 4;
       if (isPurpleColor(data[idx], data[idx + 1], data[idx + 2])) {
-        count += 1;
-        sumX += x;
-        sumY += y;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
+        pts.push({ x, y });
       }
     }
   }
 
-  if (count < minPixels) return null;
+  if (pts.length < minPixels) return null;
 
-  const cx = sumX / count;
-  const cy = sumY / count;
+  // 2. Spatial clustering: grid-based connected components to reject scattered noise/reflections
+  const cellSize = 16;
+  const cols = Math.ceil(width / cellSize);
+  const rows = Math.ceil(height / cellSize);
+  const grid = new Int32Array(cols * rows);
+
+  for (let i = 0; i < pts.length; i += 1) {
+    const c = Math.floor(pts[i].x / cellSize);
+    const r = Math.floor(pts[i].y / cellSize);
+    grid[r * cols + c] += 1;
+  }
+
+  const labels = new Int32Array(cols * rows);
+  let currentLabel = 1;
+  const components = [];
+
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const idx = r * cols + c;
+      if (grid[idx] >= 2 && labels[idx] === 0) {
+        const queue = [{ r, c }];
+        labels[idx] = currentLabel;
+        let count = grid[idx];
+        let minC = c;
+        let maxC = c;
+        let minR = r;
+        let maxR = r;
+
+        while (queue.length > 0) {
+          const curr = queue.pop();
+          const neighbors = [
+            { r: curr.r - 1, c: curr.c },
+            { r: curr.r + 1, c: curr.c },
+            { r: curr.r, c: curr.c - 1 },
+            { r: curr.r, c: curr.c + 1 },
+            { r: curr.r - 1, c: curr.c - 1 },
+            { r: curr.r - 1, c: curr.c + 1 },
+            { r: curr.r + 1, c: curr.c - 1 },
+            { r: curr.r + 1, c: curr.c + 1 },
+          ];
+          for (let n = 0; n < neighbors.length; n += 1) {
+            const nr = neighbors[n].r;
+            const nc = neighbors[n].c;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+              const nIdx = nr * cols + nc;
+              if (grid[nIdx] >= 2 && labels[nIdx] === 0) {
+                labels[nIdx] = currentLabel;
+                queue.push({ r: nr, c: nc });
+                count += grid[nIdx];
+                if (nc < minC) minC = nc;
+                if (nc > maxC) maxC = nc;
+                if (nr < minR) minR = nr;
+                if (nr > maxR) maxR = nr;
+              }
+            }
+          }
+        }
+
+        const compW = (maxC - minC + 1) * cellSize;
+        const compH = (maxR - minR + 1) * cellSize;
+        const major = Math.max(compW, compH);
+        const minor = Math.max(1, Math.min(compW, compH));
+        const aspect = major / minor;
+
+        // Scalpel tool must be elongated and of reasonable size (rejects round faces / squares)
+        if (count >= minPixels && major >= 28 && aspect >= 1.5) {
+          components.push({
+            label: currentLabel,
+            count,
+            minX: minC * cellSize,
+            maxX: (maxC + 1) * cellSize,
+            minY: minR * cellSize,
+            maxY: (maxR + 1) * cellSize,
+            aspect,
+          });
+        }
+        currentLabel += 1;
+      }
+    }
+  }
+
+  if (components.length === 0) return null;
+
+  // Pick the most scalpel-like elongated component
+  components.sort((a, b) => (b.count * b.aspect) - (a.count * a.aspect));
+  const bestComp = components[0];
+
+  // Collect points belonging to best component
+  const compPts = [];
+  let sumX = 0;
+  let sumY = 0;
+  let minX = width;
+  let maxX = 0;
+  let minY = height;
+  let maxY = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const c = Math.floor(pts[i].x / cellSize);
+    const r = Math.floor(pts[i].y / cellSize);
+    if (labels[r * cols + c] === bestComp.label) {
+      compPts.push(pts[i]);
+      sumX += pts[i].x;
+      sumY += pts[i].y;
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+  }
+
+  if (compPts.length < minPixels) return null;
+
+  const cx = sumX / compPts.length;
+  const cy = sumY / compPts.length;
+
+  // Compute principal axis using 2nd central moments
   let mu20 = 0;
   let mu02 = 0;
   let mu11 = 0;
-  let maxDistSq = 0;
-  let tipX = cx;
-  let tipY = cy;
+  for (let i = 0; i < compPts.length; i += 1) {
+    const dx = compPts[i].x - cx;
+    const dy = compPts[i].y - cy;
+    mu20 += dx * dx;
+    mu02 += dy * dy;
+    mu11 += dx * dy;
+  }
 
-  for (let y = minY; y <= maxY; y += step) {
-    const rowOffset = y * width * 4;
-    for (let x = minX; x <= maxX; x += step) {
-      const idx = rowOffset + x * 4;
-      if (isPurpleColor(data[idx], data[idx + 1], data[idx + 2])) {
-        const dx = x - cx;
-        const dy = y - cy;
-        mu20 += dx * dx;
-        mu02 += dy * dy;
-        mu11 += dx * dy;
-        const distSq = dx * dx + dy * dy;
-        if (distSq > maxDistSq) {
-          maxDistSq = distSq;
-          tipX = x;
-          tipY = y;
-        }
-      }
+  const theta = 0.5 * Math.atan2(2 * mu11, mu20 - mu02);
+  const cosTheta = Math.cos(theta);
+  const sinTheta = Math.sin(theta);
+
+  // Project points along principal axis
+  let minProj = Infinity;
+  let maxProj = -Infinity;
+  let endA = { x: cx, y: cy };
+  let endB = { x: cx, y: cy };
+
+  for (let i = 0; i < compPts.length; i += 1) {
+    const proj = (compPts[i].x - cx) * cosTheta + (compPts[i].y - cy) * sinTheta;
+    if (proj < minProj) {
+      minProj = proj;
+      endA = compPts[i];
+    }
+    if (proj > maxProj) {
+      maxProj = proj;
+      endB = compPts[i];
     }
   }
 
-  const angleRad = 0.5 * Math.atan2(2 * mu11, mu20 - mu02);
-  const angleDeg = (angleRad * 180) / Math.PI;
+  const projRange = maxProj - minProj;
+  if (projRange < 18) return null;
+
+  // Measure thickness (perp spread) near End A vs End B to identify the cutting TIP
+  let perpSumSqA = 0;
+  let countA = 0;
+  let perpSumSqB = 0;
+  let countB = 0;
+
+  for (let i = 0; i < compPts.length; i += 1) {
+    const proj = (compPts[i].x - cx) * cosTheta + (compPts[i].y - cy) * sinTheta;
+    const perp = -(compPts[i].x - cx) * sinTheta + (compPts[i].y - cy) * cosTheta;
+    if (proj < minProj + 0.22 * projRange) {
+      perpSumSqA += perp * perp;
+      countA += 1;
+    }
+    if (proj > maxProj - 0.22 * projRange) {
+      perpSumSqB += perp * perp;
+      countB += 1;
+    }
+  }
+
+  const thickA = countA > 0 ? Math.sqrt(perpSumSqA / countA) : 999;
+  const thickB = countB > 0 ? Math.sqrt(perpSumSqB / countB) : 999;
+
+  // The tip ("el final") is the narrower / tapered end
+  const isEndATip = thickA <= thickB;
+  const tip = isEndATip ? endA : endB;
+  const base = isEndATip ? endB : endA;
 
   return {
-    x: cx,
-    y: cy,
-    tipX,
-    tipY,
+    x: tip.x,
+    y: tip.y,
+    tipX: tip.x,
+    tipY: tip.y,
+    baseX: base.x,
+    baseY: base.y,
+    centroidX: cx,
+    centroidY: cy,
+    angleDeg: (theta * 180) / Math.PI,
+    length: projRange,
+    tipThickness: Math.min(thickA, thickB),
+    pixelCount: compPts.length * step * step,
     minX,
-    minY,
     maxX,
+    minY,
     maxY,
-    width: maxX - minX,
-    height: maxY - minY,
-    pixelCount: count * step * step,
-    angleDeg,
-    confidence: Math.min(1, count / 60),
+    aspect: bestComp.aspect,
+    confidence: Math.min(1, compPts.length / 50),
   };
 }

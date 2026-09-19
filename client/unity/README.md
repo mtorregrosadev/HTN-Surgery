@@ -18,7 +18,10 @@ The generated scene registers the supplied high-resolution BodyParts3D skin and
 internal chest anatomy in a supine pose on an operating table. A fitted cloth
 drape covers only the pelvic genital region; the chest and limbs remain visible.
 The right anterolateral simulation patch is registered directly into the skin.
-The default camera
+SOFA remains authoritative for contact, deformation, force, and incision
+progress. Unity incrementally opens the corresponding render triangles and
+builds a bounded wound bed and side walls from those measurements; this visual
+mesh never calculates the canonical score or cut state. The default camera
 starts in a room orbit, then settles on that window. Right-drag orbits 360°
 horizontally, scroll zooms, middle mouse pans, `F` close-up, `O` room, `C`
 surgeon view.

@@ -15,7 +15,6 @@ namespace SurgePrep
         [SerializeField] private Material incisionMaterial;
         [SerializeField] private Material toolMaterial;
         [SerializeField] private Material pressureIndicatorMaterial;
-        [SerializeField] private Material bloodMaterial;
         [SerializeField] private LineRenderer incisionGuide;
 
         private readonly Dictionary<string, MeshView> meshes = new Dictionary<string, MeshView>();
@@ -24,11 +23,11 @@ namespace SurgePrep
         private Transform pressureIndicator;
         private Transform contactMarker;
         private Transform toolShadow;
-        private Transform bloodDecal;
         private GameObject scalpelVisual;
         private GameObject dissectorVisual;
         private GameObject tubeVisual;
         private Material pressureIndicatorInstance;
+        private IncrementalWoundRenderer woundRenderer;
 
         public SimulationSnapshotDto LatestSnapshot { get; private set; }
         public event Action<SimulationSnapshotDto> SnapshotReceived;
@@ -48,19 +47,23 @@ namespace SurgePrep
                 }
                 UpdateContactVisuals(snapshot);
             }
+            DeformableMeshDto skin = null;
             foreach (var state in snapshot.deformableMeshes ?? new DeformableMeshDto[0])
             {
+                if (state.objectId == "layer-skin") skin = state;
                 var view = GetOrCreateMesh(state);
-                view.SetTarget(state);
+                view.SetTarget(state, snapshot.tissue);
                 view.SetVisible(LayerVisible(state.objectId, snapshot));
             }
+            woundRenderer.SetTarget(snapshot.tissue, skin);
             UpdateIncisionGuide(snapshot);
             SnapshotReceived?.Invoke(snapshot);
         }
 
         private static bool LayerVisible(string objectId, SimulationSnapshotDto snapshot)
         {
-            if (objectId == "layer-skin" || objectId == "wound-channel") return true;
+            if (objectId == "layer-skin") return true;
+            if (objectId == "wound-channel") return false;
             var openedSkin = snapshot.tissue != null && snapshot.tissue.incisionProgress > 0.05f;
             if (objectId == "layer-subcutaneous") return openedSkin;
             var fatOpen = LayerOpened(snapshot, "subcutaneous");
@@ -91,6 +94,12 @@ namespace SurgePrep
                 toolTransform = tip.transform;
                 CreateToolVisuals(tip.transform);
             }
+            woundRenderer = gameObject.GetComponent<IncrementalWoundRenderer>();
+            if (woundRenderer == null)
+            {
+                woundRenderer = gameObject.AddComponent<IncrementalWoundRenderer>();
+            }
+            woundRenderer.Initialize(incisionMaterial);
         }
 
         private void CreateToolVisuals(Transform tip)
@@ -156,15 +165,6 @@ namespace SurgePrep
                 Vector3.zero, new Vector3(0.012f, 0.0004f, 0.012f));
             toolShadow = shadow.transform;
 
-            var blood = Primitive("Controlled blood decal", PrimitiveType.Quad, transform,
-                new Vector3(0f, -0.001f, 0f), Vector3.one * 0.018f);
-            blood.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            bloodDecal = blood.transform;
-            if (bloodMaterial != null)
-            {
-                blood.GetComponent<MeshRenderer>().sharedMaterial = bloodMaterial;
-            }
-            blood.SetActive(false);
         }
 
         private void UpdateToolVisual(string toolId)
@@ -231,11 +231,6 @@ namespace SurgePrep
                     ) + 0.0004f,
                     tip.z
                 );
-            }
-            if (bloodDecal != null && snapshot.tissue != null)
-            {
-                var show = snapshot.tissue.incisionProgress > 0.08f;
-                bloodDecal.gameObject.SetActive(show);
             }
         }
 
@@ -340,7 +335,7 @@ namespace SurgePrep
             var filter = child.AddComponent<MeshFilter>();
             var renderer = child.AddComponent<MeshRenderer>();
             renderer.sharedMaterial = MaterialFor(state.objectId);
-            var created = new MeshView(filter);
+            var created = new MeshView(filter, state.objectId);
             meshes.Add(state.objectId, created);
             return created;
         }
@@ -358,12 +353,15 @@ namespace SurgePrep
         {
             private readonly Mesh mesh;
             private readonly GameObject owner;
+            private readonly string objectId;
             private Vector3[] target = new Vector3[0];
             private int topologyRevision = -1;
+            private int incisionRevision = -1;
 
-            public MeshView(MeshFilter filter)
+            public MeshView(MeshFilter filter, string objectId)
             {
                 owner = filter.gameObject;
+                this.objectId = objectId;
                 mesh = new Mesh { name = "SOFA deformable surface" };
                 mesh.MarkDynamic();
                 filter.sharedMesh = mesh;
@@ -374,7 +372,7 @@ namespace SurgePrep
                 if (owner != null) owner.SetActive(visible);
             }
 
-            public void SetTarget(DeformableMeshDto state)
+            public void SetTarget(DeformableMeshDto state, TissueStateDto tissue)
             {
                 target = new Vector3[state.verticesMm.Length];
                 for (var index = 0; index < target.Length; index++)
@@ -385,11 +383,60 @@ namespace SurgePrep
                 {
                     mesh.vertices = target;
                 }
-                if (topologyRevision != state.topologyRevision)
+                var nextIncisionRevision = objectId == "layer-skin" && tissue != null
+                    ? Mathf.RoundToInt(tissue.incisionLengthMm * 10f)
+                        ^ (Mathf.RoundToInt(tissue.incisionProgress * 1000f) << 12)
+                    : 0;
+                if (
+                    topologyRevision != state.topologyRevision
+                    || incisionRevision != nextIncisionRevision
+                )
                 {
-                    mesh.triangles = CoordinateFrame.ReflectedTriangles(state.triangleIndices);
+                    mesh.triangles = CoordinateFrame.ReflectedTriangles(
+                        VisibleTriangles(state, tissue)
+                    );
                     topologyRevision = state.topologyRevision;
+                    incisionRevision = nextIncisionRevision;
                 }
+            }
+
+            private int[] VisibleTriangles(
+                DeformableMeshDto state, TissueStateDto tissue
+            )
+            {
+                if (
+                    objectId != "layer-skin"
+                    || tissue == null
+                    || tissue.incisionProgress <= 0.02f
+                    || tissue.incisionLengthMm <= 0.5f
+                )
+                {
+                    return state.triangleIndices;
+                }
+                var visible = new List<int>(state.triangleIndices.Length);
+                var halfLengthMm = Mathf.Clamp(
+                    tissue.incisionLengthMm * 0.5f, 1f, 18f
+                );
+                var halfWidthMm = Mathf.Lerp(
+                    0.9f, 3.45f, Mathf.Clamp01(tissue.incisionProgress)
+                );
+                for (var index = 0; index + 2 < state.triangleIndices.Length; index += 3)
+                {
+                    var a = state.verticesMm[state.triangleIndices[index]];
+                    var b = state.verticesMm[state.triangleIndices[index + 1]];
+                    var c = state.verticesMm[state.triangleIndices[index + 2]];
+                    var xMm = (a.x + b.x + c.x) / 3f;
+                    var zMm = (a.z + b.z + c.z) / 3f;
+                    var pathT = Mathf.InverseLerp(-18f, 18f, xMm);
+                    var pathZMm = -3f + 6f * Mathf.Sin(pathT * Mathf.PI);
+                    var insideWound = Mathf.Abs(xMm) <= halfLengthMm
+                        && Mathf.Abs(zMm - pathZMm) <= halfWidthMm;
+                    if (insideWound) continue;
+                    visible.Add(state.triangleIndices[index]);
+                    visible.Add(state.triangleIndices[index + 1]);
+                    visible.Add(state.triangleIndices[index + 2]);
+                }
+                return visible.ToArray();
             }
 
             public void Interpolate(float amount)

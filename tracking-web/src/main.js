@@ -644,10 +644,11 @@ function stopSource() {
   stream = null;
   if (demoTimer) clearInterval(demoTimer);
   demoTimer = null;
-  video.pause();
-  video.srcObject = null;
-  video.removeAttribute('src');
-  video.load();
+  try {
+    video.pause();
+    video.srcObject = null;
+    video.removeAttribute('src');
+  } catch (_) {}
   if (fileUrl) URL.revokeObjectURL(fileUrl);
   fileUrl = null;
   source = null;
@@ -754,12 +755,15 @@ async function startVideo() {
 function startProcessing(kind) {
   source = kind;
   resetMarkerSelection();
-  processingCanvas.width = Math.min(video.videoWidth, 480);
-  processingCanvas.height = Math.round(processingCanvas.width * video.videoHeight / video.videoWidth);
+  const vidW = (video.videoWidth && video.videoWidth > 0) ? video.videoWidth : 640;
+  const vidH = (video.videoHeight && video.videoHeight > 0) ? video.videoHeight : 480;
+  processingCanvas.width = Math.min(vidW, 480);
+  processingCanvas.height = Math.round(processingCanvas.width * vidH / vidW);
   overlay.width = processingCanvas.width;
   overlay.height = processingCanvas.height;
-  $('camera-stage').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+  $('camera-stage').style.aspectRatio = `${vidW} / ${vidH}`;
   $('empty-state').hidden = true;
+  $('empty-state-hint').style.display = 'none';
   $('camera-button').innerHTML = kind === 'camera' ? 'Stop camera <span>■</span>' : 'Start camera <span>↗</span>';
   $('video-button').textContent = kind === 'file' ? 'Stop video' : 'Open video file';
   $('demo-button').textContent = kind === 'demo' ? 'Stop demo' : 'Try synthetic demo';
@@ -770,33 +774,147 @@ function startProcessing(kind) {
   scheduleFrame();
 }
 
-async function startCamera() {
+let selectedCameraId = null;
+
+async function updateCameraList() {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+    const select = $('camera-select');
+    if (!select) return;
+
+    if (videoDevices.length > 1) {
+      select.innerHTML = '';
+      videoDevices.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Camera ${i + 1}`;
+        if (d.deviceId === selectedCameraId) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.style.display = 'inline-block';
+    } else {
+      select.style.display = 'none';
+    }
+  } catch (_) {}
+}
+
+$('camera-select')?.addEventListener('change', (e) => {
+  selectedCameraId = e.target.value;
+  if (source === 'camera') {
+    startCamera(selectedCameraId);
+  }
+});
+
+async function startCamera(preferredDeviceId = null) {
   $('camera-error').textContent = '';
-  if (!navigator.mediaDevices?.getUserMedia) {
-    $('camera-error').textContent = 'Camera access requires localhost or HTTPS.';
+  $('empty-state-hint').style.display = 'none';
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const isIp = window.location.hostname === '127.0.0.1';
+    const msg = isIp
+      ? 'Per obrir la càmera, ves a http://localhost:5173 (els navegadors bloquegen la càmera a adreces 127.0.0.1).'
+      : 'Aquest navegador no té suport per a getUserMedia (requereix localhost o HTTPS).';
+    $('camera-error').textContent = msg;
+    $('empty-state-hint').textContent = msg;
+    $('empty-state-hint').style.display = 'block';
+    setTracking('Càmera no disponible', msg);
     return;
   }
+
   try {
     stopSource();
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment', width: { ideal: 960 }, height: { ideal: 720 } } });
-    } catch (error) {
-      if (error.name !== 'NotFoundError') throw error;
-      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+
+    let mediaStream = null;
+    let lastError = null;
+
+    // Strategy 1: Explicit device if selected
+    // Strategy 2: Standard HD request without overconstraining facingMode
+    // Strategy 3: Basic generic { video: true } fallback
+    const targetId = preferredDeviceId || selectedCameraId;
+    const constraintOptions = [];
+    if (targetId) {
+      constraintOptions.push({ video: { deviceId: { exact: targetId } }, audio: false });
     }
+    constraintOptions.push({
+      video: {
+        width: { ideal: 1280, max: 1920 },
+        height: { ideal: 720, max: 1080 },
+      },
+      audio: false,
+    });
+    constraintOptions.push({ video: true, audio: false });
+
+    for (const constraints of constraintOptions) {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (mediaStream) break;
+      } catch (err) {
+        lastError = err;
+        // If user explicitly clicked Block, fail immediately without trying other constraints
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          throw err;
+        }
+      }
+    }
+
+    if (!mediaStream) {
+      throw lastError || new Error('No video stream available');
+    }
+
+    stream = mediaStream;
     video.srcObject = stream;
-    await video.play();
+    video.playsInline = true;
+    video.muted = true;
+
+    // Wait for video element to have valid metadata/dimensions
+    await new Promise((resolve) => {
+      if (video.videoWidth > 0 && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        resolve();
+      } else {
+        const onMeta = () => {
+          video.removeEventListener('loadedmetadata', onMeta);
+          resolve();
+        };
+        video.addEventListener('loadedmetadata', onMeta);
+        setTimeout(resolve, 800);
+      }
+    });
+
+    try {
+      await video.play();
+    } catch (playErr) {
+      console.warn('Initial play() interrupted, retrying in 100ms:', playErr);
+      await new Promise((r) => setTimeout(r, 100));
+      await video.play();
+    }
+
     startProcessing('camera');
-    stream.getVideoTracks()[0].addEventListener('ended', stopSource, { once: true });
+    updateCameraList();
+
+    const track = stream.getVideoTracks()?.[0];
+    if (track) {
+      track.addEventListener('ended', stopSource, { once: true });
+    }
   } catch (error) {
     stopSource();
-    $('camera-error').textContent = error.name === 'NotAllowedError'
-      ? 'Allow camera access in your browser.'
-      : error.name === 'NotFoundError'
-        ? 'No camera is available to this browser. Connect a webcam or open a recorded video.'
-        : `Could not open the camera: ${error.message}`;
-    setStatus(error.name === 'NotFoundError' ? 'NO CAMERA FOUND' : 'CAMERA ERROR');
-    setTracking(error.name === 'NotFoundError' ? 'No camera available' : 'Camera could not start', $('camera-error').textContent);
+    console.error('Camera startup error:', error);
+    let msg = `Error al obrir la càmera: ${error.name || ''} - ${error.message}`;
+    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+      msg = 'Permís de càmera denegat. Fes clic a la icona de càmera/cadenat a la barra del navegador per permetre l\'accés.';
+    } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+      msg = 'No s\'ha trobat cap càmera connectada a aquest equip.';
+    } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+      msg = 'La càmera està en ús per una altra app (FaceTime, Zoom, Teams, Photo Booth). Tanca-les i torna a provar.';
+    } else if (error.name === 'OverconstrainedError') {
+      msg = 'La configuració de la càmera no és suportada pel dispositiu.';
+    }
+    $('camera-error').textContent = msg;
+    $('empty-state-hint').textContent = msg;
+    $('empty-state-hint').style.display = 'block';
+    setStatus('CAMERA ERROR', 'searching');
+    setTracking('Error de càmera', msg);
   }
 }
 

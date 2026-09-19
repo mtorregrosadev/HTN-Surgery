@@ -29,11 +29,19 @@
             <div id="camera-stage" class="camera-stage">
               <video id="camera" autoplay muted playsinline></video>
               <canvas id="overlay" aria-label="Marker outline and path"></canvas>
-              <div id="empty-state" class="empty-state"><div class="reticle">⌗</div><strong>Ready to track</strong><span>Turn on the camera and show the marker to the lens.</span></div>
+              <div id="empty-state" class="empty-state"><div class="reticle">⌗</div><strong>Ready to track</strong><span>Turn on the camera and show the marker to the lens.</span><p id="empty-state-hint" style="color:#ff9e80; font-size:12px; margin-top:8px; display:none;"></p></div>
               <div class="camera-corner top-left"></div><div class="camera-corner top-right"></div><div class="camera-corner bottom-left"></div><div class="camera-corner bottom-right"></div>
               <span id="camera-label" class="camera-label">LIVE / OPENCV 5×5 250</span>
             </div>
-            <div class="camera-controls"><button id="camera-button" class="primary-button" type="button">Start camera <span>↗</span></button><button id="video-button" class="secondary-button" type="button">Open video file</button><input id="video-file" type="file" accept="video/*" hidden /><button id="demo-button" class="secondary-button" type="button">Try synthetic demo</button><button id="clear-button" class="secondary-button" type="button">Clear path</button><span id="camera-error" class="camera-error" role="alert"></span></div>
+            <div class="camera-controls">
+              <button id="camera-button" class="primary-button" type="button">Start camera <span>↗</span></button>
+              <select id="camera-select" title="Choose camera" style="display:none; height:43px; background:#102028; border:1px solid #526665; color:#e9efe8; padding:0 12px; font:11px 'DM Sans',sans-serif; cursor:pointer;"></select>
+              <button id="video-button" class="secondary-button" type="button">Open video file</button>
+              <input id="video-file" type="file" accept="video/*" hidden />
+              <button id="demo-button" class="secondary-button" type="button">Try synthetic demo</button>
+              <button id="clear-button" class="secondary-button" type="button">Clear path</button>
+              <span id="camera-error" class="camera-error" role="alert"></span>
+            </div>
           </div>
 
           <aside class="data-panel">

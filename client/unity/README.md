@@ -21,10 +21,11 @@ package added to a Unity project:
    its own demo session; no Terminal stream or pasted session ID is required.
 
 The scene presents a cropped high-resolution torso at an interactive surgical
-workstation inside a dark training lab. Use the **CHEST** and **ROOM** buttons
-for camera presets, right-drag to orbit, and scroll to zoom. The layer controls
-toggle skin, muscle, and bone; keys `1`, `2`, and `3` do the same. Press `Tab`
-to hide or restore the live guidance panel.
+workstation inside a dark training lab. Use the **CHEST**, **TARGET**, and
+**ROOM** buttons for camera presets, right-drag to orbit, and scroll to zoom.
+The layer controls toggle skin, muscle, and bone; keys `1`, `2`, and `3` do the
+same. Press `F` for the target close-up and `Tab` to hide or restore the live
+guidance panel.
 
 While the Game view is focused, use `W/A/S/D` or the arrow keys to move the
 training tool, Space to engage or release the training blade, `[` and `]` to

@@ -6,6 +6,7 @@ namespace SurgePrep
     {
         [SerializeField] private Camera sceneCamera;
         [SerializeField] private Transform chestFocus;
+        [SerializeField] private Transform targetFocus;
         [SerializeField] private GameObject skinLayer;
         [SerializeField] private GameObject muscleLayer;
         [SerializeField] private GameObject boneLayer;
@@ -39,6 +40,7 @@ namespace SurgePrep
             }
 
             if (ShowcaseInput.Pressed(KeyCode.C)) SetChestView();
+            if (ShowcaseInput.Pressed(KeyCode.F)) SetTargetView();
             if (ShowcaseInput.Pressed(KeyCode.O)) SetRoomView();
             if (ShowcaseInput.Pressed(KeyCode.Alpha1)) Toggle(skinLayer);
             if (ShowcaseInput.Pressed(KeyCode.Alpha2)) Toggle(muscleLayer);
@@ -67,7 +69,7 @@ namespace SurgePrep
         private void OnGUI()
         {
             EnsureStyles();
-            var width = 620f;
+            var width = 710f;
             var toolbar = new Rect((Screen.width - width) * 0.5f, Screen.height - 60f, width, 42f);
             DrawRect(toolbar, new Color(0.018f, 0.035f, 0.055f, 0.94f));
 
@@ -75,14 +77,16 @@ namespace SurgePrep
                 SetChestView();
             if (GUI.Button(new Rect(toolbar.x + 98f, toolbar.y + 7f, 82f, 28f), "ROOM", buttonStyle))
                 SetRoomView();
-            if (GUI.Button(new Rect(toolbar.x + 194f, toolbar.y + 7f, 82f, 28f), Label("SKIN", skinLayer), buttonStyle))
+            if (GUI.Button(new Rect(toolbar.x + 186f, toolbar.y + 7f, 82f, 28f), "TARGET", buttonStyle))
+                SetTargetView();
+            if (GUI.Button(new Rect(toolbar.x + 282f, toolbar.y + 7f, 82f, 28f), Label("SKIN", skinLayer), buttonStyle))
                 Toggle(skinLayer);
-            if (GUI.Button(new Rect(toolbar.x + 282f, toolbar.y + 7f, 92f, 28f), Label("MUSCLE", muscleLayer), buttonStyle))
+            if (GUI.Button(new Rect(toolbar.x + 370f, toolbar.y + 7f, 92f, 28f), Label("MUSCLE", muscleLayer), buttonStyle))
                 Toggle(muscleLayer);
-            if (GUI.Button(new Rect(toolbar.x + 380f, toolbar.y + 7f, 82f, 28f), Label("BONE", boneLayer), buttonStyle))
+            if (GUI.Button(new Rect(toolbar.x + 468f, toolbar.y + 7f, 82f, 28f), Label("BONE", boneLayer), buttonStyle))
                 Toggle(boneLayer);
             GUI.Label(
-                new Rect(toolbar.x + 474f, toolbar.y + 7f, 138f, 28f),
+                new Rect(toolbar.x + 562f, toolbar.y + 7f, 138f, 28f),
                 "Right-drag orbit\nScroll to zoom",
                 hintStyle
             );
@@ -102,6 +106,16 @@ namespace SurgePrep
             distance = 1.75f;
             yaw = 0f;
             pitch = 4f;
+        }
+
+        private void SetTargetView()
+        {
+            focus = targetFocus != null
+                ? targetFocus.position
+                : new Vector3(-0.105f, 0.005f, 0.225f);
+            distance = 0.28f;
+            yaw = 0f;
+            pitch = 5f;
         }
 
         private void ApplyCamera()

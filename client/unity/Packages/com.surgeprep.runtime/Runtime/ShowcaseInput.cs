@@ -74,6 +74,7 @@ namespace SurgePrep
                 case KeyCode.A: return Key.A;
                 case KeyCode.C: return Key.C;
                 case KeyCode.D: return Key.D;
+                case KeyCode.F: return Key.F;
                 case KeyCode.O: return Key.O;
                 case KeyCode.R: return Key.R;
                 case KeyCode.S: return Key.S;

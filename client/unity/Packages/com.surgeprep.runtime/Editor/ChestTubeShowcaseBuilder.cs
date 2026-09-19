@@ -151,7 +151,7 @@ namespace SurgePrep.Editor
                 "InteractiveTissue", new Color(0.42f, 0.025f, 0.045f, 0.82f)
             );
             var incision = EmissiveMaterial(
-                "IncisionChannel", new Color(0.7f, 0.015f, 0.025f)
+                "IncisionChannel", new Color(0.12f, 0.002f, 0.006f)
             );
             var pressure = TransparentMaterial(
                 "PressureIndicator", new Color(0.05f, 1f, 0.65f, 0.7f)
@@ -221,10 +221,13 @@ namespace SurgePrep.Editor
 
             var focusObject = new GameObject("Chest camera focus");
             focusObject.transform.position = new Vector3(-0.045f, -0.07f, 0.14f);
+            var targetFocusObject = new GameObject("Procedure target camera focus");
+            targetFocusObject.transform.position = new Vector3(-0.105f, 0.005f, 0.225f);
             var experienceObject = new GameObject("Interactive showcase controls");
             var experience = experienceObject.AddComponent<SurgePrep.ShowcaseExperienceController>();
             SetObject(experience, "sceneCamera", camera);
             SetObject(experience, "chestFocus", focusObject.transform);
+            SetObject(experience, "targetFocus", targetFocusObject.transform);
             SetObject(experience, "skinLayer", skinLayer.gameObject);
             SetObject(experience, "muscleLayer", muscleLayer.gameObject);
             SetObject(experience, "boneLayer", boneLayer.gameObject);

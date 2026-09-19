@@ -51,8 +51,12 @@ BodyParts3D meshes are never used as the FEM volume. Native SOFA v26.06 on the
 host Mac is required for the demo; see `docs/SHOWCASE_IMPLEMENTATION_HANDOFF.md`.
 The physical region is a mapped tetrahedral continuum with constraint contact,
 solver-derived reaction force, and a dynamically updated collision boundary.
-SofaCarving removes tetrahedra only when the correct stage tool is in the
-instructor-defined corridor and the solved force remains bounded.
+The collision pipeline follows SOFA's documented `MinProximityIntersection`
+pattern. Because that pipeline uses discrete rather than continuous collision
+detection, a surface-coupled proxy prevents tracked poses from tunnelling
+through the tissue between updates. SofaCarving removes tetrahedra only after
+the correct stage tool has physically opened enough of the
+instructor-defined corridor.
 
 Verify both the native scene and the complete running transport:
 

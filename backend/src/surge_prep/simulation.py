@@ -127,6 +127,8 @@ class SofaSessionState:
     previous_contact: bool
     initial_tetrahedra: int
     previous_tetrahedra: int
+    applied_tool_pose: list[float]
+    carving_layer: str | None
 
 
 class SofaSimulator(Simulator):
@@ -196,6 +198,8 @@ class SofaSimulator(Simulator):
                 previous_contact=False,
                 initial_tetrahedra=tetrahedra,
                 previous_tetrahedra=tetrahedra,
+                applied_tool_pose=[0.0, 18.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                carving_layer=None,
             )
             self._chests[session_id] = LayeredChestState()
 
@@ -206,30 +210,58 @@ class SofaSimulator(Simulator):
                 raise RuntimeError("SOFA session has not been initialized")
             root = state.root
             chest = self._chests[sample.session_id]
-            tool_pose = [[
+            target_pose = [
                 sample.position_mm.x, sample.position_mm.y, sample.position_mm.z,
                 sample.orientation.qx, sample.orientation.qy,
                 sample.orientation.qz, sample.orientation.qw,
-            ]]
-            self._apply_tool(root, sample, tool_pose)
-            root.carvingManager.active.value = False
-            for _ in range(self.network_substeps - 1):
-                self._simulation.animate(root, 0.01)
-            preliminary_reaction = self._reaction_force_n(root)
-            preliminary_contact = self._has_contact(root, preliminary_reaction)
-            root.carvingManager.active.value = self._should_carve(
-                sample, chest, preliminary_contact, preliminary_reaction
+            ]
+            radius = self._tool_radius_mm(sample.tool_id)
+            # SOFA's standard pipeline is discrete, not continuous collision
+            # detection. Keep a collision proxy coupled to the tracked target
+            # at the tissue boundary so a deeply pressed physical input cannot
+            # tunnel completely through the mapped surface between updates.
+            exposed_surface_y = 0.0
+            if target_pose[1] < exposed_surface_y + radius + 0.5:
+                target_pose[1] -= 0.5
+            target_pose[1] = max(
+                target_pose[1], exposed_surface_y - 0.9 * radius
             )
-            self._simulation.animate(root, 0.01)
+            previous_pose = state.applied_tool_pose
+            reactions: list[float] = []
+            contacts: list[bool] = []
+            deformations: list[float] = []
+            input_layer = chest.active_layer_for_depth(
+                max(0.0, radius - sample.position_mm.y)
+            )
+            root.carvingManager.active.value = (
+                state.carving_layer == "skin"
+                and state.carving_layer == input_layer
+                and self._tool_matches_layer(sample.tool_id, state.carving_layer)
+                and in_corridor(sample.position_mm.x, sample.position_mm.z)
+            )
+            for substep in range(self.network_substeps):
+                fraction = (substep + 1) / self.network_substeps
+                proxy_pose = [
+                    previous_pose[index]
+                    + (target_pose[index] - previous_pose[index]) * fraction
+                    for index in range(3)
+                ] + target_pose[3:]
+                self._apply_tool(root, sample, [proxy_pose])
+                self._simulation.animate(root, 0.01)
+                reaction_at_step = self._reaction_force_n(root)
+                contact_at_step = self._has_contact(root, reaction_at_step)
+                reactions.append(reaction_at_step)
+                contacts.append(contact_at_step)
+                deformations.append(self._maximum_deformation_mm(root))
             root.carvingManager.active.value = False
-            state.tick += self.network_substeps
-            reaction = self._reaction_force_n(root)
+            state.applied_tool_pose = target_pose
+            reaction = max(reactions, default=0.0)
             if not math.isfinite(reaction):
                 raise RuntimeError(
                     "SOFA contact solver became non-finite; stop the session and reset the tool."
                 )
-            contact = self._has_contact(root, reaction)
-            deformation = self._maximum_deformation_mm(root)
+            contact = any(contacts)
+            deformation = max(deformations, default=0.0)
             contact_point = self._nearest_surface_point(root, sample)
             penetration = (
                 max(0.0, self._tool_radius_mm(sample.tool_id) - sample.position_mm.y)
@@ -242,17 +274,43 @@ class SofaSimulator(Simulator):
                 events.append("contact-start")
             elif state.previous_contact and not contact:
                 events.append("contact-end")
+            active_layer = chest.current_layer()
             mode, chest_events, blocked = chest.update(sample, contact, penetration, reaction)
             events.extend(chest_events)
             if blocked:
                 events.append("protected-anatomy")
+            carving_step = 0
+            if (
+                mode == "cutting"
+                and active_layer == "skin"
+                and chest.layers[active_layer].opened
+                and self._should_carve(
+                    sample, chest, contact, reaction, active_layer
+                )
+            ):
+                state.carving_layer = active_layer
+                root.carvingManager.active.value = True
+                carving_pose = target_pose.copy()
+                carving_pose[1] -= 0.35
+                self._apply_tool(root, sample, [carving_pose])
+                self._simulation.animate(root, 0.01)
+                root.carvingManager.active.value = False
+                carving_step = 1
+            state.tick += self.network_substeps + carving_step
             tetrahedra = len(root.tissue.topology.tetrahedra.value)
             if tetrahedra < state.previous_tetrahedra:
                 events.append("topology-changed")
             state.previous_tetrahedra = tetrahedra
             state.previous_contact = contact
+            proxy_sample = sample.model_copy(
+                update={
+                    "position_mm": Vector3(
+                        x=target_pose[0], y=target_pose[1], z=target_pose[2]
+                    )
+                }
+            )
             return _snapshot(
-                sample, state.tick, self.step_ms, self.name, chest, events,
+                proxy_sample, state.tick, self.step_ms, self.name, chest, events,
                 contact, penetration, reaction, contact_point, deformation, mode,
                 deformable_meshes=self._deformable_meshes(state),
             )
@@ -298,19 +356,25 @@ class SofaSimulator(Simulator):
         chest: LayeredChestState,
         contact: bool,
         reaction_n: float,
+        layer_id: str | None = None,
     ) -> bool:
-        layer_tool = {
+        return (
+            contact
+            and SofaSimulator._tool_matches_layer(
+                sample.tool_id, layer_id or chest.current_layer()
+            )
+            and in_corridor(sample.position_mm.x, sample.position_mm.z)
+            and 0.001 <= reaction_n <= 3.0
+        )
+
+    @staticmethod
+    def _tool_matches_layer(tool_id: str, layer_id: str) -> bool:
+        return tool_id == {
             "skin": "scalpel",
             "subcutaneous": "blunt-dissector",
             "intercostal-muscle": "blunt-dissector",
             "pleura": "scalpel",
-        }
-        return (
-            contact
-            and sample.tool_id == layer_tool[chest.current_layer()]
-            and in_corridor(sample.position_mm.x, sample.position_mm.z)
-            and 0.12 <= reaction_n <= 1.5
-        )
+        }[layer_id]
 
     @staticmethod
     def _maximum_deformation_mm(root: Any) -> float:

@@ -46,18 +46,19 @@ def createScene(root, carving_active=False):
     root.addObject(
         "BlockGaussSeidelConstraintSolver",
         name="contactSolver",
-        maxIterations=500,
-        tolerance=1e-7,
+        maxIterations=1000,
+        tolerance=1e-6,
         computeConstraintForces=True,
     )
     root.addObject("CollisionPipeline", verbose=False)
     root.addObject("BruteForceBroadPhase")
     root.addObject("BVHNarrowPhase", name="narrowPhase")
     root.addObject(
-        "LocalMinDistance",
+        "MinProximityIntersection",
+        name="proximity",
         alarmDistance=2.5,
-        contactDistance=0.2,
-        useLMDFilters=False,
+        contactDistance=0.5,
+        useSurfaceNormals=False,
     )
     root.addObject(
         "CollisionResponse",

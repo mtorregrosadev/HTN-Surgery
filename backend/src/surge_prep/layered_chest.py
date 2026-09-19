@@ -18,9 +18,11 @@ CORRIDOR_MIN_X_MM = -18.0
 CORRIDOR_MAX_X_MM = 18.0
 CELL_WIDTH_MM = 3.0
 CORRIDOR_HALF_WIDTH_MM = 6.0
-MINIMUM_REACTION_N = 0.3
-MAXIMUM_REACTION_N = 1.2
-CUT_THRESHOLD_MM = 0.65
+# Calibrated against the native constraint response from the localized FEM
+# scene. Physical hardware force thresholds remain a separate calibration.
+MINIMUM_REACTION_N = 0.01
+MAXIMUM_REACTION_N = 3.0
+CUT_THRESHOLD_MM = 0.5
 REACTION_PER_MM = 0.38
 CONTACT_THRESHOLD_MM = 0.15
 RIB_HALF_WIDTH_MM = 4.0
@@ -209,7 +211,7 @@ class LayeredChestState:
         if reaction_n < MINIMUM_REACTION_N:
             return "low-force", events, blocked_by_rib
 
-        active = self._active_layer_for_depth(penetration_mm)
+        active = self.active_layer_for_depth(penetration_mm)
         required = LAYER_TOOLS[active]
         if sample.tool_id != required:
             self.layer_violations += 1
@@ -246,7 +248,7 @@ class LayeredChestState:
         mode = "cutting" if opening.cut_cells else "contact"
         return mode, events, blocked_by_rib
 
-    def _active_layer_for_depth(self, penetration_mm: float) -> str:
+    def active_layer_for_depth(self, penetration_mm: float) -> str:
         y_mm = SURFACE_Y_MM - penetration_mm
         for name in LAYER_ORDER:
             if y_mm >= LAYER_BOTTOMS_MM[name]:

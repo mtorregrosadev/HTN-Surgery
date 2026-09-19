@@ -236,11 +236,11 @@ namespace SurgePrep.Editor
             SetObject(renderer, "toolMaterial", tool);
             SetObject(renderer, "pressureIndicatorMaterial", pressure);
             SetObject(renderer, "bloodMaterial", blood);
+            SetObject(renderer, "incisionGuide", CreateTargetGuide(simulation.transform, target));
             SetObject(stream, "sceneRenderer", renderer);
             SetObject(manualDemo, "sceneRenderer", renderer);
             SetObject(hud, "sceneRenderer", renderer);
             SetObject(hud, "manualDemo", manualDemo);
-            CreateTargetGuide(simulation.transform, target);
             CreateInstrumentHome(room.transform, tool);
 
             var camera = CreateCamera();
@@ -398,7 +398,7 @@ namespace SurgePrep.Editor
             probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.OnAwake;
         }
 
-        private static void CreateTargetGuide(Transform parent, Material material)
+        private static LineRenderer CreateTargetGuide(Transform parent, Material material)
         {
             var guide = new GameObject("Curved incision guide - instructor review required");
             guide.transform.SetParent(parent, false);
@@ -425,6 +425,7 @@ namespace SurgePrep.Editor
                     )
                 );
             }
+            return line;
         }
 
         private static GameObject Cube(

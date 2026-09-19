@@ -16,6 +16,7 @@ namespace SurgePrep
         [SerializeField] private Material toolMaterial;
         [SerializeField] private Material pressureIndicatorMaterial;
         [SerializeField] private Material bloodMaterial;
+        [SerializeField] private LineRenderer incisionGuide;
 
         private readonly Dictionary<string, MeshView> meshes = new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
@@ -53,6 +54,7 @@ namespace SurgePrep
                 view.SetTarget(state);
                 view.SetVisible(LayerVisible(state.objectId, snapshot));
             }
+            UpdateIncisionGuide(snapshot);
             SnapshotReceived?.Invoke(snapshot);
         }
 
@@ -258,6 +260,62 @@ namespace SurgePrep
             foreach (var view in meshes.Values)
             {
                 view.Interpolate(amount);
+            }
+        }
+
+        private void UpdateIncisionGuide(SimulationSnapshotDto snapshot)
+        {
+            if (incisionGuide == null) return;
+            var incisionStarted = snapshot.tissue != null
+                && snapshot.tissue.incisionProgress > 0.03f;
+            incisionGuide.gameObject.SetActive(!incisionStarted);
+            if (incisionStarted) return;
+
+            DeformableMeshDto skin = null;
+            foreach (var state in snapshot.deformableMeshes ?? new DeformableMeshDto[0])
+            {
+                if (state != null && state.objectId == "layer-skin")
+                {
+                    skin = state;
+                    break;
+                }
+            }
+
+            incisionGuide.positionCount = 17;
+            for (var index = 0; index < incisionGuide.positionCount; index++)
+            {
+                var t = index / (float)(incisionGuide.positionCount - 1);
+                var xMm = Mathf.Lerp(-18f, 18f, t);
+                var zMm = -3f + 6f * Mathf.Sin(t * Mathf.PI);
+                var y = ChestSurfaceRegistration.OffsetMetres(xMm, zMm);
+                if (skin != null && skin.verticesMm != null && skin.verticesMm.Length > 0)
+                {
+                    Vector3Dto nearest = null;
+                    var nearestSquared = float.PositiveInfinity;
+                    foreach (var vertex in skin.verticesMm)
+                    {
+                        var dx = vertex.x - xMm;
+                        var dz = vertex.z - zMm;
+                        var squared = dx * dx + dz * dz;
+                        if (squared < nearestSquared)
+                        {
+                            nearestSquared = squared;
+                            nearest = vertex;
+                        }
+                    }
+                    if (nearest != null)
+                    {
+                        y += nearest.y * CoordinateFrame.MillimetresToMetres;
+                    }
+                }
+                incisionGuide.SetPosition(
+                    index,
+                    new Vector3(
+                        xMm * CoordinateFrame.MillimetresToMetres,
+                        y + 0.0008f,
+                        -zMm * CoordinateFrame.MillimetresToMetres
+                    )
+                );
             }
         }
 

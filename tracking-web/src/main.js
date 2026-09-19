@@ -90,24 +90,45 @@ let isProcessing = false;
 
 function drawPath(context, points, scaleX = 1, scaleY = 1) {
   if (points.length < 2) return;
+  context.save();
   context.beginPath();
-  let started = false;
-  for (let i = 0; i < points.length; i += 1) {
-    const pt = points[i];
-    const x = pt.x * scaleX;
-    const y = pt.y * scaleY;
-    if (!started || pt.continuous === false) {
-      context.moveTo(x, y);
-      started = true;
-    } else {
-      context.lineTo(x, y);
-    }
-  }
   context.strokeStyle = '#a7edba';
   context.lineWidth = 2.5;
   context.lineJoin = 'round';
   context.lineCap = 'round';
+
+  let segStart = 0;
+  for (let i = 0; i <= points.length; i += 1) {
+    const isEnd = i === points.length;
+    const isBreak = !isEnd && i > segStart && points[i].continuous === false;
+
+    if (isBreak || isEnd) {
+      const segLen = i - segStart;
+      if (segLen === 1) {
+        const p = points[segStart];
+        context.moveTo(p.x * scaleX, p.y * scaleY);
+        context.arc(p.x * scaleX, p.y * scaleY, 1.2, 0, Math.PI * 2);
+      } else if (segLen === 2) {
+        const p0 = points[segStart];
+        const p1 = points[segStart + 1];
+        context.moveTo(p0.x * scaleX, p0.y * scaleY);
+        context.lineTo(p1.x * scaleX, p1.y * scaleY);
+      } else if (segLen > 2) {
+        const p0 = points[segStart];
+        context.moveTo(p0.x * scaleX, p0.y * scaleY);
+        for (let j = segStart + 1; j < i - 1; j += 1) {
+          const xc = ((points[j].x + points[j + 1].x) / 2) * scaleX;
+          const yc = ((points[j].y + points[j + 1].y) / 2) * scaleY;
+          context.quadraticCurveTo(points[j].x * scaleX, points[j].y * scaleY, xc, yc);
+        }
+        const lastP = points[i - 1];
+        context.lineTo(lastP.x * scaleX, lastP.y * scaleY);
+      }
+      segStart = i;
+    }
+  }
   context.stroke();
+  context.restore();
 }
 
 function drawPreview() {
@@ -163,7 +184,34 @@ function processFrame(timestampMs) {
 
     const pose = markerPose2d(marker, timestampMs);
     if (pose) {
-      const isContinuous = missingFrames === 0 && previousPose !== null;
+      let isContinuous = true;
+      if (previousPose) {
+        const dt = timestampMs - previousPose.timestampMs;
+        const dist = Math.hypot(pose.x - previousPose.x, pose.y - previousPose.y);
+
+        // Autocomplete brief dropouts (under 500ms and natural hand movement distance):
+        if (missingFrames > 0) {
+          if (dt <= 500 && dist <= 200) {
+            // Smoothly bridge the gap by interpolating intermediate points
+            const steps = Math.min(4, Math.max(1, Math.floor(dist / 20)));
+            for (let s = 1; s < steps; s += 1) {
+              const t = s / steps;
+              path = appendPath(path, {
+                x: previousPose.x + (pose.x - previousPose.x) * t,
+                y: previousPose.y + (pose.y - previousPose.y) * t,
+                timestampMs: previousPose.timestampMs + dt * t,
+              }, true);
+            }
+            isContinuous = true;
+          } else {
+            // Real break: start new stroke
+            isContinuous = false;
+          }
+        }
+      } else {
+        isContinuous = false;
+      }
+
       missingFrames = 0;
       if (depthReference && depthReference.markerId !== pose.markerId) {
         beginDepthCalibration();

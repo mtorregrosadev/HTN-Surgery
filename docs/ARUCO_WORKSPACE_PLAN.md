@@ -6,16 +6,22 @@ Use only a blunt training prop and a reusable synthetic surface.
 
 ## Current implementation and findings
 
-- `tracking-web/src/tracking.js` detects marker corners and produces image-pixel
-  positions, a screen angle, and apparent marker size. Relative Z is a size ratio,
-  not measured depth: rotating a marker can look like moving it away. It has no
-  camera intrinsics, distortion correction, physical size, or tip calibration.
-- The browser experiment has no connection to Unity. Its camera access is an
-  isolated diagnostic experiment, not the integrated client hardware interface.
+- `tracking-web/src/tracking.js` detects ArUco marker corners and the purple
+  tool body, producing image-pixel positions and a screen angle. Marker size
+  provides relative Z as a size ratio, not measured depth: rotating a marker
+  can look like moving it away. Purple-only tracking has no depth estimate.
+  The demo has no camera intrinsics, distortion correction, physical size, or
+  tip calibration.
+- The browser camera demo sends image-derived poses to the Scalpel controller's
+  tracking stream. The controller merges them into Unity's session samples and
+  returns simulation snapshots to Unity; the browser does not connect to Unity
+  or the API directly. This is an uncalibrated demo input, not a validated
+  physical tracking interface.
 - `UnityManualDemoClient.CreateSession` submits an identity calibration and a
   synthetic `rmsErrorMm = 0.1`. `NextSample` sends keyboard-controlled millimetres
-  and an identity quaternion through the controller's `hardware-stream`. These
-  are demo assumptions, not measurements or physical calibration validation.
+  and a fixed incision-hold quaternion through the controller's `hardware-stream`.
+  The controller replaces that pose when browser optical tracking is active.
+  These are demo assumptions, not measurements or physical calibration validation.
 - `controller/src/scalpel_controller/app.py` forwards samples to the API and
   broadcasts returned snapshots. `ScalpelStreamClient` receives its
   `client-stream`; `SimulationSceneRenderer.SetTarget` renders the returned tool

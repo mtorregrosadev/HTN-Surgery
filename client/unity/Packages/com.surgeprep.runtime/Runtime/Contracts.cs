@@ -26,6 +26,19 @@ namespace SurgePrep
         public QuaternionDto orientation;
         public float forceN;
         public bool contact;
+        public Vector3Dto contactPointMm;
+        public Vector3Dto contactNormal;
+        public float reactionForceN;
+        public float penetrationDepthMm;
+    }
+
+    [Serializable]
+    public sealed class TissueLayerDto
+    {
+        public string layerId;
+        public bool opened;
+        public float openingProgress;
+        public float deformationMm;
     }
 
     [Serializable]
@@ -36,6 +49,8 @@ namespace SurgePrep
         public float incisionLengthMm;
         public float incisionDepthMm;
         public string interactionMode;
+        public string activeLayer;
+        public TissueLayerDto[] layers;
     }
 
     [Serializable]
@@ -54,6 +69,9 @@ namespace SurgePrep
         public string sessionId;
         public long tick;
         public long simulationTimeMs;
+        public string simulationBackend;
+        public string procedureStage;
+        public bool sessionDegraded;
         public ToolStateDto tool;
         public TissueStateDto tissue;
         public DeformableMeshDto[] deformableMeshes;
@@ -90,6 +108,21 @@ namespace SurgePrep
     }
 
     [Serializable]
+    public sealed class HealthDto
+    {
+        public string status;
+        public HealthApiDto api;
+    }
+
+    [Serializable]
+    public sealed class HealthApiDto
+    {
+        public string status;
+        public string persistence;
+        public string simulation;
+    }
+
+    [Serializable]
     public sealed class ToolSampleDto
     {
         public string contractVersion;
@@ -105,5 +138,16 @@ namespace SurgePrep
         public bool contact;
         public float quality;
         public bool sourceHealthy;
+        public string inputMode;
+        public bool forceMeasurementValid;
+    }
+
+    public static class ContractCompatibility
+    {
+        public static bool Accepts(string contractVersion)
+        {
+            return contractVersion == "1.0" || contractVersion == "1.1" ||
+                   string.IsNullOrEmpty(contractVersion);
+        }
     }
 }

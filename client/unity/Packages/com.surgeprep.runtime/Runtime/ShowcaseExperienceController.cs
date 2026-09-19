@@ -7,20 +7,29 @@ namespace SurgePrep
         [SerializeField] private Camera sceneCamera;
         [SerializeField] private Transform chestFocus;
         [SerializeField] private Transform targetFocus;
+        [SerializeField] private Transform roomFocus;
         [SerializeField] private GameObject skinLayer;
         [SerializeField] private GameObject muscleLayer;
         [SerializeField] private GameObject boneLayer;
         [SerializeField] private GameObject cartilageLayer;
         [SerializeField] private GameObject diaphragmLayer;
-        [SerializeField] private float orbitSensitivity = 3.0f;
+        [SerializeField] private float orbitSensitivity = 0.18f;
         [SerializeField] private float zoomSensitivity = 0.09f;
+        [SerializeField] private float panSensitivity = 0.0018f;
+        [SerializeField] private float presetSeconds = 0.85f;
+        [SerializeField] private float introOrbitSeconds = 3.2f;
 
         private Vector3 focus;
+        private Vector3 targetFocusPoint;
         private float distance;
+        private float targetDistance;
         private float yaw;
+        private float targetYaw;
         private float pitch;
-        private GUIStyle hintStyle;
-        private GUIStyle buttonStyle;
+        private float targetPitch;
+        private float introRemaining;
+        private bool cutaway;
+        private float presetBlend;
 
         private void Awake()
         {
@@ -28,8 +37,9 @@ namespace SurgePrep
             {
                 sceneCamera = Camera.main;
             }
-            SetChestView();
-            ApplyCamera();
+            SetRoomView(false);
+            introRemaining = introOrbitSeconds;
+            ApplyCamera(true);
         }
 
         private void Update()
@@ -39,136 +49,108 @@ namespace SurgePrep
                 return;
             }
 
-            if (ShowcaseInput.Pressed(KeyCode.C)) SetChestView();
-            if (ShowcaseInput.Pressed(KeyCode.F)) SetTargetView();
-            if (ShowcaseInput.Pressed(KeyCode.O)) SetRoomView();
-            if (ShowcaseInput.Pressed(KeyCode.Alpha1)) Toggle(skinLayer);
-            if (ShowcaseInput.Pressed(KeyCode.Alpha2)) Toggle(muscleLayer);
-            if (ShowcaseInput.Pressed(KeyCode.Alpha3)) Toggle(boneLayer);
+            if (introRemaining > 0f)
+            {
+                introRemaining -= Time.unscaledDeltaTime;
+                targetYaw += 42f * Time.unscaledDeltaTime;
+                if (introRemaining <= 0f)
+                {
+                    SetSurgeonView(false);
+                }
+            }
+            else
+            {
+                if (ShowcaseInput.Pressed(KeyCode.C)) SetSurgeonView(false);
+                if (ShowcaseInput.Pressed(KeyCode.F)) SetTargetView(false);
+                if (ShowcaseInput.Pressed(KeyCode.O)) SetRoomView(false);
+                if (ShowcaseInput.Pressed(KeyCode.K))
+                {
+                    cutaway = !cutaway;
+                    ApplyCutaway();
+                }
+            }
 
             var scroll = ShowcaseInput.MouseScroll();
             if (Mathf.Abs(scroll) > 0.001f)
             {
-                distance = Mathf.Clamp(distance - scroll * zoomSensitivity, 0.38f, 2.4f);
+                targetDistance = Mathf.Clamp(targetDistance - scroll * zoomSensitivity, 0.18f, 4.8f);
             }
             if (ShowcaseInput.RightMouseHeld())
             {
                 var delta = ShowcaseInput.MouseDelta();
-                yaw += delta.x * orbitSensitivity;
-                pitch -= delta.y * orbitSensitivity;
-                yaw = Mathf.Clamp(yaw, -78f, 78f);
-                pitch = Mathf.Clamp(pitch, -42f, 42f);
+                targetYaw += delta.x * orbitSensitivity;
+                targetPitch = Mathf.Clamp(targetPitch - delta.y * orbitSensitivity, 8f, 82f);
+            }
+            if (ShowcaseInput.MiddleMouseHeld())
+            {
+                var delta = ShowcaseInput.MouseDelta();
+                var right = sceneCamera.transform.right;
+                var up = Vector3.up;
+                targetFocusPoint -= (right * delta.x + up * delta.y) * panSensitivity * targetDistance;
             }
         }
 
         private void LateUpdate()
         {
-            ApplyCamera();
+            var amount = 1f - Mathf.Exp(-8f * Time.unscaledDeltaTime / Mathf.Max(0.12f, presetSeconds));
+            yaw = Mathf.LerpAngle(yaw, targetYaw, amount);
+            pitch = Mathf.Lerp(pitch, targetPitch, amount);
+            distance = Mathf.Lerp(distance, targetDistance, amount);
+            focus = Vector3.Lerp(focus, targetFocusPoint, amount);
+            ApplyCamera(false);
         }
 
-        private void OnGUI()
+        public void SetSurgeonView(bool snap)
         {
-            EnsureStyles();
-            var width = 710f;
-            var toolbar = new Rect((Screen.width - width) * 0.5f, Screen.height - 60f, width, 42f);
-            DrawRect(toolbar, new Color(0.018f, 0.035f, 0.055f, 0.94f));
-
-            if (GUI.Button(new Rect(toolbar.x + 10f, toolbar.y + 7f, 82f, 28f), "CHEST", buttonStyle))
-                SetChestView();
-            if (GUI.Button(new Rect(toolbar.x + 98f, toolbar.y + 7f, 82f, 28f), "ROOM", buttonStyle))
-                SetRoomView();
-            if (GUI.Button(new Rect(toolbar.x + 186f, toolbar.y + 7f, 82f, 28f), "TARGET", buttonStyle))
-                SetTargetView();
-            if (GUI.Button(new Rect(toolbar.x + 282f, toolbar.y + 7f, 82f, 28f), Label("SKIN", skinLayer), buttonStyle))
-                Toggle(skinLayer);
-            if (GUI.Button(new Rect(toolbar.x + 370f, toolbar.y + 7f, 92f, 28f), Label("MUSCLE", muscleLayer), buttonStyle))
-                Toggle(muscleLayer);
-            if (GUI.Button(new Rect(toolbar.x + 468f, toolbar.y + 7f, 82f, 28f), Label("BONE", boneLayer), buttonStyle))
-                Toggle(boneLayer);
-            GUI.Label(
-                new Rect(toolbar.x + 562f, toolbar.y + 7f, 138f, 28f),
-                "Right-drag orbit\nScroll to zoom",
-                hintStyle
-            );
+            targetFocusPoint = chestFocus != null ? chestFocus.position : new Vector3(0.12f, 1.02f, 0.04f);
+            targetDistance = 0.72f;
+            targetYaw = 18f;
+            targetPitch = 52f;
+            if (snap) Snap();
         }
 
-        private void SetChestView()
+        public void SetRoomView(bool snap)
         {
-            focus = chestFocus != null ? chestFocus.position : new Vector3(0f, -0.07f, 0.15f);
-            distance = 0.64f;
-            yaw = 0f;
-            pitch = 2f;
+            targetFocusPoint = roomFocus != null ? roomFocus.position : new Vector3(0f, 0.95f, 0f);
+            targetDistance = 3.4f;
+            targetYaw = 28f;
+            targetPitch = 28f;
+            if (snap) Snap();
         }
 
-        private void SetRoomView()
+        public void SetTargetView(bool snap)
         {
-            focus = new Vector3(0f, -0.18f, 0.05f);
-            distance = 1.75f;
-            yaw = 0f;
-            pitch = 4f;
-        }
-
-        private void SetTargetView()
-        {
-            focus = targetFocus != null
+            targetFocusPoint = targetFocus != null
                 ? targetFocus.position
-                : new Vector3(-0.105f, 0.005f, 0.225f);
-            distance = 0.28f;
-            yaw = 0f;
-            pitch = 5f;
+                : new Vector3(0.12f, 1.03f, 0.04f);
+            targetDistance = 0.26f;
+            targetYaw = 8f;
+            targetPitch = 62f;
+            if (snap) Snap();
         }
 
-        private void ApplyCamera()
+        private void Snap()
         {
-            if (sceneCamera == null)
-            {
-                return;
-            }
+            focus = targetFocusPoint;
+            distance = targetDistance;
+            yaw = targetYaw;
+            pitch = targetPitch;
+        }
+
+        private void ApplyCamera(bool immediate)
+        {
+            if (immediate) Snap();
+            if (sceneCamera == null) return;
             var orbit = Quaternion.Euler(pitch, yaw, 0f);
-            sceneCamera.transform.position = focus + orbit * Vector3.forward * distance;
+            sceneCamera.transform.position = focus + orbit * (Vector3.back * distance);
             sceneCamera.transform.LookAt(focus, Vector3.up);
         }
 
-        private static void Toggle(GameObject layer)
+        private void ApplyCutaway()
         {
-            if (layer != null)
-            {
-                layer.SetActive(!layer.activeSelf);
-            }
-        }
-
-        private static string Label(string name, GameObject layer)
-        {
-            return $"{name} {(layer != null && layer.activeSelf ? "ON" : "OFF")}";
-        }
-
-        private void EnsureStyles()
-        {
-            if (buttonStyle != null)
-            {
-                return;
-            }
-            buttonStyle = new GUIStyle(GUI.skin.button)
-            {
-                fontSize = 11,
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = Color.white },
-                hover = { textColor = new Color(0.1f, 0.95f, 0.82f) }
-            };
-            hintStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 10,
-                alignment = TextAnchor.MiddleLeft,
-                normal = { textColor = new Color(0.65f, 0.76f, 0.82f) }
-            };
-        }
-
-        private static void DrawRect(Rect rectangle, Color colour)
-        {
-            var previous = GUI.color;
-            GUI.color = colour;
-            GUI.DrawTexture(rectangle, Texture2D.whiteTexture);
-            GUI.color = previous;
+            if (skinLayer != null) skinLayer.SetActive(!cutaway);
+            if (muscleLayer != null) muscleLayer.SetActive(true);
+            if (boneLayer != null) boneLayer.SetActive(true);
         }
     }
 }

@@ -31,12 +31,12 @@ namespace SurgePrep
 #endif
         }
 
-        public static bool RightMouseHeld()
+        public static bool MiddleMouseHeld()
         {
 #if ENABLE_INPUT_SYSTEM
-            return Mouse.current != null && Mouse.current.rightButton.isPressed;
+            return Mouse.current != null && Mouse.current.middleButton.isPressed;
 #elif ENABLE_LEGACY_INPUT_MANAGER
-            return Input.GetMouseButton(1);
+            return Input.GetMouseButton(2);
 #else
             return false;
 #endif
@@ -76,6 +76,9 @@ namespace SurgePrep
                 case KeyCode.D: return Key.D;
                 case KeyCode.F: return Key.F;
                 case KeyCode.O: return Key.O;
+                case KeyCode.E: return Key.E;
+                case KeyCode.Q: return Key.Q;
+                case KeyCode.K: return Key.K;
                 case KeyCode.R: return Key.R;
                 case KeyCode.S: return Key.S;
                 case KeyCode.V: return Key.V;

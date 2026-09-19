@@ -9,13 +9,20 @@ and must not connect directly to this service, MongoDB, or SOFA.
 From the repository root:
 
 ```bash
-docker compose up --build
+docker compose --profile memory-dev up --build
 ```
 
 OpenAPI documentation is then available at `http://localhost:8000/docs`.
 The container defaults to the deterministic memory simulator so teammates can
 integrate without a native SOFA installation; MongoDB remains real and stores
-calibrations, sessions, normalized samples, and simulation snapshots.
+calibrations, sessions, normalized samples, and simulation snapshots. Do not
+present that memory path as SOFA physics. The showcase uses host SOFA:
+
+```bash
+docker compose up -d mongodb
+scripts/check-native-sofa.py
+scripts/start-showcase.sh
+```
 
 ## Run locally without infrastructure
 

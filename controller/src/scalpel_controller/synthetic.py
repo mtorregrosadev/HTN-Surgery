@@ -22,12 +22,17 @@ IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
 class ManualToolState:
     def __init__(self) -> None:
         self.x_mm = 0.0
+        self.y_mm = 12.0
         self.z_mm = 0.0
-        self.force_n = 0.0
+        self.tool_id = "scalpel"
 
     def apply(self, key: str) -> bool:
         if key == "q":
-            return False
+            self.y_mm = min(24.0, self.y_mm + 1.0)
+            return True
+        if key == "e":
+            self.y_mm = max(-16.0, self.y_mm - 1.0)
+            return True
         if key == "a":
             self.x_mm += 2.0
         elif key == "d":
@@ -36,16 +41,18 @@ class ManualToolState:
             self.z_mm += 2.0
         elif key == "s":
             self.z_mm -= 2.0
-        elif key == " ":
-            self.force_n = 0.0 if self.force_n > 0.0 else 0.75
-        elif key == "[":
-            self.force_n = max(0.0, self.force_n - 0.1)
-        elif key == "]":
-            self.force_n = min(1.5, self.force_n + 0.1)
+        elif key == "1":
+            self.tool_id = "scalpel"
+        elif key == "2":
+            self.tool_id = "blunt-dissector"
+        elif key == "3":
+            self.tool_id = "chest-tube"
         elif key == "r":
             self.x_mm = 0.0
+            self.y_mm = 12.0
             self.z_mm = 0.0
-            self.force_n = 0.0
+        elif key == "x":
+            return False
         return True
 
 
@@ -91,7 +98,7 @@ async def run(controller_url: str, sample_limit: int, manual: bool = False) -> N
             json={
                 "exerciseId": "chest-tube-access-demo",
                 "calibrationId": calibration["calibrationId"],
-                "toolId": "blunt-stylus-1",
+                "toolId": "scalpel",
                 "deviceId": "synthetic-hardware",
             },
         )
@@ -100,11 +107,10 @@ async def run(controller_url: str, sample_limit: int, manual: bool = False) -> N
 
     session_id = session["sessionId"]
     print(f"Session ID: {session_id}", flush=True)
-    print("Enter this session ID in the Unity ScalpelStreamClient.", flush=True)
     if manual:
         print(
-            "Controls: W/A/S/D move, Space contacts/releases, [ and ] change force, "
-            "R resets, Q finishes.",
+            "Controls: W/A/S/D move, Q/E raise/lower, 1 scalpel, 2 dissector, 3 tube, "
+            "R resets, X finishes. Contact comes from SOFA, not Space.",
             flush=True,
         )
     websocket_base = controller_url.replace("http://", "ws://").replace("https://", "wss://")
@@ -124,42 +130,36 @@ async def run(controller_url: str, sample_limit: int, manual: bool = False) -> N
                         break
                     if manual:
                         x_mm = manual_state.x_mm
+                        y_mm = manual_state.y_mm
                         z_mm = manual_state.z_mm
-                        force_n = manual_state.force_n
+                        tool_id = manual_state.tool_id
                     else:
                         phase = elapsed % 20.0
+                        tool_id = "scalpel"
                         if phase < 5.0:
-                            approach = 1.0 - phase / 5.0
-                            radius_mm = 30.0 * approach
-                            force_n = 0.0
+                            y_mm = 12.0 - phase
+                            x_mm = math.sin(elapsed * 0.8) * 8.0
+                            z_mm = math.cos(elapsed * 0.8) * 4.0
                         else:
-                            radius_mm = 2.0 + math.sin(elapsed * 1.7) * 1.2
-                            force_n = round(0.75 + math.sin(elapsed * 2.3) * 0.16, 3)
-                        x_mm = math.sin(elapsed * 0.8) * radius_mm
-                        z_mm = math.cos(elapsed * 0.8) * radius_mm
+                            y_mm = -1.2
+                            x_mm = math.sin(elapsed * 0.4) * 12.0
+                            z_mm = 0.0
                     sample = {
-                        "contractVersion": "1.0",
+                        "contractVersion": "1.1",
                         "sessionId": session_id,
-                        "toolId": "blunt-stylus-1",
+                        "toolId": tool_id,
                         "deviceId": "synthetic-hardware",
                         "calibrationId": calibration["calibrationId"],
                         "sequence": sequence,
                         "timestampMs": int(elapsed * 1000),
-                        "positionMm": {
-                            "x": x_mm,
-                            "y": 16.0 - force_n * 2.0,
-                            "z": z_mm,
-                        },
-                        "orientation": {
-                            "qx": 0.461749,
-                            "qy": 0,
-                            "qz": 0,
-                            "qw": 0.887011,
-                        },
-                        "forceN": force_n,
-                        "contact": force_n > 0.08,
+                        "positionMm": {"x": x_mm, "y": y_mm, "z": z_mm},
+                        "orientation": {"qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0},
+                        "forceN": 0.0,
+                        "contact": False,
                         "quality": 1.0,
                         "sourceHealthy": True,
+                        "inputMode": "pose-only",
+                        "forceMeasurementValid": False,
                     }
                     await socket.send(json.dumps(sample))
                     await socket.recv()

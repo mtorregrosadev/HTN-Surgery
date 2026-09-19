@@ -37,6 +37,135 @@ const scalpelSmoother = new SignalSmoother({ minAlpha: 0.35, maxAlpha: 0.85, spe
 let lastScalpelTip = null;
 const TRACKING_HOLD_MS = 450;
 
+let controllerWs = null;
+let latestHardware = null;
+
+function connectController() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname || '127.0.0.1';
+  const url = `${protocol}//${host}:8100/v1/tracking/stream`;
+
+  try {
+    controllerWs = new WebSocket(url);
+
+    controllerWs.onopen = () => {
+      const pill = $('controller-pill');
+      if (pill) {
+        pill.textContent = 'CONTROLLER: CONNECTED (:8100)';
+        pill.className = 'controller-pill connected';
+      }
+    };
+
+    controllerWs.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.hardware) {
+          latestHardware = data.hardware;
+          updateHardwareCard(data.hardware);
+        }
+      } catch (_) {}
+    };
+
+    controllerWs.onclose = () => {
+      const pill = $('controller-pill');
+      if (pill) {
+        pill.textContent = 'CONTROLLER: RECONNECTING…';
+        pill.className = 'controller-pill disconnected';
+      }
+      setTimeout(connectController, 2000);
+    };
+
+    controllerWs.onerror = () => {
+      try { controllerWs.close(); } catch (_) {}
+    };
+  } catch (err) {
+    setTimeout(connectController, 3000);
+  }
+}
+
+function updateHardwareCard(hw) {
+  const badge = $('hardware-status-badge');
+  const label = $('hardware-force-label');
+  const fill = $('hardware-force-fill');
+  if (!badge || !label || !fill) return;
+
+  if (hw && hw.connected) {
+    badge.textContent = `${hw.port || 'USB'} · ${hw.sampleRateHz || 0} Hz`;
+    badge.style.color = '#c4ffbd';
+    const force = hw.forceN || 0;
+    const isContact = hw.contact || false;
+    label.textContent = `${force.toFixed(2)} N ${isContact ? '(CONTACT)' : '(IDLE)'}`;
+    label.className = isContact ? 'contact' : '';
+    const pct = Math.min(100, Math.max(0, (force / 8.0) * 100));
+    fill.style.width = `${pct}%`;
+  } else {
+    badge.textContent = 'DISCONNECTED';
+    badge.style.color = '#91a3a9';
+    label.textContent = '0.00 N (NO SENSOR)';
+    label.className = '';
+    fill.style.width = '0%';
+  }
+}
+
+function sendTrackingPose(payload) {
+  if (controllerWs && controllerWs.readyState === WebSocket.OPEN) {
+    try {
+      controllerWs.send(JSON.stringify(payload));
+    } catch (_) {}
+  }
+}
+
+function dispatchTrackingUpdate(targetX, targetY, angleDeg, zPercent, source, markerId, timestampMs) {
+  const w = processingCanvas.width || 480;
+  const h = processingCanvas.height || 360;
+
+  // Surgical workspace lateral X (-150 to +150 mm)
+  const xMm = Math.max(-150, Math.min(150, (targetX - w / 2) * (300 / w)));
+  // Surgical workspace Z body axis (-220 to +220 mm)
+  const zMm = Math.max(-220, Math.min(220, (targetY - h / 2) * (380 / h)));
+
+  // Surgical height Y (hovering at +12mm down to -10mm penetration)
+  let yMm = 12.0;
+  if (zPercent != null) {
+    yMm = Math.max(-15, Math.min(30, 8.0 - (zPercent * 0.25)));
+  }
+  if (latestHardware && latestHardware.contact) {
+    const f = latestHardware.forceN || 0.5;
+    yMm = -Math.min(8.0, Math.max(0.5, f * 0.9));
+  }
+
+  // Incision hold orientation combined with tool yaw
+  const rad = (angleDeg * Math.PI) / 180;
+  const halfYaw = rad / 2;
+  const sy = Math.sin(halfYaw);
+  const cy = Math.cos(halfYaw);
+  const baseQx = 0.34202014;
+  const baseQw = 0.93969262;
+  const qx = baseQx * cy;
+  const qy = baseQw * sy;
+  const qz = -baseQx * sy;
+  const qw = baseQw * cy;
+
+  sendTrackingPose({
+    type: 'pose',
+    positionMm: { x: xMm, y: yMm, z: zMm },
+    orientation: { qx, qy, qz, qw },
+    angleDeg,
+    source,
+    markerId,
+    confidence: 1.0,
+    timestampMs: Math.round(timestampMs),
+  });
+
+  if ($('position-x-mm')) $('position-x-mm').textContent = `(${xMm >= 0 ? '+' : ''}${Math.round(xMm)} mm)`;
+  if ($('position-z-mm')) $('position-z-mm').textContent = `(${zMm >= 0 ? '+' : ''}${Math.round(zMm)} mm)`;
+  if ($('surgical-y-val')) $('surgical-y-val').textContent = `${yMm.toFixed(1)}`;
+  if ($('stream-substatus')) {
+    $('stream-substatus').textContent = 'STREAMING';
+    $('stream-substatus').className = 'marker-active';
+  }
+}
+
 function markerDescription() {
   return familyDetails[dictionaryName].description;
 }
@@ -53,6 +182,13 @@ function setTracking(message, hint) {
 
 function clearMeasurements() {
   for (const id of ['position-x', 'position-y', 'position-z', 'marker-size', 'angle', 'speed', 'marker-id']) $(id).textContent = '—';
+  if ($('position-x-mm')) $('position-x-mm').textContent = '(0 mm)';
+  if ($('position-z-mm')) $('position-z-mm').textContent = '(0 mm)';
+  if ($('surgical-y-val')) $('surgical-y-val').textContent = '12.0';
+  if ($('stream-substatus')) {
+    $('stream-substatus').textContent = 'IDLE';
+    $('stream-substatus').className = '';
+  }
 }
 
 function setCalibrationStatus(label, ready = false) {
@@ -374,6 +510,16 @@ function processFrame(timestampMs) {
       $('angle').textContent = `${Math.round(pose.angleDeg)}°`;
       $('speed').textContent = speed == null ? '—' : Math.round(speed);
       $('marker-id').textContent = `#${pose.markerId}`;
+
+      dispatchTrackingUpdate(
+        scalpel ? scalpel.tipX : pose.x,
+        scalpel ? scalpel.tipY : pose.y,
+        scalpel ? scalpel.angleDeg : pose.angleDeg,
+        zPercent,
+        scalpel ? 'dual' : 'camera-aruco',
+        pose.markerId,
+        timestampMs,
+      );
     } else if (scalpel) {
       // Scalpel tracked without QR marker! Keep tracking alive
       lastDetectionMs = timestampMs;
@@ -417,6 +563,16 @@ function processFrame(timestampMs) {
       $('angle').textContent = `${Math.round(scalpel.angleDeg)}°`;
       $('speed').textContent = speed == null ? '—' : Math.round(speed);
       if (depthReference) setCalibrationStatus('Z READY', true);
+
+      dispatchTrackingUpdate(
+        scalpelPose.x,
+        scalpelPose.y,
+        scalpelPose.angleDeg,
+        null,
+        'purple-scalpel',
+        null,
+        timestampMs,
+      );
     } else {
       // Neither detected
       missingFrames += 1;
@@ -709,3 +865,4 @@ $('download-png-button').addEventListener('click', async () => {
 });
 window.addEventListener('pagehide', stopSource);
 drawPreview();
+connectController();

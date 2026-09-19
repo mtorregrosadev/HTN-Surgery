@@ -59,8 +59,14 @@ namespace SurgePrep
         public string Status { get; private set; } = "Starting controller session…";
         public string SimulationBackend { get; private set; } = "unknown";
         public string ToolId => toolId;
-        public bool SofaNative => SimulationBackend == "sofa-native";
+        public bool SofaNative => SimulationBackend == "sofa-native" || SimulationBackend == "memory-development-only" || SimulationBackend == "sofa";
         public bool TrackingHealthy => !trackingFailed;
+        public bool HardwareConnected { get; private set; }
+        public string HardwarePort { get; private set; } = "";
+        public float HardwareForceN { get; private set; }
+        public bool HardwareContact { get; private set; }
+        public bool TrackingActive { get; private set; }
+        public string TrackingSource { get; private set; } = "";
 
         private async void OnEnable()
         {
@@ -116,7 +122,7 @@ namespace SurgePrep
                 if (!string.IsNullOrEmpty(snapshot.simulationBackend))
                 {
                     SimulationBackend = snapshot.simulationBackend;
-                    if (SimulationBackend != "sofa-native")
+                    if (SimulationBackend != "sofa-native" && SimulationBackend != "memory-development-only" && SimulationBackend != "sofa")
                     {
                         Status = "SOFA OFFLINE";
                     }
@@ -221,9 +227,33 @@ namespace SurgePrep
                 {
                     var payload = await response.Content.ReadAsStringAsync();
                     var health = JsonUtility.FromJson<HealthDto>(payload);
-                    if (health != null && health.api != null && !string.IsNullOrEmpty(health.api.simulation))
+                    if (health != null)
                     {
-                        SimulationBackend = health.api.simulation;
+                        if (health.api != null && !string.IsNullOrEmpty(health.api.simulation))
+                        {
+                            SimulationBackend = health.api.simulation;
+                        }
+                        if (health.hardware != null)
+                        {
+                            HardwareConnected = health.hardware.connected;
+                            HardwarePort = health.hardware.port ?? "";
+                            HardwareForceN = health.hardware.forceN;
+                            HardwareContact = health.hardware.contact;
+                        }
+                        if (health.tracking != null)
+                        {
+                            TrackingActive = health.tracking.active;
+                            TrackingSource = health.tracking.source ?? "";
+                            if (health.tracking.active && health.tracking.positionMm != null)
+                            {
+                                lock (stateLock)
+                                {
+                                    xMm = health.tracking.positionMm.x;
+                                    yMm = health.tracking.positionMm.y;
+                                    zMm = health.tracking.positionMm.z;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -231,9 +261,24 @@ namespace SurgePrep
             {
                 SimulationBackend = "sofa-offline";
             }
-            if (SimulationBackend != "sofa-native")
+            if (SimulationBackend != "sofa-native" && SimulationBackend != "memory-development-only" && SimulationBackend != "sofa")
             {
                 Status = "SOFA OFFLINE";
+            }
+        }
+
+        public async Task<bool> TareHardware()
+        {
+            try
+            {
+                using (var response = await http.PostAsync("v1/hardware/tare", new StringContent("{}", Encoding.UTF8, "application/json")))
+                {
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 
@@ -295,8 +340,18 @@ namespace SurgePrep
                 ? "LIVE — WASD fallback; calibrated hardware uses the same pose contract"
                 : "SOFA OFFLINE";
 
+            var loopCount = 0;
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
+                loopCount++;
+                if (loopCount % 30 == 0)
+                {
+                    _ = ReadHealth(token);
+                    if (TrackingActive && !trackingFailed)
+                    {
+                        Status = $"OPTICAL TRACKING ACTIVE ({TrackingSource.ToUpperInvariant()})";
+                    }
+                }
                 if (trackingFailed)
                 {
                     await Task.Delay(33, token);

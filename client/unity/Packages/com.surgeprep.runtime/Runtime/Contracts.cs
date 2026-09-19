@@ -114,6 +114,37 @@ namespace SurgePrep
     {
         public string status;
         public HealthApiDto api;
+        public HealthHardwareDto hardware;
+        public HealthTrackingDto tracking;
+    }
+
+    [Serializable]
+    public sealed class HealthTrackingDto
+    {
+        public bool active;
+        public Vector3Dto positionMm;
+        public QuaternionDto orientation;
+        public float angleDeg;
+        public string source;
+        public int markerId;
+        public float confidence;
+        public int sequence;
+        public int timestampMs;
+        public float sampleRateHz;
+    }
+
+    [Serializable]
+    public sealed class HealthHardwareDto
+    {
+        public bool connected;
+        public string port;
+        public string deviceId;
+        public float forceN;
+        public bool contact;
+        public int rawAdc;
+        public int sequence;
+        public int timestampMs;
+        public float sampleRateHz;
     }
 
     [Serializable]

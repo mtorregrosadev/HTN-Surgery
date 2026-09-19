@@ -11,6 +11,7 @@
       <header class="topbar">
         <a class="brand" href="#" aria-label="Surge Prep, home"><span class="brand-mark">✳</span><span>SURGE <b>PREP</b></span></a>
         <span class="topbar-label">LAB / VISUAL TRACKING</span>
+        <span id="controller-pill" class="controller-pill disconnected">CONTROLLER: CONNECTING…</span>
         <span class="prototype-tag">TRAINING PROTOTYPE</span>
       </header>
 
@@ -44,9 +45,25 @@
               <div class="dual-signal-row">
                 <span>QR / ARUCO: <b id="marker-substatus">—</b></span>
                 <span>SCALPEL LILA: <b id="scalpel-substatus">—</b></span>
+                <span>STREAM: <b id="stream-substatus">IDLE</b></span>
               </div>
             </div>
-            <div class="metric-grid"><div class="metric"><span class="micro-label">POSITION X</span><strong id="position-x">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">POSITION Y</span><strong id="position-y">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">RELATIVE Z</span><strong id="position-z">—</strong><small>% of starting distance; + away</small></div><div class="metric"><span class="micro-label">MARKER SIZE</span><strong id="marker-size">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">ORIENTATION</span><strong id="angle">—</strong><small>degrees on screen</small></div><div class="metric"><span class="micro-label">SPEED</span><strong id="speed">—</strong><small>px / second</small></div></div>
+            <div class="metric-grid">
+              <div class="metric"><span class="micro-label">POSITION X</span><strong id="position-x">—</strong><small id="position-x-mm">px in image (0.0 mm)</small></div>
+              <div class="metric"><span class="micro-label">POSITION Z (AXIS)</span><strong id="position-y">—</strong><small id="position-z-mm">px in image (0.0 mm)</small></div>
+              <div class="metric"><span class="micro-label">HEIGHT Y</span><strong id="surgical-y-val">12.0</strong><small>mm (+hover / -tissue)</small></div>
+              <div class="metric"><span class="micro-label">RELATIVE Z</span><strong id="position-z">—</strong><small>% of starting distance; + away</small></div>
+              <div class="metric"><span class="micro-label">ORIENTATION</span><strong id="angle">—</strong><small>degrees on screen</small></div>
+              <div class="metric"><span class="micro-label">SPEED</span><strong id="speed">—</strong><small>px / second</small></div>
+            </div>
+            <div class="hardware-card">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span class="micro-label">PHYSICAL FSR (ESP32)</span>
+                <span id="hardware-status-badge" style="font-family:'DM Mono',monospace; font-size:10px; color:#91a3a9;">DISCONNECTED</span>
+              </div>
+              <strong id="hardware-force-label">0.00 N (IDLE)</strong>
+              <div class="force-bar"><div id="hardware-force-fill" class="force-fill"></div></div>
+            </div>
             <div class="readout-footer"><span>MARKER <strong id="marker-id">—</strong></span><span>SCALPEL <strong id="scalpel-status" class="scalpel-text">—</strong></span><span>FRAMES <strong id="frame-count">0</strong></span></div>
             <div class="preview-card"><div><span class="micro-label">PATH</span><span id="path-count">0 points</span></div><canvas id="path-preview" width="320" height="110" aria-label="2D path"></canvas></div>
           </aside>

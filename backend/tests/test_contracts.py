@@ -108,12 +108,8 @@ def test_v11_schema_accepts_1_0_and_1_1_samples():
 
 def test_v11_schema_accepts_1_0_and_1_1_snapshots():
     schema = _schema(V11 / "simulation-snapshot.schema.json")
-    resolver = jsonschema.RefResolver(
-        base_uri=(V11 / "simulation-snapshot.schema.json").as_uri(),
-        referrer=schema,
-    )
-    jsonschema.Draft202012Validator(schema, resolver=resolver).validate(SNAPSHOT_1_0)
-    jsonschema.Draft202012Validator(schema, resolver=resolver).validate(SNAPSHOT_1_1)
+    jsonschema.validate(SNAPSHOT_1_0, schema)
+    jsonschema.validate(SNAPSHOT_1_1, schema)
 
 
 def test_models_parse_stored_1_0_and_new_1_1_payloads():

@@ -31,12 +31,12 @@
       "type": "object", "additionalProperties": false,
       "required": ["positionMm", "orientation", "forceN", "contact"],
       "properties": {
-        "positionMm": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
-        "orientation": { "$ref": "tool-sample.schema.json#/$defs/quaternion" },
+        "positionMm": { "$ref": "#/$defs/vector3" },
+        "orientation": { "$ref": "#/$defs/quaternion" },
         "forceN": { "type": "number", "minimum": 0 },
         "contact": { "type": "boolean" },
-        "contactPointMm": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
-        "contactNormal": { "$ref": "tool-sample.schema.json#/$defs/vector3" },
+        "contactPointMm": { "$ref": "#/$defs/vector3" },
+        "contactNormal": { "$ref": "#/$defs/vector3" },
         "reactionForceN": { "type": "number", "minimum": 0 },
         "penetrationDepthMm": { "type": "number", "minimum": 0 }
       }
@@ -84,7 +84,7 @@
           "topologyRevision": { "type": "integer", "minimum": 1 },
           "verticesMm": {
             "type": "array",
-            "items": { "$ref": "tool-sample.schema.json#/$defs/vector3" }
+            "items": { "$ref": "#/$defs/vector3" }
           },
           "triangleIndices": {
             "type": "array",
@@ -94,5 +94,20 @@
       }
     },
     "events": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }
+    },
+    "quaternion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["qx", "qy", "qz", "qw"],
+      "properties": {
+        "qx": { "type": "number" }, "qy": { "type": "number" },
+        "qz": { "type": "number" }, "qw": { "type": "number" }
+      }
+    }
   }
 }

@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     environment:
       MONGO_INITDB_DATABASE: surge_prep
+    ports:
+      - "27017:27017"
     volumes:
       - surge-prep-mongodb:/data/db
     healthcheck:
@@ -14,6 +16,7 @@ services:
       start_period: 5s
 
   api:
+    profiles: ["memory-dev"]
     build: ./backend
     restart: unless-stopped
     environment:
@@ -27,6 +30,7 @@ services:
         condition: service_healthy
 
   controller:
+    profiles: ["memory-dev"]
     build: ./controller
     restart: unless-stopped
     environment:

@@ -1,6 +1,11 @@
 import './style.css';
 import { advanceDepthCalibration, appendPath, CALIBRATION_FRAMES, createDetector, DEFAULT_DICTIONARY, demoMarkerState, detectPurpleScalpel, DICTIONARIES, relativeDepthPercent, markerPose2d, markerSvg, movementSpeed, selectMarker, SignalSmoother, TARGET_MARKER_ID } from './tracking.js';
 
+// Auto-redirect from 127.0.0.1 to localhost for browser camera permissions compliance
+if (typeof window !== 'undefined' && window.location.hostname === '127.0.0.1') {
+  window.location.hostname = 'localhost';
+}
+
 const $ = (id) => document.getElementById(id);
 const video = $('camera');
 const overlay = $('overlay');
@@ -672,6 +677,12 @@ function stopSource() {
   overlayContext.clearRect(0, 0, overlay.width, overlay.height);
   $('empty-state').hidden = false;
   $('camera-button').innerHTML = 'Start camera <span>↗</span>';
+  $('camera-button').disabled = false;
+  const emptyBtn = $('empty-state-start-btn');
+  if (emptyBtn) {
+    emptyBtn.innerHTML = 'Start camera <span>↗</span>';
+    emptyBtn.disabled = false;
+  }
   $('video-button').textContent = 'Open video file';
   $('demo-button').textContent = 'Try synthetic demo';
   setStatus('CAMERA OFF');
@@ -819,13 +830,46 @@ async function startCamera(preferredDeviceId = null) {
     $('camera-error').textContent = msg;
     $('empty-state-hint').textContent = msg;
     $('empty-state-hint').style.display = 'block';
+    setStatus('CAMERA OFF');
     setTracking('Càmera no disponible', msg);
     return;
   }
 
+  // Teardown previous active stream/loops cleanly without resetting UI to "CAMERA OFF"
+  if (frameCallbackKind === 'video') video.cancelVideoFrameCallback(frameCallbackId);
+  else if (frameCallbackKind === 'animation') cancelAnimationFrame(frameCallbackId);
+  frameCallbackId = 0;
+  frameCallbackKind = null;
+  stream?.getTracks().forEach((track) => track.stop());
+  stream = null;
+  if (demoTimer) clearInterval(demoTimer);
+  demoTimer = null;
   try {
-    stopSource();
+    video.pause();
+    video.srcObject = null;
+    video.removeAttribute('src');
+  } catch (_) {}
+  if (fileUrl) URL.revokeObjectURL(fileUrl);
+  fileUrl = null;
+  source = null;
 
+  // Immediate visual feedback so the user knows camera acquisition is in progress
+  const camBtn = $('camera-button');
+  if (camBtn) {
+    camBtn.disabled = true;
+    camBtn.innerHTML = 'Starting camera… <span>⏳</span>';
+  }
+  const emptyBtn = $('empty-state-start-btn');
+  if (emptyBtn) {
+    emptyBtn.disabled = true;
+    emptyBtn.innerHTML = 'Starting camera… <span>⏳</span>';
+  }
+  setStatus('OPENING CAMERA…', 'searching');
+  setTracking('Connecting to camera…', 'Demana permís per utilitzar la càmera. Si et surt un avís al navegador, fes clic a "Permetre".');
+  $('empty-state-hint').textContent = 'Demana permís per utilitzar la càmera… Si surt un avís al navegador, fes clic a "Permetre".';
+  $('empty-state-hint').style.display = 'block';
+
+  try {
     let mediaStream = null;
     let lastError = null;
 
@@ -836,6 +880,7 @@ async function startCamera(preferredDeviceId = null) {
     const constraintOptions = [];
     if (targetId) {
       constraintOptions.push({ video: { deviceId: { exact: targetId } }, audio: false });
+      constraintOptions.push({ video: { deviceId: targetId }, audio: false });
     }
     constraintOptions.push({
       video: {
@@ -852,7 +897,7 @@ async function startCamera(preferredDeviceId = null) {
         if (mediaStream) break;
       } catch (err) {
         lastError = err;
-        // If user explicitly clicked Block, fail immediately without trying other constraints
+        // If user explicitly clicked Block/Deny, fail immediately without trying other constraints
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
           throw err;
         }
@@ -867,6 +912,18 @@ async function startCamera(preferredDeviceId = null) {
     video.srcObject = stream;
     video.playsInline = true;
     video.muted = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('muted', '');
+    video.setAttribute('autoplay', '');
+
+    const track = stream.getVideoTracks()?.[0];
+    if (track) {
+      const settings = track.getSettings?.();
+      if (settings?.deviceId) {
+        selectedCameraId = settings.deviceId;
+      }
+      track.addEventListener('ended', stopSource, { once: true });
+    }
 
     // Wait for video element to have valid metadata/dimensions
     await new Promise((resolve) => {
@@ -878,31 +935,29 @@ async function startCamera(preferredDeviceId = null) {
           resolve();
         };
         video.addEventListener('loadedmetadata', onMeta);
-        setTimeout(resolve, 800);
+        setTimeout(resolve, 1000);
       }
     });
 
     try {
       await video.play();
     } catch (playErr) {
-      console.warn('Initial play() interrupted, retrying in 100ms:', playErr);
-      await new Promise((r) => setTimeout(r, 100));
+      console.warn('Initial play() interrupted, retrying:', playErr);
+      await new Promise((r) => setTimeout(r, 150));
       await video.play();
     }
 
     startProcessing('camera');
-    updateCameraList();
-
-    const track = stream.getVideoTracks()?.[0];
-    if (track) {
-      track.addEventListener('ended', stopSource, { once: true });
-    }
+    await updateCameraList();
   } catch (error) {
-    stopSource();
     console.error('Camera startup error:', error);
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null;
+    source = null;
+
     let msg = `Error al obrir la càmera: ${error.name || ''} - ${error.message}`;
     if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      msg = 'Permís de càmera denegat. Fes clic a la icona de càmera/cadenat a la barra del navegador per permetre l\'accés.';
+      msg = 'Permís de càmera denegat. Fes clic a la icona del cadenat o de la càmera a l\'esquerra de la URL del navegador per permetre l\'accés.';
     } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
       msg = 'No s\'ha trobat cap càmera connectada a aquest equip.';
     } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
@@ -913,8 +968,22 @@ async function startCamera(preferredDeviceId = null) {
     $('camera-error').textContent = msg;
     $('empty-state-hint').textContent = msg;
     $('empty-state-hint').style.display = 'block';
+    $('empty-state').hidden = false;
     setStatus('CAMERA ERROR', 'searching');
     setTracking('Error de càmera', msg);
+  } finally {
+    const camBtn = $('camera-button');
+    if (camBtn) {
+      camBtn.disabled = false;
+      if (source !== 'camera') {
+        camBtn.innerHTML = 'Start camera <span>↗</span>';
+      }
+    }
+    const emptyBtn = $('empty-state-start-btn');
+    if (emptyBtn) {
+      emptyBtn.disabled = false;
+      emptyBtn.innerHTML = 'Start camera <span>↗</span>';
+    }
   }
 }
 
@@ -981,6 +1050,29 @@ $('download-png-button').addEventListener('click', async () => {
   context.drawImage(markerImage, 100, 100, 1000, 1000);
   canvas.toBlob((blob) => { if (blob) downloadBlob(blob, 'png'); }, 'image/png');
 });
+$('empty-state')?.addEventListener('click', () => {
+  if (!source) startCamera();
+});
+$('empty-state-start-btn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!source) startCamera();
+});
+
+// Auto-start camera if permissions already granted or on page load
+function tryAutoStart() {
+  if (!source) {
+    startCamera().catch((err) => {
+      console.log('Camera auto-start waiting for click:', err);
+    });
+  }
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(tryAutoStart, 300);
+} else {
+  window.addEventListener('DOMContentLoaded', () => setTimeout(tryAutoStart, 300));
+}
+
 window.addEventListener('pagehide', stopSource);
 drawPreview();
 connectController();

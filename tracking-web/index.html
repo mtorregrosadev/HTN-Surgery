@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101b24" />
+    <title>Surge Prep · ArUco Tracking</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Surge Prep, home"><span class="brand-mark">✳</span><span>SURGE <b>PREP</b></span></a>
+        <span class="topbar-label">LAB / VISUAL TRACKING</span>
+        <span class="prototype-tag">TRAINING PROTOTYPE</span>
+      </header>
+
+      <main>
+        <section class="intro">
+          <div><p class="eyebrow">01 / MOTION STUDY</p><h1>Make every<br /><em>move visible.</em></h1><p class="lead">Attach an ArUco marker to a blunt training tool. Watch its path appear live through your camera.</p></div>
+          <div class="intro-note"><span class="note-icon">◎</span><p><strong>2D tracking today.</strong><br />3D position and AR alignment will follow camera and workspace calibration.</p></div>
+        </section>
+
+        <section class="workspace" aria-label="Tracking workspace">
+          <div class="camera-panel">
+            <div class="panel-heading"><div><span class="section-number">01</span><h2>Camera view</h2></div><span id="status-pill" class="status-pill">CAMERA OFF</span></div>
+            <div id="camera-stage" class="camera-stage">
+              <video id="camera" autoplay muted playsinline></video>
+              <canvas id="overlay" aria-label="Marker outline and path"></canvas>
+              <div id="empty-state" class="empty-state"><div class="reticle">⌗</div><strong>Ready to track</strong><span>Turn on the camera and show the marker to the lens.</span></div>
+              <div class="camera-corner top-left"></div><div class="camera-corner top-right"></div><div class="camera-corner bottom-left"></div><div class="camera-corner bottom-right"></div>
+              <span class="camera-label">LIVE / ARUCO MIP 36h12</span>
+            </div>
+            <div class="camera-controls"><button id="camera-button" class="primary-button" type="button">Start camera <span>↗</span></button><button id="clear-button" class="secondary-button" type="button">Clear path</button><span id="camera-error" class="camera-error" role="alert"></span></div>
+          </div>
+
+          <aside class="data-panel">
+            <div class="panel-heading"><div><span class="section-number">02</span><h2>Live readout</h2></div><span class="live-dot"></span></div>
+            <div class="signal-card"><span class="micro-label">MARKER STATUS</span><strong id="tracking-state">Waiting for camera</strong><span id="tracking-hint">No reading yet.</span></div>
+            <div class="metric-grid"><div class="metric"><span class="micro-label">POSITION X</span><strong id="position-x">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">POSITION Y</span><strong id="position-y">—</strong><small>px in image</small></div><div class="metric"><span class="micro-label">ORIENTATION</span><strong id="angle">—</strong><small>degrees on screen</small></div><div class="metric"><span class="micro-label">SPEED</span><strong id="speed">—</strong><small>px / second</small></div></div>
+            <div class="readout-footer"><span>MARKER <strong id="marker-id">—</strong></span><span>FRAMES <strong id="frame-count">0</strong></span></div>
+            <div class="preview-card"><div><span class="micro-label">PATH</span><span id="path-count">0 points</span></div><canvas id="path-preview" width="320" height="110" aria-label="2D path"></canvas></div>
+          </aside>
+        </section>
+
+        <section class="setup"><div><span class="section-number">03</span><h2>Set up the test</h2></div><ol><li><span>01</span><p><strong>Print the marker</strong><br /><button id="marker-button" class="text-button" type="button">Download marker #0 ↗</button> at a fixed size, keeping the white margin intact.</p></li><li><span>02</span><p><strong>Attach it to a training tool</strong><br />Use a rigid mount and a blunt tool. Keep the full square visible.</p></li><li><span>03</span><p><strong>Start the camera</strong><br />Move the tool in front of the camera and follow the green outline and trail.</p></li></ol></section>
+        <p class="footnote">Local computer vision test · Video is not stored or sent to the API · Do not use on people.</p>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

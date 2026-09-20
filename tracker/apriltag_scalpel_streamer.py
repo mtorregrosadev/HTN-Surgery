@@ -571,7 +571,7 @@ def main():
                         toast_until = now + 4.0
                         print(f"[Pivot Calibration] {status_toast} (RMS: {desk_calib.rms_error_mm} mm)", flush=True)
                     else:
-                        pivot_feedback = "Need more varied handle rotation. Keep the tip fixed and tilt the handle farther."
+                        pivot_feedback = "Calibration could not solve. Keep the tip fixed, then retry with wider handle angles."
 
             # 3. Solve 6-DOF Tool Pose
             current_pose: Optional[ToolPose6DOF] = None
@@ -620,6 +620,9 @@ def main():
                         f"{current_pose.z_mm:.2f},{current_pose.qx:.4f},{current_pose.qy:.4f},"
                         f"{current_pose.qz:.4f},{current_pose.qw:.4f},{int(current_pose.y_mm <= 0.0)}\n"
                     )
+            elif pivot_mode and primary_tag is not None:
+                lost_text = "Scalpel: ID 1 detected — collecting pivot calibration views"
+                lost_color = (0, 220, 255)
             else:
                 pose_solver.reset_tracking()
                 if bridge is not None:
@@ -697,10 +700,19 @@ def main():
                 if primary_tag is None:
                     health_text, health_color = "CAMERA CHECK: ID 1 is not visible", (0, 80, 255)
                 elif sample_count < pivot_calibrator.min_samples:
-                    health_text = f"CALIBRATING: {sample_count}/{pivot_calibrator.min_samples} good views — rotate the handle"
+                    health_text = (
+                        f"CALIBRATING: {sample_count}/{pivot_calibrator.min_samples} views • "
+                        f"handle range {pivot_calibrator.handle_rotation_span_deg:.0f}° / 45°"
+                    )
                     health_color = (0, 220, 255)
                 else:
-                    health_text = pivot_feedback or "CALIBRATING: checking the measured desk frame..."
+                    span = pivot_calibrator.handle_rotation_span_deg
+                    if span < 45.0:
+                        health_text = (
+                            f"MORE MOVEMENT NEEDED: {span:.0f}° / 45°. Keep the tip fixed; tilt left, right, toward and away."
+                        )
+                    else:
+                        health_text = pivot_feedback or "CALIBRATING: checking the measured desk frame..."
                     health_color = (0, 180, 255)
             elif primary_tag is None:
                 health_text, health_color = "CAMERA CHECK: show the scalpel's ID 1 tag to the camera", (0, 80, 255)

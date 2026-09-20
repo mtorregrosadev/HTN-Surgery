@@ -183,6 +183,16 @@ class PivotCalibrator:
     def is_ready(self) -> bool:
         return len(self.rotations) >= self.min_samples
 
+    @property
+    def handle_rotation_span_deg(self) -> float:
+        """Largest handle-axis change observed during the pivot capture."""
+        if len(self.rotations) < 2:
+            return 0.0
+        axes = np.asarray([rotation[:, 1] for rotation in self.rotations], dtype=np.float64)
+        axes /= np.linalg.norm(axes, axis=1, keepdims=True)
+        dots = np.clip(axes @ axes.T, -1.0, 1.0)
+        return float(np.degrees(np.arccos(np.min(dots))))
+
     def solve(self) -> Optional[Tuple[DeskCalibration, np.ndarray]]:
         """Solve least squares system [R_i, -I] * [v_tip, P_contact]^T = -t_i."""
         if not self.is_ready:

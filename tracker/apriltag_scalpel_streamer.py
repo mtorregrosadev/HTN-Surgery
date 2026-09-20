@@ -271,6 +271,49 @@ def _configure_capture_for_low_latency(cap: cv2.VideoCapture) -> None:
             pass
 
 
+CAMERA_SCAN_LIMIT = 5
+
+# How long a camera gets to produce its first properly exposed frame before it
+# is treated as unusable.  Measured against a Logitech C270, which needs
+# roughly 0.5s; the headroom covers a cold USB start.
+CAMERA_WARMUP_SECONDS = 1.5
+
+
+def _try_open_camera(idx: int) -> Optional[cv2.VideoCapture]:
+    """Open one camera index and confirm it yields a real, non-blank frame.
+
+    A camera that opens but only ever returns black frames (a covered lens, a
+    virtual device, or a Continuity Camera that never woke up) is useless for
+    tracking, so the brightness/variance check below rejects it and lets the
+    caller move on to the next index.
+    """
+    backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
+    try:
+        cap = cv2.VideoCapture(idx, backend) if backend != cv2.CAP_ANY else cv2.VideoCapture(idx)
+    except Exception:
+        return None
+    if not cap.isOpened():
+        cap.release()
+        return None
+
+    _configure_capture_for_low_latency(cap)
+
+    # Budget real time rather than a frame count.  External USB webcams stream
+    # several dark frames while their sensor and auto-exposure settle: a
+    # Logitech C270 was measured needing 8 frames, against a previous budget of
+    # only 10, so a slightly slower start silently got it written off as a dead
+    # device.  A wall-clock deadline scales with whatever the camera's real
+    # warm-up is instead of assuming every device wakes at the same rate.
+    deadline = time.monotonic() + CAMERA_WARMUP_SECONDS
+    while time.monotonic() < deadline:
+        ok, frame = cap.read()
+        if ok and frame is not None and np.mean(frame) > 3.0 and np.std(frame) > 3.0:
+            return cap
+        time.sleep(0.01)
+    cap.release()
+    return None
+
+
 def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv2.VideoCapture], int]:
     """Auto-detect and open an active, non-blank camera stream."""
     if preferred_index is not None:
@@ -279,29 +322,58 @@ def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv
         candidates = [1, 0, 2, 3]
     else:
         candidates = [0, 1, 2, 3]
-    candidates += [i for i in range(5) if i not in candidates]
-    backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
+    candidates += [i for i in range(CAMERA_SCAN_LIMIT) if i not in candidates]
 
     for idx in candidates:
-        try:
-            cap = cv2.VideoCapture(idx, backend) if backend != cv2.CAP_ANY else cv2.VideoCapture(idx)
-        except Exception:
-            continue
-        if not cap.isOpened():
-            cap.release()
-            continue
-
-        _configure_capture_for_low_latency(cap)
-
-        for _ in range(10):
+        cap = _try_open_camera(idx)
+        if cap is not None:
             ok, frame = cap.read()
-            if ok and frame is not None and np.mean(frame) > 3.0 and np.std(frame) > 3.0:
-                print(f"[Camera] Active stream found on index {idx} ({frame.shape[1]}x{frame.shape[0]}).", flush=True)
-                return cap, idx
-            time.sleep(0.03)
-        cap.release()
+            shape = frame.shape if ok and frame is not None else None
+            if shape is not None:
+                print(f"[Camera] Active stream found on index {idx} ({shape[1]}x{shape[0]}).", flush=True)
+            return cap, idx
 
     return None, 0
+
+
+def open_next_camera(current_idx: int) -> Tuple[Optional[cv2.VideoCapture], int]:
+    """Open the next working camera after ``current_idx``, wrapping around.
+
+    Used by the live 'n' hotkey so the operator can hop between a built-in
+    webcam, a USB cam and a Continuity Camera without restarting the tracker
+    and losing the desk registration.  Returns ``(None, current_idx)`` when no
+    *other* working camera exists, leaving the caller's stream untouched.
+    """
+    order = [(current_idx + offset) % CAMERA_SCAN_LIMIT for offset in range(1, CAMERA_SCAN_LIMIT)]
+    for idx in order:
+        cap = _try_open_camera(idx)
+        if cap is not None:
+            return cap, idx
+    return None, current_idx
+
+
+# Camera mounting presets for the nominal desk frame.  FLAT is a webcam sitting
+# in front of the operator at roughly desk/eye height; BIRD is that same camera
+# raised somewhat and angled further down over the table.  FLAT deliberately
+# matches the historical default tilt so toggling back reproduces the previous
+# behaviour exactly, and both values stay inside the 12-48 deg range that the
+# '[' and ']' fine-tune keys clamp to.
+TILT_PRESET_FLAT_DEG = 28.0
+TILT_PRESET_BIRD_DEG = 45.0
+
+
+def tilt_mode_label(tilt_deg: float) -> str:
+    """Name the mounting preset a tilt corresponds to, for the HUD.
+
+    Reported from the live tilt rather than a stored mode flag so that
+    fine-tuning with '[' / ']' honestly degrades the label to CUSTOM instead
+    of continuing to claim a preset the geometry no longer matches.
+    """
+    if abs(tilt_deg - TILT_PRESET_FLAT_DEG) < 0.75:
+        return "FLAT"
+    if abs(tilt_deg - TILT_PRESET_BIRD_DEG) < 0.75:
+        return "BIRD"
+    return "CUSTOM"
 
 
 class LatestFrameCamera:
@@ -589,7 +661,8 @@ def main():
 
     print("\nSurge Prep Physical Scalpel Tracker Live.")
     print("Quick demo: centre the scalpel tip and press Space. The stream starts automatically.")
-    print("This is labelled DEMO (~15 mm registration). Press P for measured pivot calibration, X to recalibrate, or Q to quit.\n", flush=True)
+    print("This is labelled DEMO (~15 mm registration). Press P for measured pivot calibration, X to recalibrate, or Q to quit.")
+    print("Press N to switch webcam, V to toggle view: FLAT (camera in front at desk height) / BIRD'S EYE (camera raised, angled down).\n", flush=True)
 
     start_requested = False
     pivot_feedback = ""
@@ -783,7 +856,8 @@ def main():
             else:
                 desk_str = "UNSET (Place flat & press 't')"
             stream_str = f"LIVE ({bridge.sofa_backend})" if bridge is not None and bridge.connected else "OFFLINE"
-            line1 = f"FPS: {fps:4.1f} | Table: {desk_str} | Stream: {stream_str}"
+            line1 = (f"FPS: {fps:4.1f} | Cam {camera_idx} | View: {tilt_mode_label(tilt_deg)} "
+                     f"| Table: {desk_str} | Stream: {stream_str}")
             cv2.putText(frame, line1, (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1, cv2.LINE_AA)
 
             if now < toast_until:
@@ -948,6 +1022,61 @@ def main():
                 status_toast = "RESET: Restored default 6-DOF controller space"
                 toast_until = now + 3.0
                 print(f"[Reset] {status_toast}", flush=True)
+            if key == ord("n"):
+                new_cap, new_idx = open_next_camera(camera_idx)
+                if new_cap is None:
+                    status_toast = "CAMERA: no other working camera found"
+                    toast_until = now + 3.0
+                    print(f"[Camera] {status_toast}", flush=True)
+                else:
+                    cam.release()
+                    cam = LatestFrameCamera(new_cap)
+                    ok_new, probe = cam.wait_for_first_frame()
+                    if ok_new and probe is not None:
+                        camera_idx = new_idx
+                        new_h, new_w = probe.shape[:2]
+                        if (new_w, new_h) != (w, h):
+                            # Intrinsics are derived from frame size, so a
+                            # camera with a different resolution needs fresh
+                            # ones or every solved pose would be wrong.
+                            w, h = new_w, new_h
+                            camera_matrix, dist_coeffs = get_default_camera_matrix(w, h)
+                            pose_solver.camera_matrix = camera_matrix
+                            pose_solver.dist_coeffs = dist_coeffs
+                        pose_solver.reset_tracking()
+                        status_toast = f"CAMERA: switched to index {camera_idx} ({w}x{h})"
+                        toast_until = now + 3.0
+                        print(f"[Camera] {status_toast}", flush=True)
+                    else:
+                        # The new device opened but went dark; fall back rather
+                        # than leaving the operator with a frozen window.
+                        cam.release()
+                        restored_cap, restored_idx = open_camera_auto(camera_idx)
+                        if restored_cap is None:
+                            print("[Camera] Lost every camera while switching; exiting.", flush=True)
+                            break
+                        camera_idx = restored_idx
+                        cam = LatestFrameCamera(restored_cap)
+                        status_toast = f"CAMERA: index {new_idx} sent no frames; stayed on {camera_idx}"
+                        toast_until = now + 3.0
+                        print(f"[Camera] {status_toast}", flush=True)
+            if bridge is None and key == ord("v"):
+                # Anything that is not already BIRD (including a fine-tuned
+                # CUSTOM tilt) snaps to BIRD, so one key reliably alternates.
+                if tilt_mode_label(tilt_deg) == "BIRD":
+                    tilt_deg = TILT_PRESET_FLAT_DEG
+                else:
+                    tilt_deg = TILT_PRESET_BIRD_DEG
+                orig = np.array(desk_calib.origin_cam) if desk_calib else None
+                ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
+                ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
+                desk_calib = get_default_desk_calibration(origin_cam=orig, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
+                save_desk_calibration(desk_calib)
+                mode_name = "FLAT (camera in front, desk height)" if tilt_mode_label(tilt_deg) == "FLAT" \
+                    else "BIRD'S EYE (camera raised, angled down)"
+                status_toast = f"View: {mode_name} - {tilt_deg:.1f} deg"
+                toast_until = now + 3.0
+                print(f"[View] {status_toast}", flush=True)
             if bridge is None and key == ord("["):
                 tilt_deg = max(12.0, tilt_deg - 1.5)
                 orig = np.array(desk_calib.origin_cam) if desk_calib else None

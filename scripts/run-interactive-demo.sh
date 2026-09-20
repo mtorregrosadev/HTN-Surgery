@@ -44,7 +44,7 @@ if ! curl -s "$CONTROLLER_URL/health" | grep -q "status"; then
   else
     echo "[Notice] Docker unavailable; launching local demo stack (In-Memory Store)..."
     export SURGE_PREP_MONGODB_URI=""
-    export SURGE_PREP_SIMULATION_BACKEND="${SURGE_PREP_SIMULATION_BACKEND:-memory}"
+    export SURGE_PREP_SIMULATION_BACKEND="${SURGE_PREP_SIMULATION_BACKEND:-sofa}"
     export SURGE_PREP_API_URL="$API_URL"
 
     # Start API

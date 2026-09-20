@@ -471,8 +471,8 @@ def main():
     cv2.setMouseCallback(window_name, on_mouse)
 
     print("\nSurge Prep Physical Scalpel Tracker Live.")
-    print("Quick setup: centre the scalpel tip, press Space, then rotate the handle while the tip stays still.")
-    print("The stream starts automatically after a successful calibration. Press X to recalibrate or Q to quit.\n", flush=True)
+    print("Quick demo: centre the scalpel tip and press Space. The stream starts automatically.")
+    print("This is labelled DEMO (~15 mm registration). Press P for measured pivot calibration, X to recalibrate, or Q to quit.\n", flush=True)
 
     start_requested = False
     pivot_feedback = ""

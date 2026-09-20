@@ -571,7 +571,7 @@ def main():
                         toast_until = now + 4.0
                         print(f"[Pivot Calibration] {status_toast} (RMS: {desk_calib.rms_error_mm} mm)", flush=True)
                     else:
-                        pivot_feedback = "Calibration could not solve. Keep the tip fixed, then retry with wider handle angles."
+                        pivot_feedback = pivot_calibrator.last_failure_reason or "Calibration could not solve. Press Space and retry."
 
             # 3. Solve 6-DOF Tool Pose
             current_pose: Optional[ToolPose6DOF] = None

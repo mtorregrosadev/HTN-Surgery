@@ -165,10 +165,12 @@ class PivotCalibrator:
         self.max_rms_error_mm = max_rms_error_mm
         self.rotations: List[np.ndarray] = []
         self.translations: List[np.ndarray] = []
+        self.last_failure_reason: Optional[str] = None
 
     def reset(self):
         self.rotations.clear()
         self.translations.clear()
+        self.last_failure_reason = None
 
     def add_sample(self, r_cam: np.ndarray, t_cam: np.ndarray):
         """Add a pose sample while user pivots scalpel."""
@@ -196,6 +198,7 @@ class PivotCalibrator:
     def solve(self) -> Optional[Tuple[DeskCalibration, np.ndarray]]:
         """Solve least squares system [R_i, -I] * [v_tip, P_contact]^T = -t_i."""
         if not self.is_ready:
+            self.last_failure_reason = f"Need {self.min_samples - len(self.rotations)} more camera views."
             return None
 
         A = []
@@ -213,6 +216,7 @@ class PivotCalibrator:
             # A stationary or nearly one-axis motion cannot identify both the
             # tip offset and the contact point.  Do not manufacture a nominal
             # calibration for an under-constrained solve.
+            self.last_failure_reason = "Not enough 3D handle angles. Tilt left/right and toward/away from the camera."
             return None
         tip_offset = x[:3]
         contact_point = x[3:]
@@ -229,15 +233,22 @@ class PivotCalibrator:
 
         # Reject poor or physically impossible solves.  Returning ``None`` is
         # safer than replacing measured data with nominal geometry.
-        if (
-            not np.isfinite(rms_err)
-            or rms_err > self.max_rms_error_mm
-            or contact_point[2] < 150.0
-            or contact_point[2] > 1500.0
-            or not 20.0 <= np.linalg.norm(tip_offset) <= 150.0
-            or not np.all(np.isfinite(tip_offset))
-            or not np.all(np.isfinite(contact_point))
-        ):
+        if not np.isfinite(rms_err):
+            self.last_failure_reason = "Camera pose data is not finite. Keep ID 1 fully visible and retry."
+            return None
+        if rms_err > self.max_rms_error_mm:
+            self.last_failure_reason = (
+                f"The tip moved about {rms_err:.1f} mm; keep it fixed within {self.max_rms_error_mm:.0f} mm and retry."
+            )
+            return None
+        if contact_point[2] < 150.0 or contact_point[2] > 1500.0:
+            self.last_failure_reason = "The camera depth estimate is outside its usable range. Move the desk 15–150 cm from the camera."
+            return None
+        if not np.all(np.isfinite(tip_offset)) or not np.all(np.isfinite(contact_point)):
+            self.last_failure_reason = "The camera pose estimate is invalid. Keep the whole tag in view and retry."
+            return None
+        if not 20.0 <= np.linalg.norm(tip_offset) <= 150.0:
+            self.last_failure_reason = "The estimated tag-to-tip distance is implausible. Check the printed tag size and keep it flat on the handle."
             return None
 
         # Desk normal is estimated from the symmetry axis of the rotation cone
@@ -246,6 +257,7 @@ class PivotCalibrator:
         mean_axis = np.mean(handle_axes, axis=0)
         norm_val = np.linalg.norm(mean_axis)
         if norm_val < 1e-4:
+            self.last_failure_reason = "The handle angles cancel out. Restart and use a smaller, varied cone of motion."
             return None
         mean_axis = mean_axis / norm_val
 
@@ -257,6 +269,7 @@ class PivotCalibrator:
         # A sideways normal means the pivot motion did not provide a useful
         # desk orientation.  Do not silently substitute a nominal plane.
         if normal_cam[1] > -0.35:
+            self.last_failure_reason = "The captured motion cannot identify the desk plane. Tilt the handle toward and away from the camera."
             return None
 
         u_y = normal_cam / np.linalg.norm(normal_cam)
@@ -288,6 +301,7 @@ class PivotCalibrator:
             extent_x_mm=160.0,
             extent_z_mm=110.0
         )
+        self.last_failure_reason = None
         return calib, tip_offset
 
 

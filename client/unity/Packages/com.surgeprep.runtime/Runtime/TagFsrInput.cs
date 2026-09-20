@@ -40,6 +40,7 @@ namespace SurgePrep
         [SerializeField] private Vector3 tagToToolEulerDegrees;
         [SerializeField] private Vector3 registrationTipPositionMm = Vector3.zero;
         [SerializeField] private Vector3 registrationToolEulerApi = new Vector3(40f, 0f, 0f);
+        [SerializeField] private bool autoRegisterOnFirstPose = true;
         [SerializeField, Min(0f)] private float positionResponse = 24f;
         [SerializeField, Min(0f)] private float rotationResponse = 30f;
 
@@ -171,7 +172,7 @@ namespace SurgePrep
                 Vector3.one
             );
 
-            if (ShowcaseInput.Pressed(KeyCode.Space))
+            if ((autoRegisterOnFirstPose && !registered6D) || ShowcaseInput.Pressed(KeyCode.Space))
             {
                 var targetPosition = new Vector3(
                     registrationTipPositionMm.x,

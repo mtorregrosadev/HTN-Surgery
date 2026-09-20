@@ -465,17 +465,8 @@ def main():
     cv2.setMouseCallback(window_name, on_mouse)
 
     print("\nSurge Prep Physical Scalpel Tracker Live.")
-    print("Controls:")
-    print("  [Drag Mouse] Draw Rectangle Area directly on the table to lock workspace")
-    print("  's' / 'c': Snap Desk Plane to Scalpel resting on desk")
-    print("  'd': Default generous surgical area (320x220 mm)")
-    print("  '[' / ']': Adjust Desk Tilt Angle (+/- 1.5 deg)")
-    print("  '+' / '-': Raise/Lower Desk Height (+/- 5 mm)")
-    print("  Space / 't': Tare / Recenter (0,0,0) to current scalpel tip")
-    print("  'p': Pivot Calibrate")
-    print("  'l': Start session and live stream with the measured calibration")
-    print("  'x': Stop live stream to recalibrate")
-    print("  'q'/Esc: Quit\n", flush=True)
+    print("Quick setup: centre the scalpel tip, press Space, then rotate the handle while the tip stays still.")
+    print("The stream starts automatically after a successful calibration. Press X to recalibrate or Q to quit.\n", flush=True)
 
     start_requested = False
 
@@ -573,6 +564,7 @@ def main():
                         desk_calib, solved_tip = res_calib
                         save_desk_calibration(desk_calib)
                         pivot_mode = False
+                        start_requested = True
                         status_toast = f"LOCKED Desk via Scalpel Pivot! Tip offset: {np.round(solved_tip, 1)} mm"
                         toast_until = now + 4.0
                         print(f"[Pivot Calibration] {status_toast} (RMS: {desk_calib.rms_error_mm} mm)", flush=True)
@@ -680,8 +672,16 @@ def main():
                 cv2.putText(frame, lost_text, (14, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, lost_color, 1, cv2.LINE_AA)
 
-            line3 = "[t] Tare | [s] Snap Desk | [p] Pivot | [l] Live stream | [x] Stop/recalibrate | [g] Grid | [q] Quit"
-            cv2.putText(frame, line3, (14, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (170, 170, 170), 1, cv2.LINE_AA)
+            if bridge is not None:
+                guide = "LIVE: move the scalpel.  Press X to recalibrate or Q to quit."
+            elif pivot_mode:
+                guide = "STEP 2 OF 2: Keep the tip fixed on the desk and rotate the handle slowly."
+            elif _is_measured_calibration(desk_calib):
+                guide = "Calibration complete. Starting the live stream..."
+            else:
+                guide = "STEP 1 OF 2: Place the scalpel tip at the centre, then press SPACE to calibrate."
+            cv2.rectangle(frame, (8, 82), (min(w - 8, 850), 112), (20, 20, 20), cv2.FILLED)
+            cv2.putText(frame, guide, (14, 103), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (70, 255, 255), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -700,7 +700,13 @@ def main():
                 else:
                     status_toast = "Live requires measured calibration: run Pivot ('p') or place the desk tag, then press 'l'."
                     toast_until = now + 3.0
-            if bridge is None and key in (ord("t"), ord(" "), ord("z")):
+            if bridge is None and key == ord(" "):
+                pivot_mode = True
+                pivot_calibrator.reset()
+                status_toast = "Calibration started: keep the tip still and rotate the handle."
+                toast_until = now + 4.0
+                print(f"[Pivot] {status_toast}", flush=True)
+            if bridge is None and key in (ord("t"), ord("z")):
                 if current_pose is not None:
                     tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
                     ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
@@ -789,9 +795,9 @@ def main():
                     status_toast = "Lowered Desk Plane (-5mm)"
                     toast_until = now + 1.5
             if bridge is None and key == ord("p"):
-                pivot_mode = not pivot_mode
+                pivot_mode = True
                 pivot_calibrator.reset()
-                status_toast = "Pivot Calibration Started: keep tip on desk and rotate handle"
+                status_toast = "Calibration started: keep the tip still and rotate the handle."
                 toast_until = now + 3.0
                 print(f"[Pivot] {status_toast}", flush=True)
             if key == ord("g"):

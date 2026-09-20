@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 
+from .coaching import CoachReport, ElevenLabsVoice, VoiceUnavailable, build_coach
 from .config import Settings
 from .models import (
     Calibration,
     CalibrationCreate,
     Health,
+    ProgressSummary,
+    ResultRecord,
     Session,
     SessionCreate,
     SessionResult,
@@ -34,11 +37,37 @@ def build_simulator(settings: Settings) -> Simulator:
     raise RuntimeError(f"Unsupported simulation backend: {settings.simulation_backend}")
 
 
-def create_app(store: Store | None = None, simulator: Simulator | None = None) -> FastAPI:
+def init_sentry(settings: Settings) -> bool:
+    """Optional observability: tracing and profiling, only when SENTRY_DSN is set and sentry-sdk is installed."""
+    if not settings.sentry_dsn:
+        return False
+    try:
+        import sentry_sdk
+    except ImportError:
+        return False
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn, traces_sample_rate=1.0, profiles_sample_rate=1.0,
+        send_default_pii=False, enable_logs=True,
+    )
+    return True
+
+
+def create_app(
+    store: Store | None = None,
+    simulator: Simulator | None = None,
+    coach=None,
+    voice: ElevenLabsVoice | None = None,
+) -> FastAPI:
     settings = Settings.from_environment()
+    init_sentry(settings)
     selected_store = store or build_store(settings)
     selected_simulator = simulator or build_simulator(settings)
     service = TrainingService(selected_store, selected_simulator)
+    selected_coach = coach or build_coach(
+        settings.coach_provider, settings.openai_api_key, settings.gemini_api_key,
+        settings.openai_model, settings.gemini_model,
+    )
+    selected_voice = voice or ElevenLabsVoice(settings.elevenlabs_api_key, settings.elevenlabs_voice_id)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -59,6 +88,10 @@ def create_app(store: Store | None = None, simulator: Simulator | None = None) -
     async def create_calibration(request: CalibrationCreate) -> Calibration:
         return await service.create_calibration(request)
 
+    @app.get("/v1/sessions", response_model=list[Session])
+    async def list_sessions(limit: int = Query(20, ge=1, le=200)) -> list[Session]:
+        return await service.list_sessions(limit)
+
     @app.post("/v1/sessions", response_model=Session, status_code=201)
     async def create_session(request: SessionCreate) -> Session:
         return await service.create_session(request)
@@ -74,6 +107,33 @@ def create_app(store: Store | None = None, simulator: Simulator | None = None) -
     @app.post("/v1/sessions/{session_id}/complete", response_model=SessionResult)
     async def complete_session(session_id: str) -> SessionResult:
         return await service.complete_session(session_id)
+
+    @app.get("/v1/sessions/{session_id}/result", response_model=ResultRecord)
+    async def session_result(session_id: str) -> ResultRecord:
+        return await service.get_result(session_id)
+
+    @app.get("/v1/progress", response_model=ProgressSummary)
+    async def progress(
+        device_id: str | None = Query(None, alias="deviceId"), limit: int = Query(50, ge=1, le=500)
+    ) -> ProgressSummary:
+        return await service.progress(device_id, limit)
+
+    @app.post("/v1/sessions/{session_id}/coaching", response_model=CoachReport)
+    async def coaching(session_id: str) -> CoachReport:
+        record = await service.get_result(session_id)
+        return await selected_coach.coach(session_id, record.metrics)
+
+    @app.post("/v1/sessions/{session_id}/coaching/audio")
+    async def coaching_audio(session_id: str) -> Response:
+        if not selected_voice.available:
+            raise HTTPException(503, "Spoken coaching needs ELEVENLABS_API_KEY")
+        record = await service.get_result(session_id)
+        report = await selected_coach.coach(session_id, record.metrics)
+        try:
+            audio = await selected_voice.synthesize(report.spoken)
+        except VoiceUnavailable as error:
+            raise HTTPException(502, str(error)) from error
+        return Response(content=audio, media_type="audio/mpeg")
 
     @app.get("/v1/sessions/{session_id}/replay", response_model=list[SimulationSnapshot])
     async def replay(session_id: str) -> list[SimulationSnapshot]:

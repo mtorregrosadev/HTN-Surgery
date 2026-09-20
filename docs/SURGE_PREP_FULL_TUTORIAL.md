@@ -175,6 +175,9 @@ You pick prizes on the submission form. Guidance:
    Hack the North 2026. Read the rule on the page and be honest.
 4. Do **not** select sponsor prizes you cannot truthfully explain. Judges ask.
 
+> The project also has optional OpenAI, Gemini, ElevenLabs and Sentry features. See `docs/API_PRIZES.md` for what each does
+> and how to switch it on.
+>
 > Only select prizes where you can say, in one sentence, *exactly how your project uses that sponsor's product*.
 > A shorter, honest list beats a long, weak one.
 

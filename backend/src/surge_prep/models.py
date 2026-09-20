@@ -197,3 +197,31 @@ def utc_now() -> datetime:
 
 def mongo_document(model: ApiModel) -> dict[str, Any]:
     return model.model_dump(by_alias=True, mode="json")
+
+
+class ResultRecord(ApiModel):
+    """A stored scorecard. Derived from the samples/snapshots, kept so progress can be charted."""
+
+    session_id: str
+    exercise_id: str
+    device_id: str
+    tool_id: str
+    completed_at: datetime
+    metrics: SessionMetrics
+
+
+class TrendPoint(ApiModel):
+    session_id: str
+    completed_at: datetime
+    score_percent: float
+
+
+class ProgressSummary(ApiModel):
+    attempts: int
+    latest_score_percent: float | None = None
+    best_score_percent: float | None = None
+    average_score_percent: float | None = None
+    improvement_points: float | None = None     # latest minus first attempt
+    weakest_component: str | None = None
+    component_averages: dict[str, float] = Field(default_factory=dict)
+    trend: list[TrendPoint] = Field(default_factory=list)

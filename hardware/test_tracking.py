@@ -101,3 +101,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def test_synthetic_accuracy():
+    main()

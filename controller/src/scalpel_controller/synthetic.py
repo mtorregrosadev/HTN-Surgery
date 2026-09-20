@@ -8,9 +8,13 @@ import math
 import os
 import select
 import sys
-import termios
 import time
-import tty
+
+try:  # POSIX-only terminal control; the keyboard demo needs it, the rest of this module does not
+    import termios
+    import tty
+except ImportError:  # Windows
+    termios = tty = None
 
 import httpx
 from websockets.asyncio.client import connect
@@ -61,6 +65,8 @@ def terminal_input(enabled: bool):
     if not enabled:
         yield None
         return
+    if termios is None:
+        raise RuntimeError("Manual keyboard control needs a POSIX terminal (macOS or Linux); use Unity instead")
     if not sys.stdin.isatty():
         raise RuntimeError("Manual control requires an interactive terminal")
     descriptor = sys.stdin.fileno()

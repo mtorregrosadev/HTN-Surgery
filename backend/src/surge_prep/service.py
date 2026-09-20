@@ -10,6 +10,8 @@ from .models import (
     SHOWCASE_TOOL_IDS,
     Calibration,
     CalibrationCreate,
+    ProgressSummary,
+    ResultRecord,
     Session,
     SessionCreate,
     SessionMetrics,
@@ -20,6 +22,7 @@ from .models import (
     new_id,
     utc_now,
 )
+from .progress import summarize_progress
 from .simulation import Simulator
 from .store import Store
 
@@ -126,7 +129,36 @@ class TrainingService:
         self._last_valid.pop(session_id, None)
         self._frozen.pop(session_id, None)
         await self.store.save_session(session)
-        return SessionResult(session=session, metrics=self.calculate_metrics(samples, snapshots))
+        metrics = self.calculate_metrics(samples, snapshots)
+        await self.store.save_result(ResultRecord(
+            session_id=session.session_id, exercise_id=session.exercise_id, device_id=session.device_id,
+            tool_id=session.tool_id, completed_at=session.completed_at, metrics=metrics,
+        ))
+        return SessionResult(session=session, metrics=metrics)
+
+    async def get_result(self, session_id: str) -> ResultRecord:
+        """The stored scorecard. Older sessions completed before results were stored are re-scored from their data."""
+        session = await self.require_session(session_id)
+        record = await self.store.get_result(session_id)
+        if record is not None:
+            return record
+        if session.status != SessionStatus.completed:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Session is not completed yet")
+        samples = await self.store.list_samples(session_id)
+        snapshots = await self.store.list_snapshots(session_id)
+        record = ResultRecord(
+            session_id=session.session_id, exercise_id=session.exercise_id, device_id=session.device_id,
+            tool_id=session.tool_id, completed_at=session.completed_at or utc_now(),
+            metrics=self.calculate_metrics(samples, snapshots),
+        )
+        await self.store.save_result(record)
+        return record
+
+    async def progress(self, device_id: str | None = None, limit: int = 50) -> ProgressSummary:
+        return summarize_progress(await self.store.list_results(device_id, limit))
+
+    async def list_sessions(self, limit: int = 20) -> list[Session]:
+        return await self.store.list_sessions(limit)
 
     async def replay(self, session_id: str) -> list[SimulationSnapshot]:
         await self.require_session(session_id)

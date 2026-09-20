@@ -122,3 +122,38 @@ def test_quaternion_conversion():
     # For Y-axis 45 deg rotation: qy = sin(22.5 deg) approx 0.38268, qw = cos(22.5 deg) approx 0.92388
     assert pytest.approx(q[1], 1e-4) == np.sin(theta / 2.0)
     assert pytest.approx(q[3], 1e-4) == np.cos(theta / 2.0)
+
+
+def test_scalpel_pose_solver_6dof():
+    """Verify ScalpelPoseSolver computes 6-DOF blade tip in desk coordinates."""
+    import cv2
+    from tracker.desk_calibration import get_default_desk_calibration
+    from tracker.tool_pose_solver import ScalpelPoseSolver
+
+    calib = get_default_desk_calibration(origin_cam=np.array([0.0, 50.0, 500.0]))
+    K = np.array([[800.0, 0.0, 640.0], [0.0, 800.0, 360.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+    dist = np.zeros(5, dtype=np.float64)
+    solver = ScalpelPoseSolver(camera_matrix=K, dist_coeffs=dist, tag_size_mm=24.0, tip_offset_along_handle_mm=65.0)
+
+    # Synthetic tag 1 corners in front of camera
+    half = 12.0
+    obj_pts = np.array([
+        [-half, -half, 0.0],
+        [ half, -half, 0.0],
+        [ half,  half, 0.0],
+        [-half,  half, 0.0]
+    ], dtype=np.float64)
+    tag_pos = np.array([0.0, 30.0, 480.0], dtype=np.float64)
+    pts_cam = obj_pts + tag_pos
+
+    img_pts, _ = cv2.projectPoints(pts_cam, np.zeros((3, 1)), np.zeros((3, 1)), K, dist)
+    detected = {1: img_pts.reshape(4, 2)}
+
+    pose = solver.solve_tool_pose(detected, calib, timestamp=0.0)
+    assert pose is not None
+    assert pose.confidence > 0.0
+    assert len(pose.visible_tags) == 1
+    assert -500.0 < pose.x_mm < 500.0
+    assert -500.0 < pose.y_mm < 500.0
+    assert -500.0 < pose.z_mm < 500.0
+

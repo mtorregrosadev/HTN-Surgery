@@ -151,6 +151,10 @@ class ScalpelPoseSolver:
         if not tag_positions_cam:
             return None
 
+        # Mean tag cluster position and rotation
+        mean_tag_pos_cam = np.mean(tag_positions_cam, axis=0)
+        mean_rot_cam = tag_rotations_cam[0]  # Primary orientation reference
+
         # Use exact tip offset vector from pivot calibration if available and physically valid
         tip_offset_valid = (
             desk_calib.calibrated_tip_offset_mm is not None

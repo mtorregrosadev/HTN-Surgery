@@ -16,6 +16,7 @@ namespace SurgePrep
         [SerializeField] private Material incisionMaterial;
         [SerializeField] private Material toolMaterial;
         [SerializeField] private LineRenderer incisionGuide;
+        [SerializeField, Min(0.25f)] private float snapshotTimeoutSeconds = 2f;
 
         private readonly Dictionary<string, MeshView> meshes = new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
@@ -23,13 +24,89 @@ namespace SurgePrep
         private GameObject scalpelVisual;
         private GameObject dissectorVisual;
         private GameObject tubeVisual;
+        private string boundSessionId;
+        private long latestTick = -1;
+        private long latestSimulationTimeMs = -1;
+        private float lastSnapshotReceivedAt = -1f;
+        private bool hasSnapshot;
 
         public SimulationSnapshotDto LatestSnapshot { get; private set; }
         public event Action<SimulationSnapshotDto> SnapshotReceived;
+        public bool SnapshotStale { get; private set; }
+
+        public float SnapshotAgeSeconds
+        {
+            get
+            {
+                if (!hasSnapshot || lastSnapshotReceivedAt < 0f)
+                {
+                    return float.PositiveInfinity;
+                }
+                return Mathf.Max(0f, Time.unscaledTime - lastSnapshotReceivedAt);
+            }
+        }
+
+        public bool BindSession(string sessionId, bool forceRebind = false)
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                return true;
+            }
+            if (string.IsNullOrEmpty(boundSessionId))
+            {
+                boundSessionId = sessionId;
+                return true;
+            }
+            if (boundSessionId == sessionId)
+            {
+                return true;
+            }
+            if (forceRebind || SnapshotStale)
+            {
+                boundSessionId = sessionId;
+                latestTick = -1;
+                latestSimulationTimeMs = -1;
+                hasSnapshot = false;
+                LatestSnapshot = null;
+                SnapshotStale = false;
+                if (toolTransform != null)
+                {
+                    toolTransform.gameObject.SetActive(false);
+                }
+                foreach (var view in meshes.Values)
+                {
+                    view.SetVisible(false);
+                }
+                return true;
+            }
+            return false;
+        }
 
         public void SetTarget(SimulationSnapshotDto snapshot)
         {
+            if (snapshot == null)
+            {
+                return;
+            }
+            if (!BindSession(snapshot.sessionId))
+            {
+                return;
+            }
+            if (hasSnapshot && IsOlderOrDuplicate(snapshot))
+            {
+                return;
+            }
+
+            hasSnapshot = true;
+            latestTick = snapshot.tick;
+            latestSimulationTimeMs = snapshot.simulationTimeMs;
+            lastSnapshotReceivedAt = Time.unscaledTime;
+            SnapshotStale = false;
             LatestSnapshot = snapshot;
+            if (toolTransform != null)
+            {
+                toolTransform.gameObject.SetActive(true);
+            }
             if (snapshot.tool != null)
             {
                 toolTargetPosition = RegisteredPosition(snapshot.tool.positionMm);
@@ -49,6 +126,25 @@ namespace SurgePrep
             }
             UpdateIncisionGuide(snapshot);
             SnapshotReceived?.Invoke(snapshot);
+        }
+
+        private bool IsOlderOrDuplicate(SimulationSnapshotDto snapshot)
+        {
+            if (!string.IsNullOrEmpty(boundSessionId)
+                && !string.IsNullOrEmpty(snapshot.sessionId)
+                && snapshot.sessionId != boundSessionId)
+            {
+                return true;
+            }
+            if (snapshot.tick < latestTick)
+            {
+                return true;
+            }
+            if (snapshot.tick > latestTick)
+            {
+                return false;
+            }
+            return snapshot.simulationTimeMs <= latestSimulationTimeMs;
         }
 
         private static bool LayerVisible(string objectId, SimulationSnapshotDto snapshot)
@@ -395,6 +491,7 @@ namespace SurgePrep
 
         private void Update()
         {
+            UpdateSnapshotHealth();
             if (toolTransform == null) return;
             var amount = 1f - Mathf.Exp(-interpolationSpeed * Time.deltaTime);
             if (CoordinateFrame.ShouldSnap(toolTransform.localPosition, toolTargetPosition))
@@ -414,6 +511,23 @@ namespace SurgePrep
             foreach (var view in meshes.Values)
             {
                 view.Interpolate(amount);
+            }
+        }
+
+        private void UpdateSnapshotHealth()
+        {
+            if (!hasSnapshot || SnapshotStale || snapshotTimeoutSeconds <= 0f)
+            {
+                return;
+            }
+            if (SnapshotAgeSeconds <= snapshotTimeoutSeconds)
+            {
+                return;
+            }
+            SnapshotStale = true;
+            if (toolTransform != null)
+            {
+                toolTransform.gameObject.SetActive(false);
             }
         }
 

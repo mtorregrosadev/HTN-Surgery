@@ -7,3 +7,19 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 
+# Unity generated files
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+MemoryCaptures/
+Recordings/
+client/unity/Library/
+client/unity/Temp/
+client/unity/Logs/
+client/unity/UserSettings/
+client/unity/Assets/SurgePrepShowcase/Anatomy/
+desk_calibration.json

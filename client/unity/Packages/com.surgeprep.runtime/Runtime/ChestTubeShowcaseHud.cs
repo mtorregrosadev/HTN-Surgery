@@ -83,6 +83,12 @@ namespace SurgePrep
             GUI.color = Color.white;
             y += 22f;
 
+            var trackingMode = snapshot != null
+                ? "Scalpel (3D Desk Space / WASD)"
+                : "Manual Keyboard Input";
+            GUI.Label(new Rect(38, y, 380, 18), "Input:  " + trackingMode, smallStyle);
+            y += 18f;
+
             if (snapshot != null && snapshot.tool != null)
             {
                 var contact = snapshot.tool.contact;
@@ -130,13 +136,14 @@ namespace SurgePrep
             y += 6f;
             GUI.Label(new Rect(38, y, 380, 18), "Controls", labelStyle);
             y += 20f;
-            DrawRect(new Rect(38, y, 360, 234), new Color(0.05f, 0.07f, 0.1f, 0.8f));
+            DrawRect(new Rect(38, y, 360, 256), new Color(0.05f, 0.07f, 0.1f, 0.8f));
             y += 8f;
             ControlLine(ref y, "Drag", "look around the bay");
             ControlLine(ref y, "W A S D", "move on the chest");
             ControlLine(ref y, "Q / E", "raise / lower the tool");
             ControlLine(ref y, "1 / 2 / 3", "scalpel / dissector / tube");
-            ControlLine(ref y, "F / C / O", "close-up / surgeon / room");
+            ControlLine(ref y, "D / Space", "desk workspace view (wide)");
+            ControlLine(ref y, "C / F / O", "surgeon / incision / room");
             ControlLine(ref y, "H / B", "head close-up / overhead");
             ControlLine(ref y, "T", "360 turntable on / off");
             ControlLine(ref y, "K", "anatomy cutaway");

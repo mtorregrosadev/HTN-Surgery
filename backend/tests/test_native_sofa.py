@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
 from pathlib import Path
 
@@ -24,6 +25,12 @@ def configure_native_sofa() -> None:
     except SystemExit:
         pytest.skip("native SOFA is not installed")
     checker.configure_paths(root)
+    try:
+        import Sofa
+        import Sofa.Simulation
+        import SofaRuntime
+    except Exception as err:
+        pytest.skip(f"native SOFA is incompatible with current Python runtime: {err}")
 
 
 def sample(
@@ -45,6 +52,27 @@ def sample(
         force_n=0.0,
         contact=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_native_sofa_fails_closed_when_sofa_python_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    real_import = builtins.__import__
+
+    def block_native_sofa(name: str, *args, **kwargs):
+        if name == "Sofa" or name.startswith("Sofa."):
+            raise ModuleNotFoundError("No module named 'Sofa'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", block_native_sofa)
+    simulator = SofaSimulator(str(tmp_path / "sofa_scene.py"))
+
+    with pytest.raises(RuntimeError, match="SofaPython3 is unavailable") as error:
+        await simulator.start()
+
+    assert isinstance(error.value.__cause__, ModuleNotFoundError)
 
 
 @pytest.mark.asyncio

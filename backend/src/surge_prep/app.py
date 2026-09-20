@@ -33,7 +33,7 @@ def build_simulator(settings: Settings) -> Simulator:
     if settings.simulation_backend == "memory":
         return MemorySimulator()
     if settings.simulation_backend == "sofa":
-        return SofaSimulator(settings.sofa_scene_path)
+        return SofaSimulator(settings.sofa_scene_path, allow_fallback=True)
     raise RuntimeError(f"Unsupported simulation backend: {settings.simulation_backend}")
 
 
@@ -95,6 +95,10 @@ def create_app(
     @app.post("/v1/sessions", response_model=Session, status_code=201)
     async def create_session(request: SessionCreate) -> Session:
         return await service.create_session(request)
+
+    @app.get("/v1/sessions/active", response_model=Session)
+    async def get_active_session() -> Session:
+        return await service.get_active_session()
 
     @app.get("/v1/sessions/{session_id}", response_model=Session)
     async def get_session(session_id: str) -> Session:

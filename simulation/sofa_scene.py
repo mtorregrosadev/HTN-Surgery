@@ -422,8 +422,15 @@ def createScene(root, carving_active=False):
         ],
     )
     root.addObject("FreeMotionAnimationLoop")
+    import Sofa
+
+    solver_type = (
+        "BlockGaussSeidelConstraintSolver"
+        if Sofa.Core.ObjectFactory.shortName("BlockGaussSeidelConstraintSolver")
+        else "GenericConstraintSolver"
+    )
     root.addObject(
-        "BlockGaussSeidelConstraintSolver",
+        solver_type,
         name="contactSolver",
         maxIterations=1000,
         tolerance=1e-6,

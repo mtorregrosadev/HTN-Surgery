@@ -243,6 +243,7 @@ namespace SurgePrep.Editor
             window.transform.SetParent(tableTop, false);
             window.transform.localPosition = new Vector3(0.12f, 0.353f, 0.38f);
             window.transform.localRotation = Quaternion.identity;
+            window.AddComponent<DeskWorkspaceAnchor>();
 
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
             simulation.transform.SetParent(window.transform, false);
@@ -255,9 +256,14 @@ namespace SurgePrep.Editor
                 );
             }
             var stream = simulation.AddComponent<ScalpelStreamClient>();
-            stream.enabled = false;
+            stream.enabled = true;
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
             var tagInput = simulation.AddComponent<TagFsrInput>();
+            // The generated showcase has one input owner. Enable the physical
+            // stream; keyboard mode remains available by enabling this component
+            // in a software-only scene. The AprilTag/FSR listener stays wired
+            // below so that scene also picks up the hardware bridge.
+            manualDemo.enabled = false;
             var hud = simulation.AddComponent<ChestTubeShowcaseHud>();
             SetObject(renderer, "tissueMaterial", tissue);
             SetObject(renderer, "subcutaneousMaterial", fat);

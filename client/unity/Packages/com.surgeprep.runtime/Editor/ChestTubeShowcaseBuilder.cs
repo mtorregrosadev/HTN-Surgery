@@ -235,6 +235,7 @@ namespace SurgePrep.Editor
             var stream = simulation.AddComponent<ScalpelStreamClient>();
             stream.enabled = false;
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
+            var tagInput = simulation.AddComponent<TagFsrInput>();
             var hud = simulation.AddComponent<ChestTubeShowcaseHud>();
             SetObject(renderer, "tissueMaterial", tissue);
             SetObject(renderer, "subcutaneousMaterial", fat);
@@ -246,6 +247,7 @@ namespace SurgePrep.Editor
             SetObject(renderer, "incisionGuide", CreateTargetGuide(simulation.transform, target));
             SetObject(stream, "sceneRenderer", renderer);
             SetObject(manualDemo, "sceneRenderer", renderer);
+            SetObject(manualDemo, "tagInput", tagInput);
             SetObject(hud, "sceneRenderer", renderer);
             SetObject(hud, "manualDemo", manualDemo);
             CreateInstrumentHome(room.transform, steel, scalpelYellow, dissectorBlue, tubeAmber);

@@ -27,6 +27,8 @@ namespace SurgePrep
         [SerializeField] private SimulationSceneRenderer sceneRenderer;
         [SerializeField, Min(1f)] private float movementSpeedMmPerSecond = 24f;
         [SerializeField] private Camera sceneCamera;
+        // Optional AprilTag + FSR scalpel. When it is sending, it replaces WASD.
+        [SerializeField] private TagFsrInput tagInput;
 
         private readonly ConcurrentQueue<string> received = new ConcurrentQueue<string>();
         private readonly object stateLock = new object();
@@ -51,6 +53,9 @@ namespace SurgePrep
         private string sessionId;
         private Stopwatch clock;
         private float resetArmedUntil;
+        private bool hardwareActive;
+        private float hardwareForceN;
+        private bool hardwareContact;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
         public string SessionId => sessionId;
@@ -84,6 +89,7 @@ namespace SurgePrep
         private void Update()
         {
             UpdateKeyboardState();
+            Update_TagFsr();
             string latest = null;
             while (received.TryDequeue(out var payload))
             {
@@ -109,6 +115,27 @@ namespace SurgePrep
                     Status = "SOFA stream recovering…";
                 }
                 sceneRenderer.SetTarget(snapshot);
+            }
+        }
+
+        private void Update_TagFsr()
+        {
+            lock (stateLock)
+            {
+                hardwareActive = tagInput != null && tagInput.HasSignal;
+                if (!hardwareActive)
+                {
+                    hardwareForceN = 0f;
+                    hardwareContact = false;
+                    return;
+                }
+                tagInput.Read(out var pose, out var forceN, out var contact, out _);
+                xMm = pose.x;
+                yMm = pose.y;
+                zMm = pose.z;
+                hardwareForceN = forceN;
+                hardwareContact = contact;
+                Status = "LIVE — AprilTag position, FSR cut depth";
             }
         }
 
@@ -302,12 +329,18 @@ namespace SurgePrep
             float sampleY;
             float sampleZ;
             string sampleTool;
+            bool hardware;
+            float sampleForce;
+            bool sampleContact;
             lock (stateLock)
             {
                 sampleX = xMm;
                 sampleY = yMm;
                 sampleZ = zMm;
                 sampleTool = toolId;
+                hardware = hardwareActive;
+                sampleForce = hardwareForceN;
+                sampleContact = hardwareContact;
             }
             return new ToolSampleDto
             {
@@ -320,12 +353,12 @@ namespace SurgePrep
                 timestampMs = clock.ElapsedMilliseconds,
                 positionMm = new Vector3Dto { x = sampleX, y = sampleY, z = sampleZ },
                 orientation = IncisionHold,
-                forceN = 0f,
-                contact = false,
+                forceN = hardware ? sampleForce : 0f,
+                contact = hardware && sampleContact,
                 quality = 1f,
                 sourceHealthy = true,
-                inputMode = "pose-only",
-                forceMeasurementValid = false
+                inputMode = hardware ? "calibrated-hardware" : "pose-only",
+                forceMeasurementValid = hardware
             };
         }
 

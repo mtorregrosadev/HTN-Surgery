@@ -221,6 +221,7 @@ namespace SurgePrep.Editor
             window.transform.SetParent(tableTop, false);
             window.transform.localPosition = new Vector3(0.12f, 0.353f, 0.38f);
             window.transform.localRotation = Quaternion.identity;
+            window.AddComponent<DeskWorkspaceAnchor>();
 
             var simulation = new GameObject("RegistrationAnchor_SimulationPatch");
             simulation.transform.SetParent(window.transform, false);

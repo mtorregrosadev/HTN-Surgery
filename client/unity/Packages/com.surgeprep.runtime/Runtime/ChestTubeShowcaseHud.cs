@@ -83,6 +83,12 @@ namespace SurgePrep
             GUI.color = Color.white;
             y += 22f;
 
+            var trackingMode = (snapshot != null && snapshot.tool != null && snapshot.tool.inputMode == "calibrated-hardware")
+                ? "Physical Scalpel (3D Desk Space)"
+                : "Manual Keyboard Input";
+            GUI.Label(new Rect(38, y, 380, 18), "Input:  " + trackingMode, smallStyle);
+            y += 18f;
+
             if (snapshot != null && snapshot.tool != null)
             {
                 var contact = snapshot.tool.contact;

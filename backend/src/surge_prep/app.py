@@ -63,6 +63,14 @@ def create_app(store: Store | None = None, simulator: Simulator | None = None) -
     async def create_session(request: SessionCreate) -> Session:
         return await service.create_session(request)
 
+    @app.get("/v1/sessions", response_model=list[Session])
+    async def list_sessions() -> list[Session]:
+        return await service.list_sessions()
+
+    @app.get("/v1/sessions/active", response_model=Session)
+    async def get_active_session() -> Session:
+        return await service.get_active_session()
+
     @app.get("/v1/sessions/{session_id}", response_model=Session)
     async def get_session(session_id: str) -> Session:
         return await service.require_session(session_id)

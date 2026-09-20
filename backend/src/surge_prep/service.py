@@ -57,6 +57,16 @@ class TrainingService:
         await self.store.save_session(session)
         return session
 
+    async def list_sessions(self) -> list[Session]:
+        return await self.store.list_sessions()
+
+    async def get_active_session(self) -> Session:
+        sessions = await self.store.list_sessions()
+        active = [s for s in sessions if s.status == SessionStatus.active]
+        if not active:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No active session found")
+        return active[-1]
+
     def _tool_allowed(self, session: Session, sample: ToolSample) -> bool:
         if sample.tool_id == session.tool_id:
             return True

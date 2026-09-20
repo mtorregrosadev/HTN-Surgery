@@ -122,6 +122,14 @@ def create_app(upstream: Upstream | None = None) -> FastAPI:
     async def create_session(body: dict[str, Any]) -> JSONResponse:
         return await proxy("POST", "/v1/sessions", body)
 
+    @app.get("/v1/sessions")
+    async def list_sessions() -> JSONResponse:
+        return await proxy("GET", "/v1/sessions")
+
+    @app.get("/v1/sessions/active")
+    async def get_active_session() -> JSONResponse:
+        return await proxy("GET", "/v1/sessions/active")
+
     @app.get("/v1/sessions/{session_id}")
     async def get_session(session_id: str) -> JSONResponse:
         return await proxy("GET", f"/v1/sessions/{session_id}")

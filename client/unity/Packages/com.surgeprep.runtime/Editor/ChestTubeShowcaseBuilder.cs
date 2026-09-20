@@ -234,7 +234,7 @@ namespace SurgePrep.Editor
                 );
             }
             var stream = simulation.AddComponent<ScalpelStreamClient>();
-            stream.enabled = false;
+            stream.enabled = true;
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
             var hud = simulation.AddComponent<ChestTubeShowcaseHud>();
             SetObject(renderer, "tissueMaterial", tissue);

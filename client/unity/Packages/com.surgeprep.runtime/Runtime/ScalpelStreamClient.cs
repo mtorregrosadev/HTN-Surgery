@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -16,7 +17,7 @@ namespace SurgePrep
     /// </summary>
     public sealed class ScalpelStreamClient : MonoBehaviour
     {
-        [SerializeField] private string controllerUrl = "ws://localhost:8100";
+        [SerializeField] private string controllerUrl = "http://localhost:8100";
         [SerializeField] private string sessionId = "replace-with-active-session";
         [SerializeField] private SimulationSceneRenderer sceneRenderer;
 
@@ -25,6 +26,20 @@ namespace SurgePrep
         private CancellationTokenSource cancellation;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
+        public string SessionId => sessionId;
+
+        public void SetSessionId(string id)
+        {
+            if (!string.IsNullOrEmpty(id) && id != sessionId)
+            {
+                sessionId = id;
+                if (isActiveAndEnabled)
+                {
+                    OnDisable();
+                    OnEnable();
+                }
+            }
+        }
 
         private async void OnEnable()
         {
@@ -63,10 +78,51 @@ namespace SurgePrep
 
         private async Task ConnectAndReceive(CancellationToken token)
         {
+            var httpBase = controllerUrl.TrimEnd('/')
+                .Replace("ws://", "http://")
+                .Replace("wss://", "https://");
+            var wsBase = httpBase
+                .Replace("http://", "ws://")
+                .Replace("https://", "wss://");
+
+            // Auto-discover active session if not configured
+            if (string.IsNullOrEmpty(sessionId) || sessionId == "replace-with-active-session")
+            {
+                using (var http = new HttpClient())
+                {
+                    while (!token.IsCancellationRequested && (string.IsNullOrEmpty(sessionId) || sessionId == "replace-with-active-session"))
+                    {
+                        try
+                        {
+                            var resp = await http.GetAsync($"{httpBase}/v1/sessions/active", token);
+                            if (resp.IsSuccessStatusCode)
+                            {
+                                var json = await resp.Content.ReadAsStringAsync();
+                                var sess = JsonUtility.FromJson<SessionDto>(json);
+                                if (sess != null && !string.IsNullOrEmpty(sess.sessionId))
+                                {
+                                    sessionId = sess.sessionId;
+                                    Debug.Log($"[ScalpelStreamClient] Auto-attached to active session: {sessionId}");
+                                    break;
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Await session creation
+                        }
+                        await Task.Delay(1000, token);
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(sessionId) || sessionId == "replace-with-active-session")
+            {
+                return;
+            }
+
             socket = new ClientWebSocket();
-            var uri = new Uri(
-                $"{controllerUrl.TrimEnd('/')}/v1/sessions/{sessionId}/client-stream"
-            );
+            var uri = new Uri($"{wsBase}/v1/sessions/{sessionId}/client-stream");
             await socket.ConnectAsync(uri, token);
             var buffer = new byte[1024 * 256];
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)

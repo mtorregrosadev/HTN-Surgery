@@ -137,7 +137,12 @@ class ControllerBridge:
 
 def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv2.VideoCapture], int]:
     """Auto-detect and open an active, non-blank camera stream."""
-    candidates = [preferred_index] if preferred_index is not None else []
+    if preferred_index is not None:
+        candidates = [preferred_index]
+    elif sys.platform == "darwin":
+        candidates = [1, 0, 2, 3]
+    else:
+        candidates = [0, 1, 2, 3]
     candidates += [i for i in range(5) if i not in candidates]
     backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
 
@@ -161,6 +166,63 @@ def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv
     return None, 0
 
 
+def resolve_or_create_session(controller_url: str, session_id: str) -> tuple[str, str]:
+    """Resolve an active session from the controller or create a new calibrated session."""
+    import urllib.request
+    ctrl = controller_url.rstrip("/")
+    if session_id and session_id not in ("auto", "demo-session-1"):
+        return session_id, "calib-demo-default"
+
+    # 1. Check for active session on controller
+    try:
+        req = urllib.request.Request(f"{ctrl}/v1/sessions/active")
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                active_id = data.get("sessionId")
+                if active_id:
+                    print(f"[Session] Auto-attached to active controller session: {active_id}", flush=True)
+                    return active_id, data.get("calibrationId", "calib-demo-default")
+    except Exception:
+        pass
+
+    # 2. Create new session with demo calibration if none exists
+    try:
+        calib_data = json.dumps({
+            "deviceId": "apriltag-scalpel-tracker",
+            "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            "rmsErrorMm": 0.05
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{ctrl}/v1/calibrations",
+            data=calib_data,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            calib = json.loads(resp.read().decode("utf-8"))
+            calib_id = calib.get("calibrationId", "calib-demo-default")
+
+        sess_data = json.dumps({
+            "exerciseId": "chest-tube-access-demo",
+            "calibrationId": calib_id,
+            "toolId": "scalpel",
+            "deviceId": "apriltag-scalpel-tracker"
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{ctrl}/v1/sessions",
+            data=sess_data,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            sess = json.loads(resp.read().decode("utf-8"))
+            new_id = sess.get("sessionId", "demo-session-live")
+            print(f"[Session] Created active surgical training session: {new_id}", flush=True)
+            return new_id, calib_id
+    except Exception as e:
+        print(f"[Session] Note: Controller session creation ({e}); using default session ID.", flush=True)
+        return "demo-session-live", "calib-demo-default"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Track AprilTag scalpel in 3D desk space & stream to controller")
     ap.add_argument("--camera", type=int, default=None, help="Camera index (default: auto-detect)")
@@ -171,7 +233,7 @@ def main():
     ap.add_argument("--tool-tag-size", type=float, default=24.0, help="Tool tags physical size in mm")
     ap.add_argument("--tip-offset", type=float, default=65.0, help="Blade tip offset along handle in mm")
     ap.add_argument("--controller", default="http://localhost:8100", help="Scalpel controller URL")
-    ap.add_argument("--session", default="demo-session-1", help="Controller session ID")
+    ap.add_argument("--session", default="auto", help="Controller session ID or 'auto' to attach to active session")
     ap.add_argument("--csv", help="Optional CSV logging path")
     args = ap.parse_args()
 
@@ -207,7 +269,8 @@ def main():
     status_toast = ""
     toast_until = 0.0
 
-    bridge = ControllerBridge(controller_url=args.controller, session_id=args.session)
+    session_id, calib_id = resolve_or_create_session(args.controller, args.session)
+    bridge = ControllerBridge(controller_url=args.controller, session_id=session_id, calibration_id=calib_id)
     bridge.start()
 
     log_file = open(args.csv, "w") if args.csv else None

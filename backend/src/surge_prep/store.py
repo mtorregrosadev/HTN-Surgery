@@ -40,6 +40,9 @@ class Store(ABC):
     @abstractmethod
     async def list_snapshots(self, session_id: str) -> list[SimulationSnapshot]: ...
 
+    @abstractmethod
+    async def list_sessions(self) -> list[Session]: ...
+
 
 class MemoryStore(Store):
     name = "memory"
@@ -73,6 +76,9 @@ class MemoryStore(Store):
 
     async def list_snapshots(self, session_id: str) -> list[SimulationSnapshot]:
         return list(self.snapshots[session_id])
+
+    async def list_sessions(self) -> list[Session]:
+        return list(self.sessions.values())
 
 
 class MongoStore(Store):
@@ -124,4 +130,8 @@ class MongoStore(Store):
     async def list_snapshots(self, session_id: str) -> list[SimulationSnapshot]:
         cursor = self.db.snapshots.find({"sessionId": session_id}, {"_id": 0}).sort("tick", 1)
         return [SimulationSnapshot.model_validate(item) async for item in cursor]
+
+    async def list_sessions(self) -> list[Session]:
+        cursor = self.db.sessions.find({}, {"_id": 0}).sort("createdAt", -1)
+        return [Session.model_validate(item) async for item in cursor]
 

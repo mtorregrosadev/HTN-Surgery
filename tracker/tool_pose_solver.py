@@ -151,16 +151,17 @@ class ScalpelPoseSolver:
         if not tag_positions_cam:
             return None
 
-        # Mean tag cluster position and rotation
-        mean_tag_pos_cam = np.mean(tag_positions_cam, axis=0)
-        mean_rot_cam = tag_rotations_cam[0]  # Primary orientation reference
-
-        # Use exact tip offset vector from pivot calibration if available
-        if desk_calib.calibrated_tip_offset_mm is not None:
+        # Use exact tip offset vector from pivot calibration if available and physically valid
+        tip_offset_valid = (
+            desk_calib.calibrated_tip_offset_mm is not None
+            and 20.0 <= np.linalg.norm(desk_calib.calibrated_tip_offset_mm) <= 130.0
+            and abs(desk_calib.calibrated_tip_offset_mm[0]) < 30.0  # Should not stick wildly to the side
+        )
+        if tip_offset_valid:
             tip_vec = np.asarray(desk_calib.calibrated_tip_offset_mm, dtype=np.float64)
             blade_tip_cam = mean_tag_pos_cam + (mean_rot_cam @ tip_vec)
         else:
-            # Fallback to nominal handle axis offset
+            # Fallback to nominal handle axis offset (+Y is down the handle toward tip)
             tool_handle_axis_cam = mean_rot_cam[:, 1]
             blade_tip_cam = mean_tag_pos_cam + (tool_handle_axis_cam * self.tip_offset_along_handle_mm)
 

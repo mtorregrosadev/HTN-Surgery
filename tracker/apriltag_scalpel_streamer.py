@@ -28,6 +28,7 @@ from .desk_calibration import (
     draw_desk_plane_grid,
     estimate_desk_from_tag,
     get_default_camera_matrix,
+    get_default_desk_calibration,
     load_desk_calibration,
     save_desk_calibration,
 )
@@ -259,10 +260,17 @@ def main():
     )
 
     desk_calib = load_desk_calibration()
-    if desk_calib:
-        print(f"[Desk] Loaded existing desk calibration ({desk_calib.calibration_method}).", flush=True)
+    # Check if existing calibration is healthy (positive depth > 100mm, valid matrix)
+    if desk_calib and (desk_calib.origin_cam[2] < 100.0 or desk_calib.r_cam_to_desk[0][0] < 0.3):
+        print("[Desk] Detected degenerate calibration file. Re-initializing to robust 6-DOF controller space.", flush=True)
+        desk_calib = None
+
+    if desk_calib is None:
+        desk_calib = get_default_desk_calibration()
+        save_desk_calibration(desk_calib)
+        print("[Desk] 6-DOF Controller Tracking active. (Hold scalpel at start position and press Space to Tare/Recenter).", flush=True)
     else:
-        print("[Desk] No saved calibration. Press 'p' to pivot scalpel on desk or place Desk Tag 0.", flush=True)
+        print(f"[Desk] Loaded existing desk calibration ({desk_calib.calibration_method}).", flush=True)
 
     pivot_calibrator = PivotCalibrator(min_samples=45)
     pivot_mode = False
@@ -425,13 +433,29 @@ def main():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 200, 200), 1, cv2.LINE_AA)
 
             mode_str = f"Fast ({current_scale:.1f}x)" if current_scale < 0.99 else "Full (1.0x)"
-            line3 = f"Cam {camera_idx} ({w}x{h}) | {mode_str} [f] | [p] Pivot Calibrate | [c] Tag Calib | [q] Quit"
+            line3 = f"[Space/t] Tare Recenter | [p] Pivot Calib | [c] Tag Calib | [r] Reset Space | [f] Speed | [q] Quit"
             cv2.putText(frame, line3, (14, 66), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (170, 170, 170), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
+            if key in (ord("t"), ord(" "), ord("z")):
+                if current_pose is not None:
+                    desk_calib.origin_cam = list(current_pose.cam_pos_mm)
+                    save_desk_calibration(desk_calib)
+                    status_toast = "RECENTERED CONTROLLER: (0, 0, 0) set to current scalpel tip!"
+                    toast_until = now + 3.0
+                    print(f"[Tare] {status_toast}", flush=True)
+                else:
+                    status_toast = "Cannot Tare: Hold scalpel in view of camera"
+                    toast_until = now + 2.0
+            if key == ord("r"):
+                desk_calib = get_default_desk_calibration()
+                save_desk_calibration(desk_calib)
+                status_toast = "RESET: Restored default 6-DOF controller space"
+                toast_until = now + 3.0
+                print(f"[Reset] {status_toast}", flush=True)
             if key == ord("p"):
                 pivot_mode = not pivot_mode
                 pivot_calibrator.reset()

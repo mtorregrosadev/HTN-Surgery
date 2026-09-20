@@ -300,28 +300,28 @@ def resolve_or_create_session(
             raise RuntimeError("controller returned a non-object response")
         return payload
 
+    if desk_calib is None or not _is_measured_calibration(desk_calib):
+        raise RuntimeError("a measured desk calibration is required before creating a session")
+
     if not force_new and session_id and session_id not in ("auto", "demo-session-1"):
         data = read_json(urllib.request.Request(f"{ctrl}/v1/sessions/{session_id}"))
-        calibration_id = data.get("calibrationId")
-        if not calibration_id or data.get("status") not in (None, "active"):
-            raise RuntimeError(f"session {session_id!r} is missing an active calibration")
-        return session_id, str(calibration_id), int(data.get("lastSequence") or 0)
+        if not _session_matches_tracker(data, desk_calib):
+            raise RuntimeError(
+                f"session {session_id!r} does not match this tracker and desk calibration"
+            )
+        return session_id, str(data["calibrationId"]), int(data.get("lastSequence") or 0)
 
     # 1. Check for active session on controller if not forcing new
     if not force_new:
         try:
             data = read_json(urllib.request.Request(f"{ctrl}/v1/sessions/active"))
             active_id = data.get("sessionId")
-            calibration_id = data.get("calibrationId")
-            if active_id and calibration_id and data.get("status") in (None, "active"):
+            if active_id and _session_matches_tracker(data, desk_calib):
                 last_seq = data.get("lastSequence", 0) or 0
                 print(f"[Session] Auto-attached to active controller session: {active_id} (lastSequence: {last_seq})", flush=True)
-                return str(active_id), str(calibration_id), int(last_seq)
+                return str(active_id), str(data["calibrationId"]), int(last_seq)
         except RuntimeError:
             pass
-
-    if desk_calib is None or not desk_calib.is_valid():
-        raise RuntimeError("a valid measured desk calibration is required before creating a session")
 
     calib_data = json.dumps({
         "deviceId": "apriltag-scalpel-tracker",
@@ -414,26 +414,7 @@ def main():
     toast_until = 0.0
 
     bridge: Optional[ControllerBridge] = None
-    # A nominal desk frame is useful for displaying the camera feed while the
-    # user places the tool, but it is not a session calibration.  The bridge is
-    # started only after the initial tare creates a real, session-bound frame.
-    if desk_calib.calibration_method != "nominal-controller":
-        session_id, calib_id, last_seq = resolve_or_create_session(
-            args.controller,
-            args.session,
-            force_new=args.new_session,
-            desk_calib=desk_calib,
-        )
-        bridge = ControllerBridge(
-            controller_url=args.controller,
-            session_id=session_id,
-            calibration_id=calib_id,
-            initial_sequence=last_seq,
-            motion_scale=args.motion_scale,
-        )
-        bridge.start()
-    else:
-        print("[Session] Waiting for the first measured tare before creating a session.", flush=True)
+    print("[Session] Calibrate or review the desk frame, then press 'l' to start streaming.", flush=True)
 
     log_file = open(args.csv, "w") if args.csv else None
     if log_file:
@@ -486,10 +467,11 @@ def main():
     print("  '+' / '-': Raise/Lower Desk Height (+/- 5 mm)")
     print("  Space / 't': Tare / Recenter (0,0,0) to current scalpel tip")
     print("  'p': Pivot Calibrate")
+    print("  'l': Start session and live stream with the measured calibration")
+    print("  'x': Stop live stream to recalibrate")
     print("  'q'/Esc: Quit\n", flush=True)
 
-    initial_tumbado_locked = False
-    settle_counter = 0
+    start_requested = False
 
     def start_session_bridge(calibration: DeskCalibration) -> ControllerBridge:
         """Create a stream only after the calibration frame is finalized."""
@@ -610,33 +592,11 @@ def main():
 
             if current_pose is not None:
                 session_just_started = False
-                # Auto-calibrate initial resting Tumbado position if uncalibrated
-                if bridge is None and not initial_tumbado_locked and desk_calib and desk_calib.calibration_method == "nominal-controller":
-                    settle_counter += 1
-                    if settle_counter >= 6:
-                        tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
-                        ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
-                        ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
-                        desk_calib = get_default_desk_calibration(origin_cam=tip_cam, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
-                        desk_calib.calibration_method = "start-tumbado"
-                        save_desk_calibration(desk_calib)
-                        initial_tumbado_locked = True
-                        pose_solver.reset_tracking()
-                        bridge = start_session_bridge(desk_calib)
-                        # The pose above was solved in the nominal frame.  Do
-                        # not send it under the newly-created calibration; the
-                        # next camera sample will be the first session sample.
-                        session_just_started = True
-                        status_toast = "TUMBADO (RESTING ON TABLE): (0, 0, 0) LOCKED -> 1:1 Unity Live!"
-                        toast_until = now + 4.0
-                        print(f"[Tumbado] {status_toast}", flush=True)
-
-                # Tare, tag, drawn-area, and successful pivot calibration all
-                # finalize a real frame before the first session sample.
-                if bridge is None and desk_calib and desk_calib.calibration_method != "nominal-controller":
+                if bridge is None and start_requested and _is_measured_calibration(desk_calib):
                     pose_solver.reset_tracking()
                     bridge = start_session_bridge(desk_calib)
                     session_just_started = True
+                    start_requested = False
 
                 if bridge is not None and not session_just_started:
                     bridge.queue_sample(current_pose)
@@ -711,13 +671,26 @@ def main():
                 cv2.putText(frame, lost_text, (14, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, lost_color, 1, cv2.LINE_AA)
 
-            line3 = "[t] Start Tumbado / Zero | [Drag Mouse] Draw Area | [g] Grid | [s] Snap Desk | [d] Default | [[ / ]] Tilt | [q] Quit"
+            line3 = "[t] Tare | [s] Snap Desk | [p] Pivot | [l] Live stream | [x] Stop/recalibrate | [g] Grid | [q] Quit"
             cv2.putText(frame, line3, (14, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (170, 170, 170), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
+            if key == ord("x") and bridge is not None:
+                bridge.stop()
+                bridge = None
+                status_toast = "Live stream stopped. Update calibration, then press L to start a new session."
+                toast_until = now + 4.0
+            if key in (ord("l"), ord("\r"), ord("\n")) and bridge is None:
+                if _is_measured_calibration(desk_calib):
+                    start_requested = True
+                    status_toast = "Starting session with the current measured calibration..."
+                    toast_until = now + 2.0
+                else:
+                    status_toast = "Calibrate with Tare, Snap Desk, Pivot, or a desk tag before starting."
+                    toast_until = now + 3.0
             if bridge is None and key in (ord("t"), ord(" "), ord("z")):
                 if current_pose is not None:
                     tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)

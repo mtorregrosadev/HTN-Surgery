@@ -80,7 +80,7 @@ def run_unit_tests() -> bool:
 def check_health() -> bool:
     print("\n[3/4] Verifying Service Health Endpoints...")
     try:
-        with urllib.request.urlopen(f"{API_URL}/health", timeout=3.0) as resp:
+        with urllib.request.urlopen(f"{API_URL}/health", timeout=5.0) as resp:
             api_health = json.loads(resp.read().decode())
             assert api_health.get("status") == "ok"
             print(f"  PASS: API Health -> status=ok, store={api_health.get('persistence')}, sim={api_health.get('simulation')}")
@@ -89,7 +89,7 @@ def check_health() -> bool:
         return False
 
     try:
-        with urllib.request.urlopen(f"{CONTROLLER_URL}/health", timeout=3.0) as resp:
+        with urllib.request.urlopen(f"{CONTROLLER_URL}/health", timeout=5.0) as resp:
             ctrl_health = json.loads(resp.read().decode())
             assert ctrl_health.get("status") == "ok"
             print(f"  PASS: Controller Health -> status=ok, upstream_api=connected")

@@ -2407,7 +2407,7 @@ LineRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 301475547}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -2531,7 +2531,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   deskDimensionsMm: {x: 280, y: 200}
   boundaryColor: {r: 0.18, g: 0.65, b: 0.85, a: 0.45}
-  showInGame: 1
+  showInGame: 0
 --- !u!1 &302086157
 GameObject:
   m_ObjectHideFlags: 0

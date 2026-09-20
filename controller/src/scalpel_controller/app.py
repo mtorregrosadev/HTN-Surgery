@@ -40,6 +40,7 @@ class SessionHub:
     def __init__(self, upstream: Upstream) -> None:
         self.upstream = upstream
         self.clients: dict[str, set[WebSocket]] = defaultdict(set)
+        self.session_sequences: dict[str, int] = {}
 
     async def client_stream(self, socket: WebSocket, session_id: str) -> None:
         await socket.accept()
@@ -63,9 +64,34 @@ class SessionHub:
         try:
             while True:
                 sample = await socket.receive_json()
+                seq = sample.get("sequence", 0)
+                last_seq = self.session_sequences.get(session_id)
+                if last_seq is None:
+                    s_code, s_info = await self.upstream.request("GET", f"/v1/sessions/{session_id}")
+                    if s_code < 400 and isinstance(s_info, dict):
+                        last_seq = s_info.get("lastSequence") or 0
+                    else:
+                        last_seq = 0
+                    self.session_sequences[session_id] = last_seq
+
+                if seq <= self.session_sequences[session_id]:
+                    self.session_sequences[session_id] += 1
+                    sample["sequence"] = self.session_sequences[session_id]
+                else:
+                    self.session_sequences[session_id] = seq
+
                 status_code, snapshot = await self.upstream.request(
                     "POST", f"/v1/sessions/{session_id}/samples", sample
                 )
+                if status_code == 409 and "sequence" in str(snapshot).lower():
+                    s_code, s_info = await self.upstream.request("GET", f"/v1/sessions/{session_id}")
+                    if s_code < 400 and isinstance(s_info, dict):
+                        self.session_sequences[session_id] = (s_info.get("lastSequence") or 0) + 1
+                        sample["sequence"] = self.session_sequences[session_id]
+                        status_code, snapshot = await self.upstream.request(
+                            "POST", f"/v1/sessions/{session_id}/samples", sample
+                        )
+
                 if status_code >= 400:
                     await socket.send_json(
                         {"type": "error", "status": status_code, "detail": snapshot}

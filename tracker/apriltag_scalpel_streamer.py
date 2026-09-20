@@ -50,9 +50,9 @@ COLORS = [(0, 0, 255), (0, 200, 0), (255, 100, 0), (0, 200, 255), (255, 0, 255)]
 
 
 class ControllerBridge:
-    """Async background bridge to the Scalpel Controller WebSocket."""
+    """Streams physical scalpel poses to the Scalpel Controller over WebSockets."""
 
-    def __init__(self, controller_url: str, session_id: str, calibration_id: str = "desk-calib-1"):
+    def __init__(self, controller_url: str, session_id: str, calibration_id: str, initial_sequence: int = 0):
         self.controller_url = controller_url.rstrip("/")
         self.session_id = session_id
         self.calibration_id = calibration_id
@@ -62,8 +62,8 @@ class ControllerBridge:
         self._sample_queue: deque = deque(maxlen=2)
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._sequence = 0
-        self.start_time = time.perf_counter()
+        self._sequence = initial_sequence
+        self.start_time = time.time()
 
     def start(self):
         self._stop_event.clear()
@@ -76,7 +76,7 @@ class ControllerBridge:
             self._thread.join(timeout=1.0)
 
     def queue_sample(self, pose: ToolPose6DOF):
-        now_ms = int((time.perf_counter() - self.start_time) * 1000)
+        now_ms = int(time.time() * 1000)
         self._sequence += 1
         sample = {
             "contractVersion": "1.1",
@@ -124,9 +124,13 @@ class ControllerBridge:
                             try:
                                 resp_raw = await asyncio.wait_for(ws.recv(), timeout=0.08)
                                 resp = json.loads(resp_raw)
-                                self.latest_snapshot = resp
-                                if "simulationBackend" in resp:
-                                    self.sofa_backend = resp["simulationBackend"]
+                                if resp.get("type") == "error":
+                                    if resp.get("status") == 409:
+                                        self._sequence += 1000
+                                else:
+                                    self.latest_snapshot = resp
+                                    if "simulationBackend" in resp:
+                                        self.sofa_backend = resp["simulationBackend"]
                             except asyncio.TimeoutError:
                                 pass
                         else:
@@ -168,25 +172,28 @@ def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv
     return None, 0
 
 
-def resolve_or_create_session(controller_url: str, session_id: str) -> tuple[str, str]:
+def resolve_or_create_session(controller_url: str, session_id: str, force_new: bool = False) -> tuple[str, str, int]:
     """Resolve an active session from the controller or create a new calibrated session."""
     import urllib.request
     ctrl = controller_url.rstrip("/")
-    if session_id and session_id not in ("auto", "demo-session-1"):
-        return session_id, "calib-demo-default"
+    if not force_new and session_id and session_id not in ("auto", "demo-session-1"):
+        return session_id, "calib-demo-default", 0
 
-    # 1. Check for active session on controller
-    try:
-        req = urllib.request.Request(f"{ctrl}/v1/sessions/active")
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
-            if resp.status == 200:
-                data = json.loads(resp.read().decode("utf-8"))
-                active_id = data.get("sessionId")
-                if active_id:
-                    print(f"[Session] Auto-attached to active controller session: {active_id}", flush=True)
-                    return active_id, data.get("calibrationId", "calib-demo-default")
-    except Exception:
-        pass
+    # 1. Check for active session on controller if not forcing new
+    if not force_new:
+        try:
+            req = urllib.request.Request(f"{ctrl}/v1/sessions/active")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    active_id = data.get("sessionId")
+                    if active_id:
+                        last_seq = data.get("lastSequence", 0) or 0
+                        calib_id = data.get("calibrationId", "calib-demo-default")
+                        print(f"[Session] Auto-attached to active controller session: {active_id} (lastSequence: {last_seq})", flush=True)
+                        return active_id, calib_id, last_seq
+        except Exception:
+            pass
 
     # 2. Create new session with demo calibration if none exists
     try:
@@ -219,10 +226,10 @@ def resolve_or_create_session(controller_url: str, session_id: str) -> tuple[str
             sess = json.loads(resp.read().decode("utf-8"))
             new_id = sess.get("sessionId", "demo-session-live")
             print(f"[Session] Created active surgical training session: {new_id}", flush=True)
-            return new_id, calib_id
+            return new_id, calib_id, 0
     except Exception as e:
         print(f"[Session] Note: Controller session creation ({e}); using default session ID.", flush=True)
-        return "demo-session-live", "calib-demo-default"
+        return "demo-session-live", "calib-demo-default", 0
 
 
 def main():
@@ -236,6 +243,7 @@ def main():
     ap.add_argument("--tip-offset", type=float, default=65.0, help="Blade tip offset along handle in mm")
     ap.add_argument("--controller", default="http://localhost:8100", help="Scalpel controller URL")
     ap.add_argument("--session", default="auto", help="Controller session ID or 'auto' to attach to active session")
+    ap.add_argument("--new-session", action="store_true", help="Force creating a new active session instead of attaching")
     ap.add_argument("--csv", help="Optional CSV logging path")
     args = ap.parse_args()
 
@@ -278,8 +286,8 @@ def main():
     status_toast = ""
     toast_until = 0.0
 
-    session_id, calib_id = resolve_or_create_session(args.controller, args.session)
-    bridge = ControllerBridge(controller_url=args.controller, session_id=session_id, calibration_id=calib_id)
+    session_id, calib_id, last_seq = resolve_or_create_session(args.controller, args.session, force_new=args.new_session)
+    bridge = ControllerBridge(controller_url=args.controller, session_id=session_id, calibration_id=calib_id, initial_sequence=last_seq)
     bridge.start()
 
     log_file = open(args.csv, "w") if args.csv else None
@@ -332,6 +340,9 @@ def main():
     print("  Space / 't': Tare / Recenter (0,0,0) to current scalpel tip")
     print("  'p': Pivot Calibrate")
     print("  'q'/Esc: Quit\n", flush=True)
+
+    initial_tumbado_locked = False
+    settle_counter = 0
 
     try:
         while True:
@@ -434,6 +445,21 @@ def main():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 255), 1, cv2.LINE_AA)
 
             if current_pose is not None:
+                # Auto-calibrate initial resting Tumbado position if uncalibrated
+                if not initial_tumbado_locked and desk_calib and desk_calib.calibration_method == "nominal-controller":
+                    settle_counter += 1
+                    if settle_counter >= 6:
+                        tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
+                        ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
+                        ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
+                        desk_calib = get_default_desk_calibration(origin_cam=tip_cam, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
+                        desk_calib.calibration_method = "start-tumbado"
+                        save_desk_calibration(desk_calib)
+                        initial_tumbado_locked = True
+                        status_toast = "TUMBADO (RESTING ON TABLE): (0, 0, 0) LOCKED -> 1:1 Unity Live!"
+                        toast_until = now + 4.0
+                        print(f"[Tumbado] {status_toast}", flush=True)
+
                 bridge.queue_sample(current_pose)
                 pose_solver.draw_tool_3d(frame, current_pose, desk_calib)
 
@@ -455,35 +481,43 @@ def main():
                 cv2.line(frame, a, b, (0, 255, 255), 2, cv2.LINE_AA)
 
             # 6. Render HUD Overlay
-            cv2.rectangle(frame, (8, 8), (min(w - 8, 760), 72), (20, 20, 20), cv2.FILLED)
+            cv2.rectangle(frame, (8, 8), (min(w - 8, 860), 78), (20, 20, 20), cv2.FILLED)
             if desk_calib and desk_calib.is_valid():
                 method_name = desk_calib.calibration_method.upper()
                 ext_w = int(getattr(desk_calib, "extent_x_mm", 160.0) * 2)
                 ext_d = int(getattr(desk_calib, "extent_z_mm", 110.0) * 2)
                 desk_str = f"LOCKED ({ext_w}x{ext_d}mm {method_name})"
             else:
-                desk_str = "UNSET (Drag mouse to draw area on desk)"
+                desk_str = "UNSET (Place flat & press 't')"
             stream_str = f"LIVE ({bridge.sofa_backend})" if bridge.connected else "OFFLINE"
-            line1 = f"FPS: {fps:4.1f} | Area: {desk_str} | Stream: {stream_str}"
+            line1 = f"FPS: {fps:4.1f} | Table: {desk_str} | Stream: {stream_str}"
             cv2.putText(frame, line1, (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1, cv2.LINE_AA)
 
             if now < toast_until:
-                cv2.putText(frame, status_toast, (14, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (50, 255, 50), 1, cv2.LINE_AA)
+                cv2.putText(frame, status_toast, (14, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (50, 255, 50), 1, cv2.LINE_AA)
             elif current_pose is not None:
-                contact_str = "CONTACT [YES]" if current_pose.y_mm <= 0 else f"Hover (+{current_pose.y_mm:.1f}mm)"
+                is_tumbado = abs(current_pose.y_mm) <= 6.0
+                if is_tumbado:
+                    mode_str = "TUMBADO (ON DESK)"
+                    txt_col = (50, 255, 50)
+                elif current_pose.y_mm < 0:
+                    mode_str = f"INCISING ({current_pose.y_mm:.1f}mm)"
+                    txt_col = (0, 140, 255)
+                else:
+                    mode_str = f"HOVER (+{current_pose.y_mm:.1f}mm)"
+                    txt_col = (50, 220, 255)
                 ext_x = getattr(desk_calib, "extent_x_mm", 160.0)
                 ext_z = getattr(desk_calib, "extent_z_mm", 110.0)
                 in_area = abs(current_pose.x_mm) <= ext_x and abs(current_pose.z_mm) <= ext_z
                 area_tag = "IN ZONE" if in_area else "OUT OF ZONE"
-                line2 = f"Scalpel: ({current_pose.x_mm:4.0f}, {current_pose.y_mm:4.0f}, {current_pose.z_mm:4.0f} mm) | {contact_str} [{area_tag}]"
-                txt_col = (50, 255, 50) if in_area else (0, 180, 255)
-                cv2.putText(frame, line2, (14, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.44, txt_col, 1, cv2.LINE_AA)
+                line2 = f"Scalpel: ({current_pose.x_mm:4.0f}, {current_pose.y_mm:4.0f}, {current_pose.z_mm:4.0f} mm) | [{mode_str}] [{area_tag}] -> Unity 1:1"
+                cv2.putText(frame, line2, (14, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.44, txt_col, 1, cv2.LINE_AA)
             else:
-                cv2.putText(frame, "Scalpel: Searching for Tag 1 on tool handle...", (14, 48),
+                cv2.putText(frame, "Scalpel: Searching for Tag 1 on tool handle...", (14, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 200, 200), 1, cv2.LINE_AA)
 
-            line3 = "[Drag Mouse] Draw Area | [s] Snap Desk to Scalpel | [d] Default Area | [Space] Tare | [[ / ]] Tilt | [q] Quit"
-            cv2.putText(frame, line3, (14, 66), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (170, 170, 170), 1, cv2.LINE_AA)
+            line3 = "[t] Start Tumbado / Zero | [Drag Mouse] Draw Area | [s] Snap Desk | [d] Default | [[ / ]] Tilt | [q] Quit"
+            cv2.putText(frame, line3, (14, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (170, 170, 170), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -491,13 +525,17 @@ def main():
                 break
             if key in (ord("t"), ord(" "), ord("z")):
                 if current_pose is not None:
-                    desk_calib.origin_cam = list(current_pose.cam_pos_mm)
+                    tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
+                    ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
+                    ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
+                    desk_calib = get_default_desk_calibration(origin_cam=tip_cam, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
+                    desk_calib.calibration_method = "start-tumbado"
                     save_desk_calibration(desk_calib)
-                    status_toast = "RECENTERED CONTROLLER: (0, 0, 0) set to current scalpel tip!"
-                    toast_until = now + 3.0
-                    print(f"[Tare] {status_toast}", flush=True)
+                    status_toast = "TUMBADO CALIBRATED: Scalpel flat on desk (Z=0). 1:1 Linked to Unity!"
+                    toast_until = now + 4.0
+                    print(f"[Tumbado] {status_toast}", flush=True)
                 else:
-                    status_toast = "Cannot Tare: Hold scalpel in view of camera"
+                    status_toast = "Cannot Tare: Place scalpel flat in view of camera"
                     toast_until = now + 2.0
             if key in (ord("s"), ord("c")):
                 if current_pose is not None:

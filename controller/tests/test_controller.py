@@ -50,3 +50,40 @@ def test_hardware_snapshot_reaches_vr_client():
                 snapshot = vr.receive_json()
                 assert snapshot["sessionId"] == "demo"
                 assert snapshot["events"] == ["contact-start"]
+
+
+def test_hardware_reconnect_monotonic_sequence():
+    posted_sequences = []
+
+    class SequenceRecordingUpstream(FakeUpstream):
+        async def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+            if path.endswith("/samples"):
+                posted_sequences.append(body.get("sequence"))
+                return 200, {
+                    "contractVersion": "1.0",
+                    "sessionId": body["sessionId"],
+                    "tick": len(posted_sequences),
+                    "tool": {
+                        "positionMm": body["positionMm"],
+                        "forceN": 0.0,
+                        "contact": False,
+                    },
+                }
+            return await super().request(method, path, body)
+
+    with TestClient(create_app(SequenceRecordingUpstream())) as client:
+        with client.websocket_connect("/v1/sessions/demo/client-stream") as vr:
+            with client.websocket_connect("/v1/sessions/demo/hardware-stream") as hardware:
+                hardware.send_json({"sessionId": "demo", "sequence": 50, "positionMm": {"x": 0, "y": 0, "z": 0}})
+                _ = hardware.receive_json()
+                _ = vr.receive_json()
+
+            # Hardware reconnects and resets sequence counter to 1
+            with client.websocket_connect("/v1/sessions/demo/hardware-stream") as hardware:
+                hardware.send_json({"sessionId": "demo", "sequence": 1, "positionMm": {"x": 1, "y": 1, "z": 1}})
+                _ = hardware.receive_json()
+                _ = vr.receive_json()
+
+    # The controller must have advanced sequence monotonically from 50 to 51
+    assert posted_sequences == [50, 51]
+

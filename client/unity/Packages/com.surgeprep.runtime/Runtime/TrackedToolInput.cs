@@ -24,6 +24,7 @@ namespace SurgePrep
     public abstract class TrackedToolInput : MonoBehaviour
     {
         public abstract bool HasSignal { get; }
+        public abstract string TrackingStatus { get; }
         public abstract bool TryRead(out TrackedToolSample sample);
     }
 }

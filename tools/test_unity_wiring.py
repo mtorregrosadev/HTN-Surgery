@@ -163,6 +163,21 @@ def test_physical_inputs_share_the_controller_bound_pose_contract():
     assert 'inputMode = hardware ? "calibrated-hardware" : "pose-only"' in client
 
 
+def test_optional_keijiro_tracker_is_isolated_and_six_dof():
+    integration = os.path.join(PACKAGE, "Runtime", "AprilTag")
+    asmdef = read(os.path.join(integration, "SurgePrep.AprilTag.asmdef"))
+    tracker = read(os.path.join(integration, "AprilTagStylusInput.cs"))
+    installer = read(os.path.join(PACKAGE, "Editor", "AprilTagPackageInstaller.cs"))
+    builder = read(os.path.join(PACKAGE, "Editor", "ChestTubeShowcaseBuilder.cs"))
+    assert '"AprilTag.Runtime"' in asmdef
+    assert '"SURGE_PREP_HAS_APRILTAG"' in asmdef
+    assert "tagStandard41h12" in tracker
+    assert "tag.Position" in tracker and "tag.Rotation" in tracker
+    assert "orientationApi" in tracker and "PositionMm" in tracker
+    assert "Client.Add(PackageUrl)" in installer
+    assert "AddOptionalAprilTagStylusInput(simulation)" in builder
+
+
 # ---------------------------------------------------------------- generated hair mesh
 
 

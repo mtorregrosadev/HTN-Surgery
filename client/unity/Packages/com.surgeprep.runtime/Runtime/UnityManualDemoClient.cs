@@ -15,6 +15,7 @@ namespace SurgePrep
     /// </summary>
     public sealed class UnityManualDemoClient : MonoBehaviour
     {
+        private const string ClientDeviceId = "unity-showcase-client";
         private static readonly float[] IdentityTransform =
         {
             1, 0, 0, 0,
@@ -61,7 +62,6 @@ namespace SurgePrep
         private float hardwareQuality = 1f;
         private bool hardwareSourceHealthy = true;
         private bool hardwareForceMeasurementValid;
-        private string hardwareDeviceId = "unity-manual-demo";
         private TrackedToolInput[] trackedInputs;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
@@ -134,7 +134,8 @@ namespace SurgePrep
             TrackedToolInput activeInput = null;
             foreach (var candidate in trackedInputs)
             {
-                if (candidate != null && candidate.isActiveAndEnabled && candidate.HasSignal)
+                if (candidate != null && candidate != tagInput &&
+                    candidate.isActiveAndEnabled && candidate.HasSignal)
                 {
                     activeInput = candidate;
                     break;
@@ -156,6 +157,14 @@ namespace SurgePrep
                     hardwareContact = false;
                     hardwareHasOrientation = false;
                     hardwareForceMeasurementValid = false;
+                    foreach (var candidate in trackedInputs)
+                    {
+                        if (candidate != null && candidate != tagInput)
+                        {
+                            Status = candidate.TrackingStatus;
+                            break;
+                        }
+                    }
                     return;
                 }
                 xMm = sample.PositionMm.x;
@@ -168,9 +177,6 @@ namespace SurgePrep
                 hardwareQuality = sample.Quality;
                 hardwareSourceHealthy = sample.SourceHealthy;
                 hardwareForceMeasurementValid = sample.ForceMeasurementValid;
-                hardwareDeviceId = string.IsNullOrEmpty(sample.DeviceId)
-                    ? "tracked-training-tool"
-                    : sample.DeviceId;
                 Status = sample.Status;
             }
         }
@@ -296,7 +302,7 @@ namespace SurgePrep
                 "v1/calibrations",
                 new CalibrationCreateDto
                 {
-                    deviceId = "unity-manual-demo",
+                    deviceId = ClientDeviceId,
                     transform = IdentityTransform,
                     rmsErrorMm = 0.1f
                 },
@@ -310,7 +316,7 @@ namespace SurgePrep
                     exerciseId = "chest-tube-access-demo",
                     calibrationId = calibrationId,
                     toolId = "scalpel",
-                    deviceId = "unity-manual-demo"
+                    deviceId = ClientDeviceId
                 },
                 token
             );
@@ -373,7 +379,6 @@ namespace SurgePrep
             float sampleQuality;
             bool sampleSourceHealthy;
             bool sampleForceValid;
-            string sampleDeviceId;
             lock (stateLock)
             {
                 sampleX = xMm;
@@ -388,7 +393,6 @@ namespace SurgePrep
                 sampleQuality = hardwareQuality;
                 sampleSourceHealthy = hardwareSourceHealthy;
                 sampleForceValid = hardwareForceMeasurementValid;
-                sampleDeviceId = hardwareDeviceId;
             }
             var orientation = hardware && sampleHasOrientation
                 ? new QuaternionDto
@@ -404,7 +408,7 @@ namespace SurgePrep
                 contractVersion = "1.1",
                 sessionId = sessionId,
                 toolId = sampleTool,
-                deviceId = hardware ? sampleDeviceId : "unity-manual-demo",
+                deviceId = ClientDeviceId,
                 calibrationId = calibrationId,
                 sequence = sequence++,
                 timestampMs = clock.ElapsedMilliseconds,

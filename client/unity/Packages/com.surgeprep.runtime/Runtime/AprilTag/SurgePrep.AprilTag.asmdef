@@ -1,0 +1,25 @@
+{
+  "name": "SurgePrep.AprilTag",
+  "rootNamespace": "SurgePrep",
+  "references": [
+    "SurgePrep.Runtime",
+    "AprilTag.Runtime"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "SURGE_PREP_HAS_APRILTAG"
+  ],
+  "versionDefines": [
+    {
+      "name": "jp.keijiro.apriltag",
+      "expression": "[1.0.3]",
+      "define": "SURGE_PREP_HAS_APRILTAG"
+    }
+  ],
+  "noEngineReferences": false
+}

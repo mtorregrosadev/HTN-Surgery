@@ -52,6 +52,10 @@ namespace SurgePrep
             get { lock (lockObj) { return latestJson != null && clock.Elapsed.TotalSeconds - receivedAt < staleSeconds; } }
         }
 
+        public override string TrackingStatus => HasSignal
+            ? "LIVE — AprilTag position, FSR cut depth"
+            : "Waiting for AprilTag + FSR bridge";
+
         /// <summary>Cut depth 0..1 (0 = resting above skin, 1 = full depth).</summary>
         public float Depth01 => lastDepth01;
 
@@ -101,9 +105,7 @@ namespace SurgePrep
                 SourceHealthy = HasSignal && tagsVisible,
                 ForceMeasurementValid = true,
                 DeviceId = "apriltag-fsr-bridge",
-                Status = tagsVisible
-                    ? "LIVE — AprilTag position, FSR cut depth"
-                    : "AprilTag hidden — tool lifted"
+                Status = tagsVisible ? TrackingStatus : "AprilTag hidden — tool lifted"
             };
             return HasSignal;
         }

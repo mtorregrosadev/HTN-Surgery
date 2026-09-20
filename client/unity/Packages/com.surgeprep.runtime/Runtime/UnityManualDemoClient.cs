@@ -157,13 +157,19 @@ namespace SurgePrep
                     hardwareContact = false;
                     hardwareHasOrientation = false;
                     hardwareForceMeasurementValid = false;
+                    var showedOptionalStatus = false;
                     foreach (var candidate in trackedInputs)
                     {
                         if (candidate != null && candidate != tagInput)
                         {
                             Status = candidate.TrackingStatus;
+                            showedOptionalStatus = true;
                             break;
                         }
+                    }
+                    if (!showedOptionalStatus && tagInput != null && tagInput.HasSignal)
+                    {
+                        Status = tagInput.TrackingStatus;
                     }
                     return;
                 }
@@ -343,25 +349,52 @@ namespace SurgePrep
 
         private async Task StreamSamples(CancellationToken token)
         {
-            socket = new ClientWebSocket();
             var websocketBase = controllerUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
                 ? "wss://" + controllerUrl.Substring(8)
                 : "ws://" + controllerUrl.Substring(controllerUrl.IndexOf("://", StringComparison.Ordinal) + 3);
             var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/hardware-stream");
-            await socket.ConnectAsync(uri, token);
-            Status = SofaNative
-                ? "LIVE — WASD fallback; calibrated hardware uses the same pose contract"
-                : "SOFA OFFLINE";
-
-            while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+            while (!token.IsCancellationRequested)
             {
-                var sample = NextSample();
-                var bytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(sample));
-                await socket.SendAsync(
-                    new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token
-                );
-                received.Enqueue(await ReceiveMessage(token));
-                await Task.Delay(33, token);
+                socket?.Dispose();
+                socket = new ClientWebSocket();
+                try
+                {
+                    Status = "Connecting controller stream…";
+                    await socket.ConnectAsync(uri, token);
+                    Status = SofaNative
+                        ? "LIVE — click Game view; WASD, Q/E and 1/2/3 enabled"
+                        : "SOFA OFFLINE";
+                    while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
+                    {
+                        var sample = NextSample();
+                        var bytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(sample));
+                        await socket.SendAsync(
+                            new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token
+                        );
+                        var payload = await ReceiveMessage(token);
+                        if (payload.Contains("\"type\":\"error\""))
+                        {
+                            Status = "SOFA busy — input retained; waiting for recovery";
+                        }
+                        else
+                        {
+                            received.Enqueue(payload);
+                        }
+                        await Task.Delay(33, token);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception error)
+                {
+                    Status = "Stream interrupted — reconnecting…";
+                    UnityEngine.Debug.LogWarning(
+                        $"Controller stream reconnecting: {error.Message}"
+                    );
+                    await Task.Delay(750, token);
+                }
             }
         }
 

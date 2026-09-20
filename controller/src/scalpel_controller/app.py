@@ -23,7 +23,8 @@ class ApiUpstream:
         self.client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
-        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=5.0)
+        timeout_seconds = float(os.getenv("SURGE_PREP_API_TIMEOUT_SECONDS", "30"))
+        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout_seconds)
 
     async def close(self) -> None:
         if self.client is not None:
@@ -63,9 +64,20 @@ class SessionHub:
         try:
             while True:
                 sample = await socket.receive_json()
-                status_code, snapshot = await self.upstream.request(
-                    "POST", f"/v1/sessions/{session_id}/samples", sample
-                )
+                try:
+                    status_code, snapshot = await self.upstream.request(
+                        "POST", f"/v1/sessions/{session_id}/samples", sample
+                    )
+                except httpx.HTTPError as error:
+                    await socket.send_json(
+                        {
+                            "type": "error",
+                            "status": 503,
+                            "message": "SOFA API temporarily unavailable",
+                            "detail": str(error),
+                        }
+                    )
+                    continue
                 if status_code >= 400:
                     await socket.send_json(
                         {"type": "error", "status": status_code, "detail": snapshot}
@@ -146,4 +158,3 @@ def create_app(upstream: Upstream | None = None) -> FastAPI:
 
 
 app = create_app()
-

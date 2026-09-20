@@ -157,19 +157,43 @@ async def test_session_recovers_after_a_timestamp_gap():
     service, calibration, session = await _session()
     await service.process_sample(
         session.session_id,
-        _sample(session, calibration, 0, 0, 10, 0, timestampMs=0),
+        _sample(
+            session, calibration, 0, 0, 10, 0,
+            timestampMs=0, inputMode="calibrated-hardware",
+        ),
     )
     degraded = await service.process_sample(
         session.session_id,
-        _sample(session, calibration, 1, 20, -1, 0, timestampMs=1000),
+        _sample(
+            session, calibration, 1, 20, -1, 0,
+            timestampMs=1000, inputMode="calibrated-hardware",
+        ),
     )
     assert degraded.session_degraded
     assert degraded.tool.position_mm.y == 10
 
     recovered = await service.process_sample(
         session.session_id,
-        _sample(session, calibration, 2, 5, -1, 0, timestampMs=1033),
+        _sample(
+            session, calibration, 2, 5, -1, 0,
+            timestampMs=1033, inputMode="calibrated-hardware",
+        ),
     )
     assert not recovered.session_degraded
     assert recovered.tool.position_mm.x == 5
     assert "session-recovered" in recovered.events
+
+
+@pytest.mark.asyncio
+async def test_pose_only_keyboard_does_not_freeze_after_editor_focus_gap():
+    service, calibration, session = await _session()
+    await service.process_sample(
+        session.session_id,
+        _sample(session, calibration, 0, 0, 10, 0, timestampMs=0),
+    )
+    resumed = await service.process_sample(
+        session.session_id,
+        _sample(session, calibration, 1, 12, -1, 0, timestampMs=2000),
+    )
+    assert not resumed.session_degraded
+    assert resumed.tool.position_mm.x == 12

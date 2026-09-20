@@ -469,6 +469,7 @@ def main():
     print("The stream starts automatically after a successful calibration. Press X to recalibrate or Q to quit.\n", flush=True)
 
     start_requested = False
+    pivot_feedback = ""
 
     def start_session_bridge(calibration: DeskCalibration) -> ControllerBridge:
         """Create a stream only after the calibration frame is finalized."""
@@ -541,9 +542,10 @@ def main():
                     status_toast = "Could not project area: drag rectangle on table in lower half of screen"
                     toast_until = now + 2.5
 
+            primary_tag = pose_solver.primary_tag_visible(detected_tags)
+
             # 2. Pivot Calibration Mode
             if bridge is None and pivot_mode:
-                primary_tag = pose_solver.primary_tag_visible(detected_tags)
                 if primary_tag is not None:
                     res = pose_solver.solve_reference_tag_pose(primary_tag, detected_tags[primary_tag])
                     if res is not None:
@@ -568,6 +570,8 @@ def main():
                         status_toast = f"LOCKED Desk via Scalpel Pivot! Tip offset: {np.round(solved_tip, 1)} mm"
                         toast_until = now + 4.0
                         print(f"[Pivot Calibration] {status_toast} (RMS: {desk_calib.rms_error_mm} mm)", flush=True)
+                    else:
+                        pivot_feedback = "Need more varied handle rotation. Keep the tip fixed and tilt the handle farther."
 
             # 3. Solve 6-DOF Tool Pose
             current_pose: Optional[ToolPose6DOF] = None
@@ -683,6 +687,28 @@ def main():
             cv2.rectangle(frame, (8, 82), (min(w - 8, 850), 112), (20, 20, 20), cv2.FILLED)
             cv2.putText(frame, guide, (14, 103), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (70, 255, 255), 1, cv2.LINE_AA)
 
+            if bridge is not None:
+                if bridge.connected:
+                    health_text, health_color = "CONNECTION OK: camera data is streaming to Unity", (60, 255, 60)
+                else:
+                    health_text, health_color = "CONNECTING: waiting for the controller", (0, 220, 255)
+            elif pivot_mode:
+                sample_count = len(pivot_calibrator.rotations)
+                if primary_tag is None:
+                    health_text, health_color = "CAMERA CHECK: ID 1 is not visible", (0, 80, 255)
+                elif sample_count < pivot_calibrator.min_samples:
+                    health_text = f"CALIBRATING: {sample_count}/{pivot_calibrator.min_samples} good views — rotate the handle"
+                    health_color = (0, 220, 255)
+                else:
+                    health_text = pivot_feedback or "CALIBRATING: checking the measured desk frame..."
+                    health_color = (0, 180, 255)
+            elif primary_tag is None:
+                health_text, health_color = "CAMERA CHECK: show the scalpel's ID 1 tag to the camera", (0, 80, 255)
+            else:
+                health_text, health_color = "CAMERA OK: ID 1 is tracked. Press SPACE to begin calibration.", (60, 255, 60)
+            cv2.rectangle(frame, (8, 116), (min(w - 8, 1040), 146), (20, 20, 20), cv2.FILLED)
+            cv2.putText(frame, health_text, (14, 137), cv2.FONT_HERSHEY_SIMPLEX, 0.45, health_color, 1, cv2.LINE_AA)
+
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
@@ -703,6 +729,7 @@ def main():
             if bridge is None and key == ord(" "):
                 pivot_mode = True
                 pivot_calibrator.reset()
+                pivot_feedback = ""
                 status_toast = "Calibration started: keep the tip still and rotate the handle."
                 toast_until = now + 4.0
                 print(f"[Pivot] {status_toast}", flush=True)
@@ -797,6 +824,7 @@ def main():
             if bridge is None and key == ord("p"):
                 pivot_mode = True
                 pivot_calibrator.reset()
+                pivot_feedback = ""
                 status_toast = "Calibration started: keep the tip still and rotate the handle."
                 toast_until = now + 3.0
                 print(f"[Pivot] {status_toast}", flush=True)

@@ -48,6 +48,54 @@ REFINE_METHODS = {
     "apriltag": getattr(cv2.aruco, "CORNER_REFINE_APRILTAG", 3),
 }
 COLORS = [(0, 0, 255), (0, 200, 0), (255, 100, 0), (0, 200, 255), (255, 0, 255)]
+TRACKER_DEVICE_ID = "apriltag-scalpel-tracker"
+TRACKER_TOOL_ID = "scalpel"
+TRACKER_EXERCISE_ID = "chest-tube-access-demo"
+
+
+def _is_measured_calibration(calibration: Optional[DeskCalibration]) -> bool:
+    """Return whether a desk frame is safe to bind to a live session."""
+    return bool(
+        calibration is not None
+        and calibration.is_valid()
+        and calibration.calibration_method != "nominal-controller"
+    )
+
+
+def _calibration_transform_matches(
+    calibration_record: object, desk_calib: DeskCalibration
+) -> bool:
+    """Check a controller calibration record against the local measured frame."""
+    if not isinstance(calibration_record, dict):
+        return False
+    transform = calibration_record.get("transform")
+    if not isinstance(transform, (list, tuple)) or len(transform) != 16:
+        return False
+    try:
+        expected = np.asarray(desk_calib.camera_to_desk_transform(), dtype=np.float64)
+        actual = np.asarray(transform, dtype=np.float64)
+    except (TypeError, ValueError):
+        return False
+    return bool(np.all(np.isfinite(actual)) and np.allclose(actual, expected, atol=1e-3, rtol=1e-6))
+
+
+def _session_matches_tracker(data: dict, desk_calib: DeskCalibration) -> bool:
+    """Validate all locally knowable session and calibration ownership fields."""
+    if data.get("status") not in (None, "active"):
+        return False
+    if data.get("toolId") != TRACKER_TOOL_ID or data.get("deviceId") != TRACKER_DEVICE_ID:
+        return False
+    calibration_id = data.get("calibrationId")
+    if not calibration_id:
+        return False
+
+    # The current API does not expose a calibration GET route, but newer
+    # controller responses may include the record inline.  If the transform is
+    # unavailable, reuse is unsafe: create a fresh session below instead.
+    calibration_record = data.get("calibration")
+    if calibration_record is None and "transform" in data:
+        calibration_record = data
+    return _calibration_transform_matches(calibration_record, desk_calib)
 
 
 class ControllerBridge:

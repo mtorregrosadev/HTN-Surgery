@@ -61,7 +61,7 @@ namespace SurgePrep
             {
                 return true;
             }
-            if (SnapshotStale)
+            if (!hasSnapshot || SnapshotStale)
             {
                 boundSessionId = sessionId;
                 latestTick = -1;

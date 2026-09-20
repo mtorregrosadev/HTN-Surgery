@@ -29,7 +29,7 @@ namespace SurgePrep
 
         [Header("FSR -> cut depth")]
         [SerializeField] private float hoverMm = 6f;              // height above skin with no pressure
-        [SerializeField, Min(1f)] private float maxDepthMm = 25f; // depth below skin at full pressure
+        [SerializeField, Min(1f)] private float maxDepthMm = 32f; // depth below skin at full pressure (pleural floor)
         [SerializeField, Range(0f, 0.5f)] private float deadband = 0.08f;
         [SerializeField, Min(0.1f)] private float maxForceN = 5f;
         [SerializeField, Min(0.05f)] private float staleSeconds = 0.5f;

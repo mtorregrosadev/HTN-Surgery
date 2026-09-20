@@ -40,8 +40,10 @@ measured `forceN`. WASD stays as the fallback whenever the bridge is not sending
 | `xRangeMm` / `zRangeMm` | 30 / 22 | Half-size of the field the tag movement covers (matches the carvable field) |
 | `invertX` / `invertZ` | off | Flip an axis if the scalpel moves the wrong way |
 | `hoverMm` | 6 | Height above skin with no pressure |
-| `maxDepthMm` | 25 | Depth at full pressure (skin 3, fat to 15, muscle to 25) |
+| `maxDepthMm` | 32 | Depth at full pressure (skin to 3, fat to 15, muscle to 25, pleura to 32) |
 | `deadband` | 0.08 | FSR noise below this is ignored |
 
 Bridge options: `--span` (fraction of the camera frame that covers the full field), `--fsr-max` (raw ADC value at
 your hardest press), `--family` (`36h11` default).
+
+New to the rig? Follow the guided practice in [`docs/CHEST_TUBE_PRACTICE_TUTORIAL.md`](../docs/CHEST_TUBE_PRACTICE_TUTORIAL.md).

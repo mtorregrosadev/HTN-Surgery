@@ -1,8 +1,8 @@
 """Track an object carrying AprilTags with a webcam.
 
 Install:  pip install opencv-python numpy
-Run:      python new.py [--camera 1] [--family 36h11] [--csv log.csv]
-Keys:     q / Esc = quit, s = switch camera, c = clear trails
+Run:      python new.py [--camera 1] [--family 36h11] [--scale 0.5] [--refine subpix] [--csv log.csv]
+Keys:     q / Esc = quit, s = switch camera, f = toggle fast mode, c = clear trails
 """
 import argparse
 import math
@@ -19,6 +19,11 @@ FAMILIES = {
     "36h10": cv2.aruco.DICT_APRILTAG_36h10,
     "36h11": cv2.aruco.DICT_APRILTAG_36h11,
 }
+REFINE_METHODS = {
+    "subpix": getattr(cv2.aruco, "CORNER_REFINE_SUBPIX", 1),
+    "none": getattr(cv2.aruco, "CORNER_REFINE_NONE", 0),
+    "apriltag": getattr(cv2.aruco, "CORNER_REFINE_APRILTAG", 3),
+}
 COLORS = [(0, 0, 255), (0, 200, 0), (255, 100, 0), (0, 200, 255), (255, 0, 255)]
 TRAIL_LEN = 60
 MAX_WARMUP_FRAMES = 12
@@ -30,7 +35,6 @@ def check_stream_active(cap, attempts=MAX_WARMUP_FRAMES):
     for _ in range(attempts):
         ok, frame = cap.read()
         if ok and frame is not None and frame.size > 0:
-            # Check whether image has non-trivial contrast (not a blank/black continuity dummy stream)
             if np.mean(frame) > 2.5 and np.std(frame) > 2.5:
                 return True, frame
         time.sleep(0.04)
@@ -73,7 +77,6 @@ def select_best_camera(preferred_index=None):
                 print(f"[Camera] Note: Requested camera {preferred_index} was blank/inactive; automatically switched to camera {idx}.", flush=True)
             return cap, idx
 
-        # Store the first camera that at least opened (even if black) as a fallback
         if fallback_cap is None:
             fallback_cap = cap
             fallback_idx = idx
@@ -102,28 +105,36 @@ def switch_camera(current_idx):
     return open_camera_device(current_idx), current_idx
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Track AprilTags in real time using webcam")
-    ap.add_argument("--camera", type=int, default=None, help="Camera device index (default: auto-detect active camera)")
-    ap.add_argument("--family", choices=FAMILIES, default="36h11", help="AprilTag dictionary family")
-    ap.add_argument("--csv", help="Optional path to log positions")
-    args = ap.parse_args()
-
-    dictionary = cv2.aruco.getPredefinedDictionary(FAMILIES[args.family])
+def build_detector(family_name, refine_name):
+    """Construct an optimized AprilTag detector."""
+    dictionary = cv2.aruco.getPredefinedDictionary(FAMILIES[family_name])
     params = cv2.aruco.DetectorParameters()
-    if hasattr(cv2.aruco, "CORNER_REFINE_APRILTAG"):
-        params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
-    elif hasattr(cv2.aruco, "CORNER_REFINE_SUBPIX"):
-        params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    refine_val = REFINE_METHODS.get(refine_name, cv2.aruco.CORNER_REFINE_SUBPIX)
+    params.cornerRefinementMethod = refine_val
+    params.adaptiveThreshWinSizeStep = 10
 
     detector = None
     if hasattr(cv2.aruco, "ArucoDetector"):
         detector = cv2.aruco.ArucoDetector(dictionary, params)
+    return detector, dictionary, params
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Track AprilTags in real time using webcam")
+    ap.add_argument("--camera", type=int, default=None, help="Camera device index (default: auto-detect active camera)")
+    ap.add_argument("--family", choices=FAMILIES, default="36h11", help="AprilTag dictionary family")
+    ap.add_argument("--scale", type=float, default=0.5, help="Detection scale factor (0.5 for high-speed ~100FPS detection, 1.0 for full res)")
+    ap.add_argument("--refine", choices=REFINE_METHODS, default="subpix", help="Corner refinement method: subpix (fast & accurate), none (fastest), apriltag (slow)")
+    ap.add_argument("--csv", help="Optional path to log positions")
+    args = ap.parse_args()
+
+    detector, dictionary, params = build_detector(args.family, args.refine)
 
     cap, camera_idx = select_best_camera(args.camera)
     if cap is None:
         raise SystemExit("Error: Unable to open any video capture device.")
 
+    current_scale = args.scale
     trails = defaultdict(lambda: deque(maxlen=TRAIL_LEN))
     obj_trail = deque(maxlen=TRAIL_LEN)
     log = open(args.csv, "w") if args.csv else None
@@ -132,8 +143,11 @@ def main():
     frame_no = 0
     consecutive_drops = 0
 
+    fps = 0.0
+    prev_time = time.perf_counter()
+
     print("AprilTag tracker running.", flush=True)
-    print("Controls: 'q' or Esc = Quit | 's' = Switch camera | 'c' = Clear trails", flush=True)
+    print("Controls: 'q' or Esc = Quit | 's' = Switch camera | 'f' = Toggle Fast Mode | 'c' = Clear trails", flush=True)
     window_name = "AprilTag tracker"
 
     try:
@@ -142,19 +156,38 @@ def main():
             if not ok:
                 consecutive_drops += 1
                 if consecutive_drops >= MAX_CONSECUTIVE_DROPS:
-                    print(f"Warning: Stream lost after {MAX_CONSECUTIVE_DROPS} consecutive failed reads. Exiting.")
+                    print(f"Warning: Stream lost after {MAX_CONSECUTIVE_DROPS} consecutive failed reads. Exiting.", flush=True)
                     break
                 time.sleep(0.02)
                 continue
             consecutive_drops = 0
 
+            # Calculate live FPS (exponential moving average)
+            now = time.perf_counter()
+            dt = now - prev_time
+            prev_time = now
+            if dt > 0:
+                current_fps = 1.0 / dt
+                fps = (0.85 * fps + 0.15 * current_fps) if fps > 0 else current_fps
+
             frame_no += 1
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            if detector is not None:
-                corners, ids, _ = detector.detectMarkers(gray)
+            # High-speed scaled detection
+            if current_scale < 0.99:
+                gray_detect = cv2.resize(gray, (0, 0), fx=current_scale, fy=current_scale)
             else:
-                corners, ids, _ = cv2.aruco.detectMarkers(gray, dictionary, parameters=params)
+                gray_detect = gray
+
+            if detector is not None:
+                corners, ids, _ = detector.detectMarkers(gray_detect)
+            else:
+                corners, ids, _ = cv2.aruco.detectMarkers(gray_detect, dictionary, parameters=params)
+
+            # Scale corner points back to full-resolution coordinates if downscaled
+            if ids is not None and current_scale < 0.99:
+                inv_scale = 1.0 / current_scale
+                corners = [c * inv_scale for c in corners]
 
             centers = {}
             if ids is not None:
@@ -201,10 +234,12 @@ def main():
 
             # Draw status HUD overlay
             h, w = frame.shape[:2]
-            cv2.rectangle(frame, (8, 8), (min(w - 8, 620), 62), (20, 20, 20), cv2.FILLED)
-            cv2.putText(frame, status, (14, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 255, 255), 2)
-            controls_hint = f"Camera {camera_idx} ({w}x{h}) | [s] Switch Cam | [c] Clear | [q] Quit"
-            cv2.putText(frame, controls_hint, (14, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1)
+            cv2.rectangle(frame, (8, 8), (min(w - 8, 640), 64), (20, 20, 20), cv2.FILLED)
+            mode_str = f"Fast ({current_scale:.1f}x)" if current_scale < 0.99 else "Full (1.0x)"
+            hud_line1 = f"FPS: {fps:4.1f} | {status}"
+            cv2.putText(frame, hud_line1, (14, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+            controls_hint = f"Cam {camera_idx} ({w}x{h}) | {mode_str} [f] | [s] Switch Cam | [c] Clear | [q] Quit"
+            cv2.putText(frame, controls_hint, (14, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 200, 200), 1)
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -213,6 +248,9 @@ def main():
             if key == ord("c"):
                 trails.clear()
                 obj_trail.clear()
+            if key == ord("f"):
+                current_scale = 1.0 if current_scale < 0.99 else 0.5
+                print(f"[Performance] Switched detection scale to {current_scale}x.", flush=True)
             if key == ord("s"):
                 cap.release()
                 new_cap, new_idx = switch_camera(camera_idx)

@@ -236,6 +236,10 @@ namespace SurgePrep.Editor
             var stream = simulation.AddComponent<ScalpelStreamClient>();
             stream.enabled = true;
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
+            // The generated showcase has one input owner. Enable the physical
+            // stream; keyboard mode remains available by enabling this component
+            // in a software-only scene.
+            manualDemo.enabled = false;
             var hud = simulation.AddComponent<ChestTubeShowcaseHud>();
             SetObject(renderer, "tissueMaterial", tissue);
             SetObject(renderer, "subcutaneousMaterial", fat);

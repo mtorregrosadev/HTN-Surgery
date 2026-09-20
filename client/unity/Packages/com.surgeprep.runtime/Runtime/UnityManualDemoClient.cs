@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
@@ -15,6 +16,9 @@ namespace SurgePrep
     /// </summary>
     public sealed class UnityManualDemoClient : MonoBehaviour
     {
+        private const int SnapshotChunkBytes = 16 * 1024;
+        private const int MaxSnapshotBytes = 4 * 1024 * 1024;
+
         private static readonly float[] IdentityTransform =
         {
             1, 0, 0, 0,
@@ -63,6 +67,12 @@ namespace SurgePrep
 
         private async void OnEnable()
         {
+            var physicalStream = GetComponent<ScalpelStreamClient>();
+            if (physicalStream != null && physicalStream.isActiveAndEnabled)
+            {
+                Status = "Physical scalpel stream selected";
+                return;
+            }
             cancellation = new CancellationTokenSource();
             http = new HttpClient { BaseAddress = new Uri(controllerUrl.TrimEnd('/') + "/") };
             try
@@ -95,9 +105,19 @@ namespace SurgePrep
             {
                 return;
             }
-            var snapshot = JsonUtility.FromJson<SimulationSnapshotDto>(latest);
-            if (snapshot != null && ContractCompatibility.Accepts(snapshot.contractVersion))
+            try
             {
+                var snapshot = JsonUtility.FromJson<SimulationSnapshotDto>(latest);
+                if (snapshot == null || !ContractCompatibility.Accepts(snapshot.contractVersion))
+                {
+                    return;
+                }
+                if (!string.IsNullOrEmpty(snapshot.sessionId)
+                    && !string.IsNullOrEmpty(sessionId)
+                    && snapshot.sessionId != sessionId)
+                {
+                    return;
+                }
                 if (!string.IsNullOrEmpty(snapshot.simulationBackend))
                 {
                     SimulationBackend = snapshot.simulationBackend;
@@ -122,6 +142,10 @@ namespace SurgePrep
                         zMm = snapshot.tool.positionMm.z;
                     }
                 }
+            }
+            catch (Exception error)
+            {
+                UnityEngine.Debug.LogWarning($"[UnityManualDemoClient] Ignoring invalid simulation snapshot: {error.Message}");
             }
         }
 
@@ -323,16 +347,17 @@ namespace SurgePrep
             var websocketBase = controllerUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
                 ? "wss://" + controllerUrl.Substring(8)
                 : "ws://" + controllerUrl.Substring(controllerUrl.IndexOf("://", StringComparison.Ordinal) + 3);
-            var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/client-stream");
+            var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/hardware-stream");
             await socket.ConnectAsync(uri, token);
+            sceneRenderer?.BindSession(sessionId);
             Status = SofaNative
-                ? "LIVE — Tracking physical scalpel (WASD fallback available)"
+                ? "LIVE — Keyboard fallback through Scalpel controller"
                 : "SOFA OFFLINE";
 
-            // Launch background receiver for authoritative client broadcast stream
+            // The controller returns authoritative snapshots on this hardware-stream socket.
             _ = ReceiveClientStreamLoop(token);
 
-            // Forward keyboard inputs only when user presses WASD keys
+            // Forward keyboard inputs through the controller's hardware ingress.
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
                 if (hasKeyboardMovement)
@@ -340,18 +365,24 @@ namespace SurgePrep
                     var sample = NextSample();
                     try
                     {
-                        var content = new StringContent(JsonUtility.ToJson(sample), Encoding.UTF8, "application/json");
-                        using (var response = await http.PostAsync($"v1/sessions/{sessionId}/samples", content, token))
-                        {
-                            if (response.IsSuccessStatusCode)
-                            {
-                                var payload = await response.Content.ReadAsStringAsync();
-                                received.Enqueue(payload);
-                            }
-                        }
+                        var payload = Encoding.UTF8.GetBytes(JsonUtility.ToJson(sample));
+                        await socket.SendAsync(
+                            new ArraySegment<byte>(payload),
+                            WebSocketMessageType.Text,
+                            true,
+                            token
+                        );
                     }
-                    catch
+                    catch (OperationCanceledException)
                     {
+                        throw;
+                    }
+                    catch (Exception error)
+                    {
+                        UnityEngine.Debug.LogWarning(
+                            $"[UnityManualDemoClient] Keyboard sample send failed: {error.Message}"
+                        );
+                        break;
                     }
                 }
                 await Task.Delay(33, token);
@@ -360,27 +391,16 @@ namespace SurgePrep
 
         private async Task ReceiveClientStreamLoop(CancellationToken token)
         {
-            var buffer = new byte[1024 * 512];
             try
             {
                 while (!token.IsCancellationRequested && socket != null && socket.State == WebSocketState.Open)
                 {
-                    var count = 0;
-                    WebSocketReceiveResult result;
-                    do
+                    var payload = await ReceiveTextMessage(socket, token);
+                    if (payload == null)
                     {
-                        result = await socket.ReceiveAsync(
-                            new ArraySegment<byte>(buffer, count, buffer.Length - count), token
-                        );
-                        count += result.Count;
-                        if (count == buffer.Length && !result.EndOfMessage)
-                        {
-                            throw new InvalidOperationException("Simulation snapshot exceeds 512 KiB");
-                        }
-                    } while (!result.EndOfMessage);
-
-                    if (result.MessageType == WebSocketMessageType.Close) break;
-                    received.Enqueue(Encoding.UTF8.GetString(buffer, 0, count));
+                        break;
+                    }
+                    received.Enqueue(payload);
                 }
             }
             catch (OperationCanceledException)
@@ -389,6 +409,43 @@ namespace SurgePrep
             catch (Exception ex)
             {
                 UnityEngine.Debug.LogWarning($"[UnityManualDemoClient] Client stream receive loop ended: {ex.Message}");
+            }
+        }
+
+        private static async Task<string> ReceiveTextMessage(
+            ClientWebSocket clientSocket, CancellationToken token
+        )
+        {
+            var buffer = new byte[SnapshotChunkBytes];
+            using (var message = new MemoryStream())
+            {
+                while (true)
+                {
+                    var result = await clientSocket.ReceiveAsync(
+                        new ArraySegment<byte>(buffer), token
+                    );
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        return null;
+                    }
+                    if (result.MessageType != WebSocketMessageType.Text)
+                    {
+                        throw new InvalidOperationException(
+                            $"Unexpected WebSocket message type: {result.MessageType}"
+                        );
+                    }
+                    message.Write(buffer, 0, result.Count);
+                    if (message.Length > MaxSnapshotBytes)
+                    {
+                        throw new InvalidOperationException(
+                            $"Simulation snapshot exceeds {MaxSnapshotBytes / (1024 * 1024)} MiB"
+                        );
+                    }
+                    if (result.EndOfMessage)
+                    {
+                        return Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
+                    }
+                }
             }
         }
 

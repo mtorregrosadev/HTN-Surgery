@@ -58,6 +58,10 @@ def _is_measured_calibration(calibration: Optional[DeskCalibration]) -> bool:
     return bool(calibration is not None and calibration.is_measured())
 
 
+def _is_session_usable_calibration(calibration: Optional[DeskCalibration]) -> bool:
+    return bool(calibration is not None and calibration.is_session_usable())
+
+
 def _calibration_transform_matches(
     calibration_record: object, desk_calib: DeskCalibration
 ) -> bool:
@@ -104,6 +108,7 @@ class ControllerBridge:
         calibration_id: str,
         initial_sequence: int = 0,
         motion_scale: float = 1.0,
+        input_mode: str = "calibrated-hardware",
     ):
         self.controller_url = controller_url.rstrip("/")
         self.session_id = session_id
@@ -111,6 +116,7 @@ class ControllerBridge:
         if motion_scale <= 0.0:
             raise ValueError("motion_scale must be positive")
         self.motion_scale = motion_scale
+        self.input_mode = input_mode
         self.connected = False
         self.latest_snapshot: Optional[dict] = None
         self.sofa_backend = "unknown"
@@ -167,7 +173,7 @@ class ControllerBridge:
             "contact": pose.y_mm <= 0.0,
             "quality": round(pose.confidence, 2),
             "sourceHealthy": True,
-            "inputMode": "calibrated-hardware",
+            "inputMode": self.input_mode,
             "forceMeasurementValid": False,
         }
         self._last_sample = sample
@@ -296,8 +302,8 @@ def resolve_or_create_session(
             raise RuntimeError("controller returned a non-object response")
         return payload
 
-    if desk_calib is None or not _is_measured_calibration(desk_calib):
-        raise RuntimeError("a measured desk calibration is required before creating a session")
+    if desk_calib is None or not _is_session_usable_calibration(desk_calib):
+        raise RuntimeError("a measured or explicit demo desk registration is required before creating a session")
 
     if not force_new and session_id and session_id not in ("auto", "demo-session-1"):
         data = read_json(urllib.request.Request(f"{ctrl}/v1/sessions/{session_id}"))
@@ -327,7 +333,7 @@ def resolve_or_create_session(
         # Keep this derived from the same gate used before session creation.
         # A nominal tare has a geometrically valid matrix but is not a measured
         # calibration and must never be advertised as valid to the API.
-        "valid": _is_measured_calibration(desk_calib),
+        "valid": _is_session_usable_calibration(desk_calib),
         "calibrationMethod": desk_calib.calibration_method,
     }).encode("utf-8")
     calib = read_json(urllib.request.Request(
@@ -485,6 +491,7 @@ def main():
             calibration_id=calib_id,
             initial_sequence=last_seq,
             motion_scale=args.motion_scale,
+            input_mode=("demo-registration" if calibration.is_demo_registration() else "calibrated-hardware"),
         )
         result.start()
         return result
@@ -594,7 +601,7 @@ def main():
 
             if current_pose is not None:
                 session_just_started = False
-                if bridge is None and start_requested and _is_measured_calibration(desk_calib):
+                if bridge is None and start_requested and _is_session_usable_calibration(desk_calib):
                     pose_solver.reset_tracking()
                     bridge = start_session_bridge(desk_calib)
                     session_just_started = True
@@ -642,6 +649,8 @@ def main():
                 ext_d = int(getattr(desk_calib, "extent_z_mm", 110.0) * 2)
                 if _is_measured_calibration(desk_calib):
                     desk_str = f"MEASURED ({ext_w}x{ext_d}mm {method_name})"
+                elif desk_calib.is_demo_registration():
+                    desk_str = f"DEMO (~{desk_calib.rms_error_mm:.0f}mm registration; {ext_w}x{ext_d}mm)"
                 else:
                     desk_str = f"PREVIEW ({ext_w}x{ext_d}mm {method_name}; MEASURE REQUIRED)"
             else:
@@ -683,10 +692,10 @@ def main():
                 guide = "LIVE: move the scalpel.  Press X to recalibrate or Q to quit."
             elif pivot_mode:
                 guide = "STEP 2 OF 2: Keep the tip fixed on the desk and rotate the handle slowly."
-            elif _is_measured_calibration(desk_calib):
+            elif _is_session_usable_calibration(desk_calib):
                 guide = "Calibration complete. Starting the live stream..."
             else:
-                guide = "STEP 1 OF 2: Place the scalpel tip at the centre, then press SPACE to calibrate."
+                guide = "Place the scalpel tip at the centre, then press SPACE to begin the demo."
             cv2.rectangle(frame, (8, 82), (min(w - 8, 850), 112), (20, 20, 20), cv2.FILLED)
             cv2.putText(frame, guide, (14, 103), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (70, 255, 255), 1, cv2.LINE_AA)
 
@@ -731,20 +740,33 @@ def main():
                 status_toast = "Live stream stopped. Update calibration, then press L to start a new session."
                 toast_until = now + 4.0
             if key in (ord("l"), ord("\r"), ord("\n")) and bridge is None:
-                if _is_measured_calibration(desk_calib):
+                if _is_session_usable_calibration(desk_calib):
                     start_requested = True
-                    status_toast = "Starting session with the current measured calibration..."
+                    status_toast = "Starting session with the current registration..."
                     toast_until = now + 2.0
                 else:
-                    status_toast = "Live requires measured calibration: run Pivot ('p') or place the desk tag, then press 'l'."
+                    status_toast = "Press Space for the one-click demo, or P for measured pivot calibration."
                     toast_until = now + 3.0
             if bridge is None and key == ord(" "):
-                pivot_mode = True
-                pivot_calibrator.reset()
-                pivot_feedback = ""
-                status_toast = "Calibration started: keep the tip still and rotate the handle."
-                toast_until = now + 4.0
-                print(f"[Pivot] {status_toast}", flush=True)
+                if current_pose is None:
+                    status_toast = "Show the scalpel's ID 1 tag to the camera before starting the demo."
+                    toast_until = now + 3.0
+                else:
+                    tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
+                    ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
+                    ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
+                    desk_calib = get_default_desk_calibration(
+                        origin_cam=tip_cam, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z
+                    )
+                    desk_calib.calibration_method = DeskCalibration.DEMO_METHOD
+                    desk_calib.rms_error_mm = DeskCalibration.DEMO_RMS_ERROR_MM
+                    save_desk_calibration(desk_calib)
+                    pivot_mode = False
+                    pose_solver.reset_tracking()
+                    start_requested = True
+                    status_toast = "DEMO REGISTRATION: current tip is virtual centre. Starting live stream..."
+                    toast_until = now + 4.0
+                    print(f"[Demo] {status_toast}", flush=True)
             if bridge is None and key in (ord("t"), ord("z")):
                 if current_pose is not None:
                     tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)

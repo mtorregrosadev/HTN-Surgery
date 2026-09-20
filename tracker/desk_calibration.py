@@ -41,6 +41,8 @@ class DeskCalibration:
     # not that it was measured against the physical workspace.
     MEASURED_METHODS: ClassVar[frozenset[str]] = frozenset(("pivot", "tag", "probe"))
     MAX_MEASURED_RMS_ERROR_MM: ClassVar[float] = 3.0
+    DEMO_METHOD: ClassVar[str] = "one-click-demo"
+    DEMO_RMS_ERROR_MM: ClassVar[float] = 15.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -118,6 +120,17 @@ class DeskCalibration:
         if not self.is_valid() or self.calibration_method not in self.MEASURED_METHODS:
             return False
         return float(self.rms_error_mm) <= self.MAX_MEASURED_RMS_ERROR_MM
+
+    def is_demo_registration(self) -> bool:
+        return (
+            self.is_valid()
+            and self.calibration_method == self.DEMO_METHOD
+            and float(self.rms_error_mm) == self.DEMO_RMS_ERROR_MM
+        )
+
+    def is_session_usable(self) -> bool:
+        """Allow measured frames and the explicit, visibly degraded demo frame."""
+        return self.is_measured() or self.is_demo_registration()
 
     def point_cam_to_desk(self, point_cam: np.ndarray | list[float]) -> np.ndarray:
         """Transform a 3D point from camera frame (mm) to desk frame (mm)."""

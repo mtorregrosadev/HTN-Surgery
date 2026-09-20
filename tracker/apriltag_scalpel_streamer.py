@@ -25,6 +25,7 @@ import websockets
 from .desk_calibration import (
     DeskCalibration,
     PivotCalibrator,
+    desk_rect_from_pixels,
     draw_desk_plane_grid,
     estimate_desk_from_tag,
     get_default_camera_matrix,
@@ -294,11 +295,42 @@ def main():
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1280, 720)
 
+    tilt_deg = 28.0
+    mouse_state = {
+        "dragging": False,
+        "start": (0, 0),
+        "current": (0, 0),
+        "drawn_rect": None,
+    }
+
+    def on_mouse(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            mouse_state["dragging"] = True
+            mouse_state["start"] = (x, y)
+            mouse_state["current"] = (x, y)
+        elif event == cv2.EVENT_MOUSEMOVE and mouse_state["dragging"]:
+            mouse_state["current"] = (x, y)
+        elif event == cv2.EVENT_LBUTTONUP and mouse_state["dragging"]:
+            mouse_state["dragging"] = False
+            p0 = mouse_state["start"]
+            p1 = (x, y)
+            if abs(p1[0] - p0[0]) > 20 and abs(p1[1] - p0[1]) > 20:
+                mouse_state["drawn_rect"] = (
+                    min(p0[0], p1[0]), min(p0[1], p1[1]),
+                    max(p0[0], p1[0]), max(p0[1], p1[1])
+                )
+
+    cv2.setMouseCallback(window_name, on_mouse)
+
     print("\nSurge Prep Physical Scalpel Tracker Live.")
     print("Controls:")
-    print("  'p': Pivot Calibrate (Rotate scalpel around stationary tip on desk for high precision)")
-    print("  'c': Fiducial Calibrate (Lock desk using visible Tag 0)")
-    print("  'f': Toggle Fast Detection (0.5x vs 1.0x)")
+    print("  [Drag Mouse] Draw Rectangle Area directly on the table to lock workspace")
+    print("  's' / 'c': Snap Desk Plane to Scalpel resting on desk")
+    print("  'd': Default generous surgical area (320x220 mm)")
+    print("  '[' / ']': Adjust Desk Tilt Angle (+/- 1.5 deg)")
+    print("  '+' / '-': Raise/Lower Desk Height (+/- 5 mm)")
+    print("  Space / 't': Tare / Recenter (0,0,0) to current scalpel tip")
+    print("  'p': Pivot Calibrate")
     print("  'q'/Esc: Quit\n", flush=True)
 
     try:
@@ -337,20 +369,34 @@ def main():
                     cv2.putText(frame, f"ID {tag_id}", (int(pts[0][0]), int(pts[0][1]) - 6),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
 
-            # 1. Pivot Calibration Mode (Rotating System of Scalpel)
+            # 1. Check if user drew a rectangle on the video feed
+            if mouse_state["drawn_rect"] is not None:
+                u0, v0, u1, v1 = mouse_state["drawn_rect"]
+                mouse_state["drawn_rect"] = None
+                if desk_calib is None or not desk_calib.is_valid():
+                    desk_calib = get_default_desk_calibration(tilt_deg=tilt_deg)
+                new_calib = desk_rect_from_pixels(u0, v0, u1, v1, desk_calib, camera_matrix)
+                if new_calib is not None and new_calib.is_valid():
+                    desk_calib = new_calib
+                    save_desk_calibration(desk_calib)
+                    status_toast = f"LOCKED AREA: {int(desk_calib.extent_x_mm*2)}x{int(desk_calib.extent_z_mm*2)} mm surgical field!"
+                    toast_until = now + 4.0
+                    print(f"[Area] {status_toast}", flush=True)
+                else:
+                    status_toast = "Could not project area: drag rectangle on table in lower half of screen"
+                    toast_until = now + 2.5
+
+            # 2. Pivot Calibration Mode
             if pivot_mode:
-                # Check for tool tags
                 tool_visible = [tid for tid in detected_tags if tid in pose_solver.tool_tag_ids]
                 if tool_visible:
                     tag_pts = [detected_tags[tid] for tid in tool_visible]
-                    # Solve single tag pose
                     res = pose_solver.solve_tag_pose(tag_pts[0])
                     if res is not None:
                         r_mat, t_vec = res
                         pivot_calibrator.add_sample(r_mat, t_vec)
 
                 progress = pivot_calibrator.progress
-                # Draw pivot calibration HUD
                 cv2.rectangle(frame, (w // 4, h - 85), (3 * w // 4, h - 25), (0, 0, 0), cv2.FILLED)
                 cv2.rectangle(frame, (w // 4, h - 85), (3 * w // 4, h - 25), (0, 255, 255), 2)
                 cv2.putText(frame, "PIVOT CALIBRATION: Keep tip on desk, rotate handle in cone",
@@ -368,27 +414,24 @@ def main():
                         toast_until = now + 4.0
                         print(f"[Pivot Calibration] {status_toast} (RMS: {desk_calib.rms_error_mm} mm)", flush=True)
 
-            # 2. Fiducial Tag-based calibration (if tag 0 visible and not in pivot mode)
-            elif args.desk_tag in detected_tags and desk_calib is None:
-                new_calib = estimate_desk_from_tag(
-                    corners_2d=detected_tags[args.desk_tag],
-                    tag_size_mm=args.desk_tag_size,
-                    camera_matrix=camera_matrix,
-                    dist_coeffs=dist_coeffs,
-                    tag_id=args.desk_tag
-                )
-                if new_calib is not None:
-                    desk_calib = new_calib
-                    save_desk_calibration(desk_calib)
-
-            # 3. Render AR 3D Desk Grid if calibrated
-            if desk_calib is not None:
-                draw_desk_plane_grid(frame, desk_calib, camera_matrix, dist_coeffs)
-
-            # 4. Solve 6-DOF Tool Pose
+            # 3. Solve 6-DOF Tool Pose
             current_pose: Optional[ToolPose6DOF] = None
             if desk_calib is not None and detected_tags and not pivot_mode:
                 current_pose = pose_solver.solve_tool_pose(detected_tags, desk_calib, now)
+
+            # 4. Render AR 3D Desk Grid & Area
+            if desk_calib is not None:
+                tip_pos_desk = np.array([current_pose.x_mm, current_pose.y_mm, current_pose.z_mm]) if current_pose else None
+                draw_desk_plane_grid(frame, desk_calib, camera_matrix, dist_coeffs, scalpel_tip_desk=tip_pos_desk)
+
+            # 5. Render live mouse dragging rectangle
+            if mouse_state["dragging"]:
+                p0 = mouse_state["start"]
+                p1 = mouse_state["current"]
+                cv2.rectangle(frame, p0, p1, (0, 255, 255), 2)
+                cv2.putText(frame, "Drawing Workspace Area (Release to Lock)...",
+                            (min(p0[0], p1[0]), max(20, min(p0[1], p1[1]) - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 255), 1, cv2.LINE_AA)
 
             if current_pose is not None:
                 bridge.queue_sample(current_pose)
@@ -411,30 +454,36 @@ def main():
             for a, b in zip(trail_pts, trail_pts[1:]):
                 cv2.line(frame, a, b, (0, 255, 255), 2, cv2.LINE_AA)
 
-            # 5. Render HUD Overlay
-            cv2.rectangle(frame, (8, 8), (min(w - 8, 720), 72), (20, 20, 20), cv2.FILLED)
-            if desk_calib:
+            # 6. Render HUD Overlay
+            cv2.rectangle(frame, (8, 8), (min(w - 8, 760), 72), (20, 20, 20), cv2.FILLED)
+            if desk_calib and desk_calib.is_valid():
                 method_name = desk_calib.calibration_method.upper()
-                desk_str = f"LOCKED ({method_name})"
+                ext_w = int(getattr(desk_calib, "extent_x_mm", 160.0) * 2)
+                ext_d = int(getattr(desk_calib, "extent_z_mm", 110.0) * 2)
+                desk_str = f"LOCKED ({ext_w}x{ext_d}mm {method_name})"
             else:
-                desk_str = "UNSET (Press 'p' to Pivot or place Tag 0)"
+                desk_str = "UNSET (Drag mouse to draw area on desk)"
             stream_str = f"LIVE ({bridge.sofa_backend})" if bridge.connected else "OFFLINE"
-            line1 = f"FPS: {fps:4.1f} | Desk Space: {desk_str} | Stream: {stream_str}"
-            cv2.putText(frame, line1, (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 255, 255), 2, cv2.LINE_AA)
+            line1 = f"FPS: {fps:4.1f} | Area: {desk_str} | Stream: {stream_str}"
+            cv2.putText(frame, line1, (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1, cv2.LINE_AA)
 
             if now < toast_until:
                 cv2.putText(frame, status_toast, (14, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (50, 255, 50), 1, cv2.LINE_AA)
             elif current_pose is not None:
                 contact_str = "CONTACT [YES]" if current_pose.y_mm <= 0 else f"Hover (+{current_pose.y_mm:.1f}mm)"
-                line2 = f"Scalpel: ({current_pose.x_mm:4.0f}, {current_pose.y_mm:4.0f}, {current_pose.z_mm:4.0f} mm) | {contact_str}"
-                cv2.putText(frame, line2, (14, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (220, 220, 220), 1, cv2.LINE_AA)
+                ext_x = getattr(desk_calib, "extent_x_mm", 160.0)
+                ext_z = getattr(desk_calib, "extent_z_mm", 110.0)
+                in_area = abs(current_pose.x_mm) <= ext_x and abs(current_pose.z_mm) <= ext_z
+                area_tag = "IN ZONE" if in_area else "OUT OF ZONE"
+                line2 = f"Scalpel: ({current_pose.x_mm:4.0f}, {current_pose.y_mm:4.0f}, {current_pose.z_mm:4.0f} mm) | {contact_str} [{area_tag}]"
+                txt_col = (50, 255, 50) if in_area else (0, 180, 255)
+                cv2.putText(frame, line2, (14, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.44, txt_col, 1, cv2.LINE_AA)
             else:
-                cv2.putText(frame, "Scalpel: Searching for Tags 1, 2, 3 on tool handle...", (14, 48),
+                cv2.putText(frame, "Scalpel: Searching for Tag 1 on tool handle...", (14, 48),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 200, 200), 1, cv2.LINE_AA)
 
-            mode_str = f"Fast ({current_scale:.1f}x)" if current_scale < 0.99 else "Full (1.0x)"
-            line3 = f"[Space/t] Tare Recenter | [p] Pivot Calib | [c] Tag Calib | [r] Reset Space | [f] Speed | [q] Quit"
-            cv2.putText(frame, line3, (14, 66), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (170, 170, 170), 1, cv2.LINE_AA)
+            line3 = "[Drag Mouse] Draw Area | [s] Snap Desk to Scalpel | [d] Default Area | [Space] Tare | [[ / ]] Tilt | [q] Quit"
+            cv2.putText(frame, line3, (14, 66), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (170, 170, 170), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -450,35 +499,86 @@ def main():
                 else:
                     status_toast = "Cannot Tare: Hold scalpel in view of camera"
                     toast_until = now + 2.0
-            if key == ord("r"):
-                desk_calib = get_default_desk_calibration()
-                save_desk_calibration(desk_calib)
-                status_toast = "RESET: Restored default 6-DOF controller space"
-                toast_until = now + 3.0
-                print(f"[Reset] {status_toast}", flush=True)
-            if key == ord("p"):
-                pivot_mode = not pivot_mode
-                pivot_calibrator.reset()
-                status_toast = "Pivot Calibration Started: keep tip on desk and rotate handle"
-                toast_until = now + 3.0
-                print(f"[Pivot] {status_toast}", flush=True)
-            if key == ord("c"):
-                if args.desk_tag in detected_tags:
-                    desk_calib = estimate_desk_from_tag(
+            if key in (ord("s"), ord("c")):
+                if current_pose is not None:
+                    tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
+                    ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
+                    ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
+                    desk_calib = get_default_desk_calibration(origin_cam=tip_cam, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
+                    desk_calib.calibration_method = "scalpel-surface"
+                    save_desk_calibration(desk_calib)
+                    status_toast = "LOCKED DESK to scalpel position on table!"
+                    toast_until = now + 3.5
+                    print(f"[Desk] {status_toast}", flush=True)
+                elif args.desk_tag in detected_tags:
+                    new_calib = estimate_desk_from_tag(
                         corners_2d=detected_tags[args.desk_tag],
                         tag_size_mm=args.desk_tag_size,
                         camera_matrix=camera_matrix,
                         dist_coeffs=dist_coeffs,
                         tag_id=args.desk_tag
                     )
-                    if desk_calib:
+                    if new_calib:
+                        desk_calib = new_calib
                         save_desk_calibration(desk_calib)
                         status_toast = "Desk calibration locked & saved using Tag 0."
                         toast_until = now + 3.0
                         print(f"[Desk] {status_toast}", flush=True)
                 else:
-                    status_toast = f"Desk Tag {args.desk_tag} not visible."
+                    status_toast = "Place scalpel on desk and press 's', or drag rectangle with mouse"
                     toast_until = now + 2.5
+            if key == ord("d"):
+                desk_calib = get_default_desk_calibration(tilt_deg=tilt_deg, extent_x_mm=160.0, extent_z_mm=110.0)
+                save_desk_calibration(desk_calib)
+                status_toast = "RESET AREA: Default 320x220 mm workspace"
+                toast_until = now + 3.0
+                print(f"[Area] {status_toast}", flush=True)
+            if key == ord("r"):
+                desk_calib = get_default_desk_calibration(tilt_deg=tilt_deg)
+                save_desk_calibration(desk_calib)
+                status_toast = "RESET: Restored default 6-DOF controller space"
+                toast_until = now + 3.0
+                print(f"[Reset] {status_toast}", flush=True)
+            if key == ord("["):
+                tilt_deg = max(12.0, tilt_deg - 1.5)
+                orig = np.array(desk_calib.origin_cam) if desk_calib else None
+                ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
+                ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
+                desk_calib = get_default_desk_calibration(origin_cam=orig, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
+                save_desk_calibration(desk_calib)
+                status_toast = f"Desk Tilt Adjusted: {tilt_deg:.1f} deg"
+                toast_until = now + 2.0
+            elif key == ord("]"):
+                tilt_deg = min(48.0, tilt_deg + 1.5)
+                orig = np.array(desk_calib.origin_cam) if desk_calib else None
+                ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
+                ext_z = getattr(desk_calib, "extent_z_mm", 110.0) if desk_calib else 110.0
+                desk_calib = get_default_desk_calibration(origin_cam=orig, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
+                save_desk_calibration(desk_calib)
+                status_toast = f"Desk Tilt Adjusted: {tilt_deg:.1f} deg"
+                toast_until = now + 2.0
+            if key in (ord("+"), ord("=")):
+                if desk_calib:
+                    orig = np.array(desk_calib.origin_cam)
+                    orig[1] -= 5.0
+                    desk_calib.origin_cam = orig.tolist()
+                    save_desk_calibration(desk_calib)
+                    status_toast = "Raised Desk Plane (+5mm)"
+                    toast_until = now + 1.5
+            elif key in (ord("-"), ord("_")):
+                if desk_calib:
+                    orig = np.array(desk_calib.origin_cam)
+                    orig[1] += 5.0
+                    desk_calib.origin_cam = orig.tolist()
+                    save_desk_calibration(desk_calib)
+                    status_toast = "Lowered Desk Plane (-5mm)"
+                    toast_until = now + 1.5
+            if key == ord("p"):
+                pivot_mode = not pivot_mode
+                pivot_calibrator.reset()
+                status_toast = "Pivot Calibration Started: keep tip on desk and rotate handle"
+                toast_until = now + 3.0
+                print(f"[Pivot] {status_toast}", flush=True)
             if key == ord("f"):
                 current_scale = 1.0 if current_scale < 0.99 else 0.5
                 print(f"[Performance] Switched detection scale to {current_scale}x.", flush=True)

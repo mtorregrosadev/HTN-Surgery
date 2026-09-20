@@ -27,16 +27,38 @@ class DeskCalibration:
     calibrated_tip_offset_mm: list[float] = None  # [x, y, z] tip offset from tag center
     desk_tag_id: int = 0
     desk_tag_size_mm: float = 50.0
-    calibration_method: str = "pivot"  # "pivot", "tag", "probe"
+    calibration_method: str = "pivot"  # "pivot", "tag", "probe", "user-drawn-area"
     rms_error_mm: float = 0.0
     timestamp: float = 0.0
+    extent_x_mm: float = 160.0  # Half-width of workspace rectangle (mm)
+    extent_z_mm: float = 110.0  # Half-depth of workspace rectangle (mm)
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> DeskCalibration:
-        return cls(**data)
+        import dataclasses
+        valid_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)
+
+    def is_valid(self) -> bool:
+        """Verify the calibration represents a physically plausible desk in front of the camera."""
+        if not self.origin_cam or len(self.origin_cam) != 3:
+            return False
+        z = self.origin_cam[2]
+        if z < 150.0 or z > 1500.0:
+            return False
+        if not self.normal_cam or len(self.normal_cam) != 3:
+            return False
+        # Desk normal in camera coordinates must point upwards (negative Y in OpenCV frame)
+        if self.normal_cam[1] > -0.2:
+            return False
+        # Desk should not be tilted crazy sideways (nx within reasonable range)
+        if abs(self.normal_cam[0]) > 0.65:
+            return False
+        return True
 
     def point_cam_to_desk(self, point_cam: np.ndarray | list[float]) -> np.ndarray:
         """Transform a 3D point from camera frame (mm) to desk frame (mm)."""
@@ -148,6 +170,15 @@ class PivotCalibrator:
         if np.dot(normal_cam, contact_point) > 0:
             normal_cam = -normal_cam
 
+        # If estimated normal is not pointing upwards (ny > -0.35) or depth is degenerate,
+        # fallback to nominal upward desk normal (tilt = 28 deg)
+        if normal_cam[1] > -0.35 or contact_point[2] < 150.0 or contact_point[2] > 1500.0:
+            import math
+            rad = math.radians(28.0)
+            normal_cam = np.array([0.0, -math.cos(rad), -math.sin(rad)], dtype=np.float64)
+            if contact_point[2] < 150.0 or contact_point[2] > 1500.0:
+                contact_point = np.array([0.0, 110.0, 450.0], dtype=np.float64)
+
         u_y = normal_cam / np.linalg.norm(normal_cam)
 
         # Desk horizontal axis (u_x): Project camera horizontal axis [1, 0, 0] onto desk plane
@@ -172,7 +203,9 @@ class PivotCalibrator:
             normal_cam=u_y.tolist(),
             calibrated_tip_offset_mm=tip_offset.tolist(),
             calibration_method="pivot",
-            rms_error_mm=round(rms_err, 3)
+            rms_error_mm=round(rms_err, 3),
+            extent_x_mm=160.0,
+            extent_z_mm=110.0
         )
         return calib, tip_offset
 
@@ -180,7 +213,9 @@ class PivotCalibrator:
 def get_default_desk_calibration(
     contact_z_mm: float = 450.0,
     tilt_deg: float = 28.0,
-    origin_cam: Optional[np.ndarray] = None
+    origin_cam: Optional[np.ndarray] = None,
+    extent_x_mm: float = 160.0,
+    extent_z_mm: float = 110.0
 ) -> DeskCalibration:
     """Construct a clean, robust 6-DOF controller coordinate frame."""
     import math
@@ -200,6 +235,8 @@ def get_default_desk_calibration(
 
     if origin_cam is None:
         origin_cam = np.array([0.0, contact_z_mm * math.tan(rad) * 0.5, contact_z_mm], dtype=np.float64)
+    else:
+        origin_cam = np.asarray(origin_cam, dtype=np.float64)
 
     return DeskCalibration(
         origin_cam=origin_cam.tolist(),
@@ -207,7 +244,9 @@ def get_default_desk_calibration(
         normal_cam=u_y.tolist(),
         calibrated_tip_offset_mm=[0.0, 65.0, 0.0],
         calibration_method="nominal-controller",
-        rms_error_mm=0.0
+        rms_error_mm=0.0,
+        extent_x_mm=extent_x_mm,
+        extent_z_mm=extent_z_mm
     )
 
 
@@ -316,16 +355,98 @@ def save_desk_calibration(calibration: DeskCalibration, path: str | Path = "desk
 
 
 def load_desk_calibration(path: str | Path = "desk_calibration.json") -> Optional[DeskCalibration]:
-    """Load desk calibration from a JSON file if present."""
+    """Load desk calibration from a JSON file if present and physically valid."""
     p = Path(path)
     if not p.exists():
         return None
     try:
         with p.open("r", encoding="utf-8") as f:
             data = json.load(f)
-            return DeskCalibration.from_dict(data)
+            calib = DeskCalibration.from_dict(data)
+            if calib.is_valid():
+                return calib
+            print(f"[Desk] Warning: Stored calibration in {path} failed physical validation. Reverting to nominal.", flush=True)
+            return None
     except Exception:
         return None
+
+
+def desk_pixel_to_3d(
+    u: float,
+    v: float,
+    calib: DeskCalibration,
+    camera_matrix: np.ndarray,
+) -> Optional[np.ndarray]:
+    """Raycast an image pixel (u, v) onto the 3D calibrated desk plane.
+
+    Returns 3D point in camera coordinates (mm), or None if ray does not intersect desk plane.
+    """
+    fx = camera_matrix[0, 0]
+    fy = camera_matrix[1, 1]
+    cx = camera_matrix[0, 2]
+    cy = camera_matrix[1, 2]
+
+    ray = np.array([(u - cx) / fx, (v - cy) / fy, 1.0], dtype=np.float64)
+    n = np.asarray(calib.normal_cam, dtype=np.float64)
+    p0 = np.asarray(calib.origin_cam, dtype=np.float64)
+
+    denom = np.dot(n, ray)
+    if denom >= -1e-4:
+        return None
+
+    t = np.dot(n, p0) / denom
+    if t < 120.0 or t > 2000.0:
+        return None
+
+    return t * ray
+
+
+def desk_rect_from_pixels(
+    u0: float, v0: float,
+    u1: float, v1: float,
+    calib: DeskCalibration,
+    camera_matrix: np.ndarray,
+) -> Optional[DeskCalibration]:
+    """Fit an updated DeskCalibration centered on a 2D user-drawn rectangle.
+
+    The center of the rectangle becomes origin_cam (0, 0, 0) on the desk,
+    and the extents define the physical boundary area on the desk.
+    """
+    min_u, max_u = min(u0, u1), max(u0, u1)
+    min_v, max_v = min(v0, v1), max(v0, v1)
+
+    c_tl = desk_pixel_to_3d(min_u, min_v, calib, camera_matrix)
+    c_tr = desk_pixel_to_3d(max_u, min_v, calib, camera_matrix)
+    c_br = desk_pixel_to_3d(max_u, max_v, calib, camera_matrix)
+    c_bl = desk_pixel_to_3d(min_u, max_v, calib, camera_matrix)
+
+    if c_tl is None or c_tr is None or c_br is None or c_bl is None:
+        return None
+
+    p_center = (c_tl + c_tr + c_br + c_bl) * 0.25
+
+    r_cam_to_desk = np.asarray(calib.r_cam_to_desk, dtype=np.float64)
+    d_tr = r_cam_to_desk @ (c_tr - p_center)
+    d_tl = r_cam_to_desk @ (c_tl - p_center)
+    d_br = r_cam_to_desk @ (c_br - p_center)
+    d_bl = r_cam_to_desk @ (c_bl - p_center)
+
+    ext_x = max(abs(d_tr[0]), abs(d_tl[0]), abs(d_br[0]), abs(d_bl[0]))
+    ext_z = max(abs(d_tr[2]), abs(d_tl[2]), abs(d_br[2]), abs(d_bl[2]))
+
+    ext_x = float(np.clip(ext_x, 40.0, 450.0))
+    ext_z = float(np.clip(ext_z, 30.0, 350.0))
+
+    return DeskCalibration(
+        origin_cam=p_center.tolist(),
+        r_cam_to_desk=calib.r_cam_to_desk,
+        normal_cam=calib.normal_cam,
+        calibrated_tip_offset_mm=calib.calibrated_tip_offset_mm,
+        calibration_method="user-drawn-area",
+        rms_error_mm=0.0,
+        extent_x_mm=round(ext_x, 1),
+        extent_z_mm=round(ext_z, 1)
+    )
 
 
 def draw_desk_plane_grid(
@@ -333,58 +454,115 @@ def draw_desk_plane_grid(
     calib: DeskCalibration,
     camera_matrix: np.ndarray,
     dist_coeffs: np.ndarray,
-    extent_x_mm: float = 240.0,
-    extent_z_mm: float = 180.0,
-    step_mm: float = 30.0
+    extent_x_mm: Optional[float] = None,
+    extent_z_mm: Optional[float] = None,
+    step_mm: float = 25.0,
+    scalpel_tip_desk: Optional[np.ndarray] = None
 ) -> None:
-    """Render an augmented-reality 3D grid and coordinate triad directly on the desk surface."""
+    """Render an augmented-reality 3D boundary rectangle and shaded area on the desk."""
+    if not calib.is_valid():
+        return
+
+    ext_x = extent_x_mm if extent_x_mm is not None else getattr(calib, "extent_x_mm", 160.0)
+    ext_z = extent_z_mm if extent_z_mm is not None else getattr(calib, "extent_z_mm", 110.0)
+
     r_cam_to_desk = np.asarray(calib.r_cam_to_desk, dtype=np.float64)
     r_desk_to_cam = r_cam_to_desk.T
-    rvec, _ = cv2.Rodrigues(r_desk_to_cam)
-    tvec = np.asarray(calib.origin_cam, dtype=np.float64).reshape(3, 1)
+    tvec = np.asarray(calib.origin_cam, dtype=np.float64)
 
-    # 1. Draw Grid Lines along X and Z on the desk plane (Y = 0)
-    lines_3d = []
-    for x in np.arange(-extent_x_mm, extent_x_mm + step_mm * 0.5, step_mm):
-        lines_3d.append([[x, 0.0, -extent_z_mm], [x, 0.0, extent_z_mm]])
-    for z in np.arange(-extent_z_mm, extent_z_mm + step_mm * 0.5, step_mm):
-        lines_3d.append([[-extent_x_mm, 0.0, z], [extent_x_mm, 0.0, z]])
+    fx = camera_matrix[0, 0]
+    fy = camera_matrix[1, 1]
+    cx = camera_matrix[0, 2]
+    cy = camera_matrix[1, 2]
 
-    for pt1, pt2 in lines_3d:
-        pts = np.array([pt1, pt2], dtype=np.float64)
-        proj, _ = cv2.projectPoints(pts, rvec, tvec, camera_matrix, dist_coeffs)
-        p1 = tuple(proj[0].ravel().astype(int))
-        p2 = tuple(proj[1].ravel().astype(int))
-        cv2.line(frame, p1, p2, (50, 50, 50), 1, cv2.LINE_AA)
+    def project_safe(p_desk: list[float] | np.ndarray) -> Optional[Tuple[int, int]]:
+        p_c = (r_desk_to_cam @ np.asarray(p_desk, dtype=np.float64)) + tvec
+        if p_c[2] < 120.0:
+            return None
+        u = int(round(fx * p_c[0] / p_c[2] + cx))
+        v = int(round(fy * p_c[1] / p_c[2] + cy))
+        h, w = frame.shape[:2]
+        if -400 <= u <= w + 400 and -400 <= v <= h + 400:
+            return (u, v)
+        return None
 
-    # 2. Draw Desk Workspace Boundary Rectangle
-    boundary = np.array([
-        [-extent_x_mm, 0.0, -extent_z_mm],
-        [ extent_x_mm, 0.0, -extent_z_mm],
-        [ extent_x_mm, 0.0,  extent_z_mm],
-        [-extent_x_mm, 0.0,  extent_z_mm]
-    ], dtype=np.float64)
-    b_proj, _ = cv2.projectPoints(boundary, rvec, tvec, camera_matrix, dist_coeffs)
-    b_pts = b_proj.reshape(-1, 2).astype(np.int32)
-    cv2.polylines(frame, [b_pts], True, (0, 220, 220), 2, cv2.LINE_AA)
+    def draw_segment(p1_desk, p2_desk, color, thickness=1):
+        c1 = (r_desk_to_cam @ np.asarray(p1_desk, dtype=np.float64)) + tvec
+        c2 = (r_desk_to_cam @ np.asarray(p2_desk, dtype=np.float64)) + tvec
+        near_z = 120.0
+        if c1[2] < near_z and c2[2] < near_z:
+            return
+        if c1[2] < near_z:
+            t = (near_z - c1[2]) / (c2[2] - c1[2])
+            c1 = c1 + t * (c2 - c1)
+        elif c2[2] < near_z:
+            t = (near_z - c2[2]) / (c1[2] - c2[2])
+            c2 = c2 + t * (c1 - c2)
 
-    # 3. Draw 3D Coordinate Triad at Desk Origin
-    axis_pts = np.array([
-        [0.0, 0.0, 0.0],
-        [40.0, 0.0, 0.0],   # X (Red)
-        [0.0, 35.0, 0.0],   # Y (Green Up)
-        [0.0, 0.0, 40.0]    # Z (Blue)
-    ], dtype=np.float64)
-    a_proj, _ = cv2.projectPoints(axis_pts, rvec, tvec, camera_matrix, dist_coeffs)
-    orig = tuple(a_proj[0].ravel().astype(int))
-    ax_x = tuple(a_proj[1].ravel().astype(int))
-    ax_y = tuple(a_proj[2].ravel().astype(int))
-    ax_z = tuple(a_proj[3].ravel().astype(int))
+        u1 = int(round(fx * c1[0] / c1[2] + cx))
+        v1 = int(round(fy * c1[1] / c1[2] + cy))
+        u2 = int(round(fx * c2[0] / c2[2] + cx))
+        v2 = int(round(fy * c2[1] / c2[2] + cy))
+        cv2.line(frame, (u1, v1), (u2, v2), color, thickness, cv2.LINE_AA)
 
-    cv2.line(frame, orig, ax_x, (0, 0, 255), 3, cv2.LINE_AA)    # Red = X
-    cv2.line(frame, orig, ax_y, (0, 255, 0), 3, cv2.LINE_AA)    # Green = Y (Up)
-    cv2.line(frame, orig, ax_z, (255, 120, 0), 3, cv2.LINE_AA)  # Blue = Z
+    # 1. Workspace Area Rectangle 4 corners
+    corners_desk = [
+        [-ext_x, 0.0, -ext_z],
+        [ ext_x, 0.0, -ext_z],
+        [ ext_x, 0.0,  ext_z],
+        [-ext_x, 0.0,  ext_z],
+    ]
+    corners_2d = [project_safe(c) for c in corners_desk]
 
-    method_tag = f"Desk ({calib.calibration_method.upper()})"
-    cv2.putText(frame, method_tag, (orig[0] + 6, orig[1] - 6),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+    if all(p is not None for p in corners_2d):
+        poly = np.array(corners_2d, dtype=np.int32)
+        # Soft translucent shaded surgical field overlay
+        overlay = frame.copy()
+        cv2.fillPoly(overlay, [poly], (35, 75, 25))
+        cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
+
+        # Crisp border
+        cv2.polylines(frame, [poly], True, (0, 255, 200), 2, cv2.LINE_AA)
+
+        # Corner markers
+        for pt in corners_2d:
+            cv2.circle(frame, pt, 4, (0, 255, 255), -1, cv2.LINE_AA)
+
+        # Dimension label
+        top_u = (corners_2d[0][0] + corners_2d[1][0]) // 2
+        top_v = (corners_2d[0][1] + corners_2d[1][1]) // 2 - 8
+        label = f"Surgical Area: {int(ext_x*2)}x{int(ext_z*2)} mm"
+        cv2.putText(frame, label, (top_u - 75, top_v),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 200), 1, cv2.LINE_AA)
+
+    # 2. Internal Grid Lines clipped strictly inside the rectangle
+    for x in np.arange(-ext_x + step_mm, ext_x, step_mm):
+        draw_segment([x, 0.0, -ext_z], [x, 0.0, ext_z], (60, 110, 60), 1)
+    for z in np.arange(-ext_z + step_mm, ext_z, step_mm):
+        draw_segment([-ext_x, 0.0, z], [ext_x, 0.0, z], (60, 110, 60), 1)
+
+    # 3. Desk Origin Triad at (0, 0, 0)
+    p_orig = project_safe([0.0, 0.0, 0.0])
+    if p_orig:
+        draw_segment([0.0, 0.0, 0.0], [35.0, 0.0, 0.0], (0, 0, 255), 2)    # X Red
+        draw_segment([0.0, 0.0, 0.0], [0.0, 30.0, 0.0], (0, 255, 0), 2)    # Y Green Up
+        draw_segment([0.0, 0.0, 0.0], [0.0, 0.0, 35.0], (255, 120, 0), 2)  # Z Blue
+        cv2.circle(frame, p_orig, 3, (255, 255, 255), -1)
+        cv2.putText(frame, "(0,0,0)", (p_orig[0] + 6, p_orig[1] - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # 4. Scalpel Shadow / Touchpoint on the desk
+    if scalpel_tip_desk is not None:
+        sx, sy, sz = scalpel_tip_desk[0], scalpel_tip_desk[1], scalpel_tip_desk[2]
+        p_shadow = project_safe([sx, 0.0, sz])
+        p_tip = project_safe([sx, sy, sz])
+        if p_shadow is not None:
+            in_area = abs(sx) <= ext_x and abs(sz) <= ext_z
+            ring_col = (0, 255, 0) if in_area else (0, 165, 255)
+            if sy <= 2.0:
+                cv2.circle(frame, p_shadow, 8, (0, 0, 255), 2, cv2.LINE_AA)
+                cv2.circle(frame, p_shadow, 3, (0, 0, 255), -1, cv2.LINE_AA)
+            else:
+                cv2.circle(frame, p_shadow, 6, ring_col, 1, cv2.LINE_AA)
+                if p_tip is not None:
+                    cv2.line(frame, p_shadow, p_tip, (0, 200, 255), 1, cv2.LINE_AA)

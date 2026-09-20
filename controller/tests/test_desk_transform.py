@@ -157,3 +157,54 @@ def test_scalpel_pose_solver_6dof():
     assert -500.0 < pose.y_mm < 500.0
     assert -500.0 < pose.z_mm < 500.0
 
+
+def test_desk_validation():
+    """Verify DeskCalibration detects degenerate planes (Z < 150mm or inverted normal)."""
+    from tracker.desk_calibration import get_default_desk_calibration, DeskCalibration
+
+    valid = get_default_desk_calibration()
+    assert valid.is_valid() is True
+
+    # Behind camera
+    bad_z = DeskCalibration(
+        origin_cam=[0.0, 50.0, -25.0],
+        r_cam_to_desk=valid.r_cam_to_desk,
+        normal_cam=valid.normal_cam
+    )
+    assert bad_z.is_valid() is False
+
+    # Normal pointing down or sideways
+    bad_n = DeskCalibration(
+        origin_cam=[0.0, 50.0, 450.0],
+        r_cam_to_desk=valid.r_cam_to_desk,
+        normal_cam=[0.0, 0.8, 0.0]
+    )
+    assert bad_n.is_valid() is False
+
+
+def test_desk_user_drawn_rectangle():
+    """Verify drawing a 2D bounding box on the camera feed projects to a valid 3D desk area."""
+    from tracker.desk_calibration import (
+        get_default_desk_calibration,
+        get_default_camera_matrix,
+        desk_pixel_to_3d,
+        desk_rect_from_pixels
+    )
+
+    K, _ = get_default_camera_matrix(1280, 720)
+    calib = get_default_desk_calibration(contact_z_mm=450.0, tilt_deg=28.0)
+
+    # Pixel in lower center of image (on desk)
+    p3d = desk_pixel_to_3d(640, 550, calib, K)
+    assert p3d is not None
+    assert p3d[2] > 200.0  # Safe positive depth in front of camera
+
+    # User draws a rectangle in the lower screen (desk region)
+    updated = desk_rect_from_pixels(400, 450, 880, 650, calib, K)
+    assert updated is not None
+    assert updated.is_valid() is True
+    assert updated.calibration_method == "user-drawn-area"
+    assert updated.extent_x_mm > 50.0
+    assert updated.extent_z_mm > 50.0
+
+

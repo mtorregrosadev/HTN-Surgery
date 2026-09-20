@@ -831,6 +831,23 @@ Restart the bridge with the new value.
 `--span 0.5` means: half the camera's width covers the full practice patch. A **smaller** span makes small hand
 movements travel far; a **larger** span makes the tool move less. Try `0.4` to `0.8`.
 
+## Step 10.8: Precision calibration (recommended)
+
+The steps above work, but three short calibrations make the position much more accurate. Each is a key press in the
+**Bridge** camera window, and the results are saved in `hardware/tracking_config.json`, so you only do them once.
+
+1. Press **k**, then click the four corners of your practice area in this order: **top-left, top-right,
+   bottom-right, bottom-left**. Tell the bridge the real size with `--table-mm 300x220` (width x height in mm).
+   *Why?* The camera sees the table at an angle. This removes the perspective distortion.
+2. Hold the tool still with all three tags visible and press **l**. It watches 30 frames and learns how the three
+   tags sit on the handle.
+   *Why?* Now it can still work out where the tool is when one tag is hidden by your hand.
+3. Put the **tip** of the tool on the exact centre of the practice area and press **t**.
+   *Why?* The tags are on the handle, but what cuts is the tip. This teaches the bridge where the tip is.
+
+The status line at the bottom of the camera window shows `table:OK layout:OK tip:OK` when all three are done.
+Move the table or camera and you must redo step 1, then steps 2 and 3.
+
 **Checkpoint 10:** `tags=3`, the origin is set, the sensor is zeroed, and pressing changes `force=`.
 
 ---

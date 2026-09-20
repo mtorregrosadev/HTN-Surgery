@@ -18,6 +18,8 @@ namespace SurgePrep.Editor
         private const string MaterialRoot = ShowcaseRoot + "/Materials";
         private const string GeneratedRoot = ShowcaseRoot + "/Generated";
         private const string SceneRoot = ShowcaseRoot + "/Scenes";
+        private const string HairModelPath =
+            "Packages/com.surgeprep.runtime/Runtime/Models/Hair/hair.obj";
         private const string ScalpelModelPath =
             "Packages/com.surgeprep.runtime/Runtime/Models/Scalpel/scalepl.obj";
 
@@ -210,6 +212,26 @@ namespace SurgePrep.Editor
                 instance.name = FriendlyName(file);
                 AssignMaterial(instance, MaterialFor(file, bone, cartilage, muscle, diaphragm, skin));
             }
+            // Hair grown on the real scalp by tools/generate_hair.py. It lives in the skin
+            // layer, so the K cutaway hides it together with the skin.
+            var hairModel = AssetDatabase.LoadAssetAtPath<GameObject>(HairModelPath);
+            GameObject hair = null;
+            if (hairModel != null)
+            {
+                hair = PrefabUtility.InstantiatePrefab(hairModel, skinLayer) as GameObject;
+                if (hair != null)
+                {
+                    hair.name = "Hair";
+                    AssignMaterial(hair, Material("Hair", new Color(0.17f, 0.10f, 0.06f), 0.0f, 0.5f));
+                }
+            }
+            var headFocus = new GameObject("RegistrationAnchor_HeadFocus");
+            var hairRenderer = hair != null ? hair.GetComponentInChildren<Renderer>() : null;
+            headFocus.transform.position = hairRenderer != null
+                ? hairRenderer.bounds.center
+                : tableTop.position + new Vector3(0f, 0.3f, 0.8f);
+            headFocus.transform.SetParent(tableTop, true);
+
             muscleLayer.gameObject.SetActive(false);
             boneLayer.gameObject.SetActive(false);
             cartilageLayer.gameObject.SetActive(false);
@@ -255,6 +277,7 @@ namespace SurgePrep.Editor
             var camera = CreateCamera();
             CreateLighting(window.transform);
             CreateReflectionProbe(tableTop.position);
+            CreateAmbience(room.transform, tableTop);
 
             var roomFocus = new GameObject("RegistrationAnchor_RoomFocus");
             roomFocus.transform.position = tableTop.position + Vector3.up * 0.2f;
@@ -264,6 +287,7 @@ namespace SurgePrep.Editor
             SetObject(experience, "chestFocus", window.transform);
             SetObject(experience, "targetFocus", window.transform);
             SetObject(experience, "roomFocus", roomFocus.transform);
+            SetObject(experience, "headFocus", headFocus.transform);
             SetObject(experience, "skinLayer", skinLayer.gameObject);
             SetObject(experience, "muscleLayer", muscleLayer.gameObject);
             SetObject(experience, "boneLayer", boneLayer.gameObject);
@@ -537,6 +561,61 @@ namespace SurgePrep.Editor
             wash.transform.position = new Vector3(0.4f, 2.4f, 1.2f);
             ambientLight.shadows = LightShadows.Soft;
             ambient.transform.rotation = Quaternion.Euler(50f, -20f, 0f);
+        }
+
+        // LED coves, a glowing halo ring around the table, a sweeping scanner plane
+        // and coloured accent lights. Purely visual; nothing here touches the simulation.
+        private static void CreateAmbience(Transform room, Transform table)
+        {
+            var cyan = EmissiveMaterial("LedCyan", new Color(0.10f, 0.75f, 0.95f));
+            var violet = EmissiveMaterial("LedViolet", new Color(0.55f, 0.25f, 0.95f));
+            var haloInner = Material("HaloInner", new Color(0.05f, 0.06f, 0.08f), 0.3f, 0.7f);
+            var scanGlass = TransparentMaterial("ScanPlane", new Color(0.15f, 0.85f, 1f, 0.10f));
+
+            var strips = new GameObject("Ambient LED strips");
+            strips.transform.SetParent(room, false);
+            const float ceilingY = 2.93f;
+            const float baseY = 0.09f;
+            Cube("Cove back", strips.transform, new Vector3(0f, ceilingY, -3.9f), new Vector3(7.6f, 0.03f, 0.03f), cyan);
+            Cube("Cove front", strips.transform, new Vector3(0f, ceilingY, 3.9f), new Vector3(7.6f, 0.03f, 0.03f), cyan);
+            Cube("Cove left", strips.transform, new Vector3(-3.9f, ceilingY, 0f), new Vector3(0.03f, 0.03f, 7.6f), cyan);
+            Cube("Cove right", strips.transform, new Vector3(3.9f, ceilingY, 0f), new Vector3(0.03f, 0.03f, 7.6f), cyan);
+            Cube("Base back", strips.transform, new Vector3(0f, baseY, -3.93f), new Vector3(7.6f, 0.03f, 0.02f), violet);
+            Cube("Base front", strips.transform, new Vector3(0f, baseY, 3.93f), new Vector3(7.6f, 0.03f, 0.02f), violet);
+            Cube("Base left", strips.transform, new Vector3(-3.93f, baseY, 0f), new Vector3(0.02f, 0.03f, 7.6f), violet);
+            Cube("Base right", strips.transform, new Vector3(3.93f, baseY, 0f), new Vector3(0.02f, 0.03f, 7.6f), violet);
+
+            var halo = new GameObject("Table halo");
+            halo.transform.SetParent(room, false);
+            Cylinder("Halo ring", halo.transform, new Vector3(0f, 0.052f, 0f), new Vector3(2.9f, 0.003f, 2.9f), Quaternion.identity, cyan);
+            Cylinder("Halo centre", halo.transform, new Vector3(0f, 0.055f, 0f), new Vector3(2.78f, 0.003f, 2.78f), Quaternion.identity, haloInner);
+
+            // A vertical scanner plane sweeps slowly along the table, like a body scan.
+            var scanner = new GameObject("Scanner sweep");
+            scanner.transform.SetParent(table, false);
+            scanner.transform.localPosition = new Vector3(0f, 0.32f, 0f);
+            Cube("Scan plane", scanner.transform, Vector3.zero, new Vector3(0.95f, 0.62f, 0.004f), scanGlass);
+            Cube("Scan top edge", scanner.transform, new Vector3(0f, 0.31f, 0f), new Vector3(0.95f, 0.006f, 0.008f), cyan);
+            Cube("Scan bottom edge", scanner.transform, new Vector3(0f, -0.31f, 0f), new Vector3(0.95f, 0.006f, 0.008f), cyan);
+            scanner.AddComponent<SurgePrep.AmbientMotion>().Configure(Vector3.zero, Vector3.forward, 0.85f, 0.06f);
+
+            AddAccentLight("Accent cyan", room, new Vector3(-3.3f, 1.4f, -3.3f), new Color(0.10f, 0.70f, 1f));
+            AddAccentLight("Accent violet", room, new Vector3(3.3f, 1.4f, 3.3f), new Color(0.60f, 0.30f, 1f));
+            AddAccentLight("Accent teal", room, new Vector3(3.3f, 1.4f, -3.3f), new Color(0.15f, 0.90f, 0.75f));
+            AddAccentLight("Accent magenta", room, new Vector3(-3.3f, 1.4f, 3.3f), new Color(0.95f, 0.30f, 0.70f));
+        }
+
+        private static void AddAccentLight(string name, Transform parent, Vector3 position, Color colour)
+        {
+            var lightObject = new GameObject(name);
+            lightObject.transform.SetParent(parent, false);
+            lightObject.transform.localPosition = position;
+            var accent = lightObject.AddComponent<Light>();
+            accent.type = LightType.Point;
+            accent.color = colour;
+            accent.intensity = 1.2f;
+            accent.range = 5.5f;
+            accent.shadows = LightShadows.None;
         }
 
         private static void CreateReflectionProbe(Vector3 centre)

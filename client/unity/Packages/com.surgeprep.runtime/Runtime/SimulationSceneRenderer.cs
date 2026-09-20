@@ -165,6 +165,9 @@ namespace SurgePrep
                 new Vector3(0f, 0.04f, 0f), new Vector3(0.007f, 0.004f, 0.007f)
             );
 
+            AddDissectorDetails(dissectorVisual.transform);
+            AddChestTubeDetails(tubeVisual.transform);
+
             if (toolMaterial != null)
             {
                 foreach (var meshRenderer in tip.GetComponentsInChildren<MeshRenderer>())
@@ -240,6 +243,127 @@ namespace SurgePrep
             PaintNamed(tubeVisual, "Training chest tube", new Color(0.82f, 0.62f, 0.28f));
             PaintNamed(tubeVisual, "Tube hub", new Color(0.18f, 0.42f, 0.70f));
             PaintNamed(tubeVisual, "Tube stripe", new Color(0.93f, 0.94f, 0.95f));
+
+            PaintTree(dissectorVisual, "Dissector rings", new Color(0.72f, 0.74f, 0.76f));
+            PaintNamed(dissectorVisual, "Ring bridge left", new Color(0.72f, 0.74f, 0.76f));
+            PaintNamed(dissectorVisual, "Ring bridge right", new Color(0.72f, 0.74f, 0.76f));
+            PaintNamed(dissectorVisual, "Jaw hinge", new Color(0.55f, 0.57f, 0.60f));
+            PaintTree(dissectorVisual, "Grip ridges", new Color(0.10f, 0.26f, 0.46f));
+            PaintTree(tubeVisual, "Tube eyes", new Color(0.10f, 0.05f, 0.04f));
+            PaintTree(tubeVisual, "Depth marks", new Color(0.12f, 0.16f, 0.30f));
+            PaintNamed(tubeVisual, "Radiopaque line", new Color(0.20f, 0.42f, 0.85f));
+            PaintNamed(tubeVisual, "Tube connector", new Color(0.86f, 0.88f, 0.90f));
+            PaintNamed(tubeVisual, "Connector cap", new Color(0.18f, 0.42f, 0.70f));
+            PaintNamed(tubeVisual, "Tube clamp", new Color(0.78f, 0.16f, 0.18f));
+        }
+
+        // Colours every renderer under a named child (for parts built from several primitives).
+        private static void PaintTree(GameObject root, string childName, Color color)
+        {
+            if (root == null) return;
+            var child = root.transform.Find(childName);
+            if (child == null) return;
+            foreach (var meshRenderer in child.GetComponentsInChildren<MeshRenderer>())
+            {
+                var source = meshRenderer.sharedMaterial;
+                if (source == null) continue;
+                meshRenderer.sharedMaterial = new Material(source) { color = color };
+            }
+        }
+
+        // A ring of small blocks; the ring lies in the tool's XY plane so it reads as a finger loop.
+        private static GameObject Ring(
+            string name, Transform parent, Vector3 centre, float radius, float thickness, int segments
+        )
+        {
+            var ring = new GameObject(name);
+            ring.transform.SetParent(parent, false);
+            ring.transform.localPosition = centre;
+            var arc = 2f * Mathf.PI * radius / segments * 1.18f;
+            for (var index = 0; index < segments; index++)
+            {
+                var angle = index * (2f * Mathf.PI / segments);
+                var block = Primitive(
+                    "Ring segment " + index, PrimitiveType.Cube, ring.transform,
+                    new Vector3(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius, 0f),
+                    new Vector3(thickness, arc, thickness * 1.5f)
+                );
+                block.transform.localRotation = Quaternion.Euler(0f, 0f, angle * Mathf.Rad2Deg);
+            }
+            return ring;
+        }
+
+        // Finger rings, a hinge screw and grip ridges make the dissector read as a real instrument.
+        // All positions are in the tool frame (tip at the origin, +Y toward the handle, metres).
+        private static void AddDissectorDetails(Transform parent)
+        {
+            var rings = new GameObject("Dissector rings");
+            rings.transform.SetParent(parent, false);
+            Ring("Left ring", rings.transform, new Vector3(-0.0165f, 0.1485f, 0f), 0.0105f, 0.0024f, 10);
+            Ring("Right ring", rings.transform, new Vector3(0.0165f, 0.1485f, 0f), 0.0105f, 0.0024f, 10);
+            Primitive(
+                "Ring bridge left", PrimitiveType.Cube, parent,
+                new Vector3(-0.0075f, 0.1385f, 0f), new Vector3(0.016f, 0.004f, 0.0055f)
+            );
+            Primitive(
+                "Ring bridge right", PrimitiveType.Cube, parent,
+                new Vector3(0.0075f, 0.1385f, 0f), new Vector3(0.016f, 0.004f, 0.0055f)
+            );
+            Primitive(
+                "Jaw hinge", PrimitiveType.Sphere, parent,
+                new Vector3(0f, 0.0755f, 0f), Vector3.one * 0.0062f
+            );
+            var ridges = new GameObject("Grip ridges");
+            ridges.transform.SetParent(parent, false);
+            for (var index = 0; index < 4; index++)
+            {
+                Primitive(
+                    "Ridge " + index, PrimitiveType.Cylinder, ridges.transform,
+                    new Vector3(0f, 0.096f + index * 0.0095f, 0f), new Vector3(0.0094f, 0.0011f, 0.0094f)
+                );
+            }
+        }
+
+        // Fenestrations near the tip, depth marks, a radiopaque line, a connector and a clamp.
+        private static void AddChestTubeDetails(Transform parent)
+        {
+            var eyes = new GameObject("Tube eyes");
+            eyes.transform.SetParent(parent, false);
+            for (var index = 0; index < 4; index++)
+            {
+                var side = index % 2 == 0 ? 1f : -1f;
+                var eye = Primitive(
+                    "Eye " + index, PrimitiveType.Cylinder, eyes.transform,
+                    new Vector3(side * 0.0031f, 0.007f + index * 0.0075f, 0f),
+                    new Vector3(0.0022f, 0.0007f, 0.0022f)
+                );
+                eye.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            }
+            var marks = new GameObject("Depth marks");
+            marks.transform.SetParent(parent, false);
+            for (var index = 0; index < 6; index++)
+            {
+                Primitive(
+                    "Mark " + index, PrimitiveType.Cylinder, marks.transform,
+                    new Vector3(0f, 0.04f + index * 0.011f, 0f), new Vector3(0.0067f, 0.0005f, 0.0067f)
+                );
+            }
+            Primitive(
+                "Radiopaque line", PrimitiveType.Cube, parent,
+                new Vector3(0f, 0.058f, 0.0032f), new Vector3(0.0009f, 0.1f, 0.0009f)
+            );
+            Primitive(
+                "Tube connector", PrimitiveType.Cylinder, parent,
+                new Vector3(0f, 0.124f, 0f), new Vector3(0.0078f, 0.010f, 0.0078f)
+            );
+            Primitive(
+                "Connector cap", PrimitiveType.Cylinder, parent,
+                new Vector3(0f, 0.1355f, 0f), new Vector3(0.0108f, 0.0035f, 0.0108f)
+            );
+            Primitive(
+                "Tube clamp", PrimitiveType.Cube, parent,
+                new Vector3(0f, 0.094f, 0f), new Vector3(0.0125f, 0.0075f, 0.0088f)
+            );
         }
 
         private static void PaintNamed(GameObject root, string childName, Color color)

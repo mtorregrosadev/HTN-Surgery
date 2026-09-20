@@ -8,6 +8,7 @@ namespace SurgePrep
         [SerializeField] private Transform chestFocus;
         [SerializeField] private Transform targetFocus;
         [SerializeField] private Transform roomFocus;
+        [SerializeField] private Transform headFocus;
         [SerializeField] private GameObject skinLayer;
         [SerializeField] private GameObject muscleLayer;
         [SerializeField] private GameObject boneLayer;
@@ -18,6 +19,7 @@ namespace SurgePrep
         [SerializeField] private float panSensitivity = 0.0045f;
         [SerializeField] private float presetSeconds = 0.85f;
         [SerializeField] private float introOrbitSeconds = 3.2f;
+        [SerializeField] private float turntableDegreesPerSecond = 16f;
         private const float MinOrbitDistance = 0.42f;
         private const float MaxOrbitDistanceCap = 3.55f;
         private static readonly Bounds RoomBounds = new Bounds(
@@ -34,6 +36,7 @@ namespace SurgePrep
         private float targetPitch;
         private float introRemaining;
         private bool cutaway;
+        private bool turntable;
 
         private void Awake()
         {
@@ -70,11 +73,20 @@ namespace SurgePrep
                 if (ShowcaseInput.Pressed(KeyCode.C)) SetSurgeonView(false);
                 if (ShowcaseInput.Pressed(KeyCode.F)) SetTargetView(false);
                 if (ShowcaseInput.Pressed(KeyCode.O)) SetRoomView(false);
+                if (ShowcaseInput.Pressed(KeyCode.H)) SetHeadView(false);
+                if (ShowcaseInput.Pressed(KeyCode.B)) SetOverheadView(false);
+                if (ShowcaseInput.Pressed(KeyCode.T)) turntable = !turntable;
                 if (ShowcaseInput.Pressed(KeyCode.K))
                 {
                     cutaway = !cutaway;
                     ApplyCutaway();
                 }
+            }
+
+            if (turntable && introRemaining <= 0f && !ShowcaseInput.OrbitMouseHeld())
+            {
+                // Slow 360-degree turntable around whatever is in focus.
+                targetYaw += turntableDegreesPerSecond * Time.unscaledDeltaTime;
             }
 
             var scroll = ShowcaseInput.MouseScroll();
@@ -91,7 +103,7 @@ namespace SurgePrep
             {
                 var delta = ShowcaseInput.MouseDelta();
                 targetYaw += delta.x * orbitSensitivity;
-                targetPitch = Mathf.Clamp(targetPitch - delta.y * orbitSensitivity, 8f, 82f);
+                targetPitch = Mathf.Clamp(targetPitch - delta.y * orbitSensitivity, -12f, 88f);
                 yaw = targetYaw;
                 pitch = targetPitch;
             }
@@ -136,6 +148,24 @@ namespace SurgePrep
             targetDistance = 3.25f;
             targetYaw = 154f;
             targetPitch = 20f;
+            if (snap) Snap();
+        }
+
+        public void SetHeadView(bool snap)
+        {
+            targetFocusPoint = headFocus != null ? headFocus.position : new Vector3(0f, 1.1f, 0.8f);
+            targetDistance = 0.7f;
+            targetYaw = 165f;
+            targetPitch = 42f;
+            if (snap) Snap();
+        }
+
+        public void SetOverheadView(bool snap)
+        {
+            targetFocusPoint = roomFocus != null ? roomFocus.position : new Vector3(0f, 0.95f, 0f);
+            targetDistance = 2.4f;
+            targetYaw = 180f;
+            targetPitch = 84f;
             if (snap) Snap();
         }
 

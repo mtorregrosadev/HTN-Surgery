@@ -1335,7 +1335,7 @@ py -3.12 hardware/tag_fsr_bridge.py --port COM3 --fsr-max 3000
 ```
 
 **Bridge keys:** `z` set origin · `c` zero sensor · `q` quit.
-**Unity keys:** `1/2/3` tools · `R` twice reset · `Tab` guidance · `F/C/O` cameras · `K` cutaway.
+**Unity keys:** `1/2/3` tools · `R` twice reset · `Tab` guidance · `F/C/O` cameras · `H` head close-up · `B` overhead · `T` 360 turntable · `K` cutaway.
 **Health checks:** `curl http://127.0.0.1:8000/health` and `curl http://127.0.0.1:8100/health`.
 **Pressure to depth:** hover +6 mm · skin 0 to −3 · fat −3 to −15 · muscle −15 to −25 · pleura −25 to −32.
 **Deadline:** Sunday Sep 20, 2026, **8:00 AM EDT**. Submit early.

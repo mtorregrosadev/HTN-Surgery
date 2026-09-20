@@ -84,6 +84,13 @@ class ToolPose6DOF:
 class ScalpelPoseSolver:
     """Solves 6-DOF physical scalpel tip pose using AprilTags on the handle."""
 
+    # Outlier-jump budget: a generous ceiling on genuine hand speed (mm/s),
+    # scaled by actual elapsed time, plus floor/ceiling clamps so a very
+    # short or very long dt still produces a sane per-sample threshold.
+    MAX_TIP_SPEED_MM_S: float = 1800.0
+    MIN_JUMP_THRESHOLD_MM: float = 25.0
+    MAX_JUMP_THRESHOLD_MM: float = 250.0
+
     def __init__(
         self,
         camera_matrix: np.ndarray,
@@ -113,6 +120,13 @@ class ScalpelPoseSolver:
         self._last_valid_tip_cam: Optional[np.ndarray] = None
         self._jump_reject_count: int = 0
         self._last_quaternion: Optional[np.ndarray] = None
+        self._last_sample_time: Optional[float] = None
+        # Whichever tool tag is currently being used as the tracking
+        # reference.  Sticking with it while it stays visible avoids
+        # tag-swap jitter; falling back to another visible tag (rather than
+        # dropping tracking) is what keeps the pose alive as the handle
+        # rotates and different tags come into view.
+        self._active_reference_tag: Optional[int] = None
 
     def reset_tracking(self) -> None:
         """Forget filtered state after a tracking gap."""
@@ -121,15 +135,29 @@ class ScalpelPoseSolver:
         self._last_valid_tip_cam = None
         self._jump_reject_count = 0
         self._last_quaternion = None
+        self._last_sample_time = None
+        self._active_reference_tag = None
 
     def primary_tag_visible(self, detected_tags: Dict[int, np.ndarray]) -> Optional[int]:
-        """Return the stable reference tag to use for this frame."""
+        """Return the reference tag to use for this frame.
+
+        All configured tool tags share the same tip-offset convention (see
+        ``solve_tool_pose``), so any one of them is an equally valid
+        tracking reference.  Restricting this to a single fixed tag ID
+        meant tracking dropped out completely whenever that specific tag
+        rotated out of view, even though another tool tag was visible.
+        """
         if self.tag_to_tool_transforms:
             candidates = sorted(tid for tid in detected_tags if tid in self.tool_tag_ids)
             return candidates[0] if candidates else None
-        if self.primary_tag_id is not None and self.primary_tag_id in detected_tags:
-            return self.primary_tag_id
-        return None
+        visible_tool_tags = sorted(tid for tid in detected_tags if tid in self.tool_tag_ids)
+        if not visible_tool_tags:
+            self._active_reference_tag = None
+            return None
+        if self._active_reference_tag in visible_tool_tags:
+            return self._active_reference_tag
+        self._active_reference_tag = visible_tool_tags[0]
+        return self._active_reference_tag
 
     def _tag_pose_to_tool(
         self, tag_id: int, rotation_cam: np.ndarray, position_cam: np.ndarray
@@ -255,17 +283,28 @@ class ScalpelPoseSolver:
             tool_handle_axis_cam = mean_rot_cam[:, 1]
             blade_tip_cam = mean_tag_pos_cam + (tool_handle_axis_cam * self.tip_offset_along_handle_mm)
 
-        # Outlier Jump Check (guard against planar ambiguity or sudden occlusion jump > 45mm/frame)
+        # Outlier Jump Check (guard against planar ambiguity or sudden occlusion
+        # jumps).  The allowed jump scales with the real elapsed time between
+        # samples instead of a fixed per-frame distance: a fixed threshold
+        # misclassifies genuine fast motion as an outlier whenever the camera
+        # frame rate dips, freezing the displayed tip and then snapping it
+        # forward once the freeze budget runs out.
+        now_t = timestamp if timestamp is not None else time.perf_counter()
         if self._last_valid_tip_cam is not None:
             jump_mm = float(np.linalg.norm(blade_tip_cam - self._last_valid_tip_cam))
-            if jump_mm > 45.0:
+            dt = (now_t - self._last_sample_time) if self._last_sample_time is not None else None
+            if dt is None or dt <= 0.0 or dt > 0.5:
+                dt = 1.0 / 30.0
+            jump_threshold_mm = float(np.clip(self.MAX_TIP_SPEED_MM_S * dt, self.MIN_JUMP_THRESHOLD_MM, self.MAX_JUMP_THRESHOLD_MM))
+            if jump_mm > jump_threshold_mm:
                 self._jump_reject_count += 1
-                if self._jump_reject_count <= 6:
+                if self._jump_reject_count <= 3:
                     blade_tip_cam = self._last_valid_tip_cam.copy()
                 else:
                     self._jump_reject_count = 0
             else:
                 self._jump_reject_count = 0
+        self._last_sample_time = now_t
 
         # Apply One-Euro filter in camera frame before desk projection
         filtered_tip_cam = self.pos_filter.filter(blade_tip_cam, timestamp)

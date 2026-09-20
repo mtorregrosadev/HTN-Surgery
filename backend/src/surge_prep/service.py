@@ -47,6 +47,7 @@ class TrainingService:
             raise HTTPException(status.HTTP_409_CONFLICT, "A valid calibration is required")
         if calibration.device_id != request.device_id:
             raise HTTPException(status.HTTP_409_CONFLICT, "Calibration belongs to another device")
+        await self._retire_active_sessions_for_device(request.device_id)
         session = Session(
             **request.model_dump(),
             session_id=new_id("session"),
@@ -56,6 +57,30 @@ class TrainingService:
         await self.simulator.begin_session(session.session_id)
         await self.store.save_session(session)
         return session
+
+    async def _retire_active_sessions_for_device(self, device_id: str) -> None:
+        """Supersede this device's other still-"active" sessions.
+
+        A physical device only ever drives one live session. Recalibrating
+        (e.g. the one-click demo, which recenters on wherever the tip
+        currently is) almost never reproduces a bit-identical transform, so
+        the tracker's session-reuse check fails and a brand-new session gets
+        created every time - leaving the previous one stranded as "active"
+        forever, since nothing ever calls its `/complete` endpoint. Once more
+        than one session for a device is "active", ``get_active_session``
+        (last-created wins) can point viewers at a session that has never
+        received a single sample while the one with real motion in it goes
+        unwatched. Retiring the old ones here keeps exactly one truly live
+        session per device.
+        """
+        for other in await self.store.list_sessions():
+            if other.device_id != device_id or other.status != SessionStatus.active:
+                continue
+            other.status = SessionStatus.aborted
+            other.completed_at = utc_now()
+            self._last_valid.pop(other.session_id, None)
+            self._frozen.pop(other.session_id, None)
+            await self.store.save_session(other)
 
     async def list_sessions(self) -> list[Session]:
         return await self.store.list_sessions()

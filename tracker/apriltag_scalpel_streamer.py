@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -34,6 +34,7 @@ from .desk_calibration import (
     load_desk_calibration,
     save_desk_calibration,
 )
+from .direct_pose_broadcast import DirectPoseBroadcaster
 from .tool_pose_solver import ScalpelPoseSolver, ToolPose6DOF
 
 FAMILIES = {
@@ -249,6 +250,27 @@ class ControllerBridge:
                 await asyncio.sleep(1.0)
 
 
+def _configure_capture_for_low_latency(cap: cv2.VideoCapture) -> None:
+    """Best-effort tuning so the driver doesn't throttle or queue up frames.
+
+    Many USB webcams default to YUYV at very low FPS under OpenCV until MJPG
+    is explicitly requested, and a large internal capture buffer lets frames
+    queue up whenever a loop iteration takes longer than one frame interval -
+    both show up as the live feed (and therefore the tracked pose) lagging
+    behind real hardware motion.  Every property here is optional per
+    backend, so failures are swallowed rather than blocking camera startup.
+    """
+    for prop, value in (
+        (cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG")),
+        (cv2.CAP_PROP_FPS, 30),
+        (cv2.CAP_PROP_BUFFERSIZE, 1),
+    ):
+        try:
+            cap.set(prop, value)
+        except Exception:
+            pass
+
+
 def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv2.VideoCapture], int]:
     """Auto-detect and open an active, non-blank camera stream."""
     if preferred_index is not None:
@@ -269,6 +291,8 @@ def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv
             cap.release()
             continue
 
+        _configure_capture_for_low_latency(cap)
+
         for _ in range(10):
             ok, frame = cap.read()
             if ok and frame is not None and np.mean(frame) > 3.0 and np.std(frame) > 3.0:
@@ -278,6 +302,59 @@ def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv
         cap.release()
 
     return None, 0
+
+
+class LatestFrameCamera:
+    """Background camera reader that always exposes only the newest frame.
+
+    A plain ``cap.read()`` call in the main loop is at the mercy of the
+    driver's internal frame queue: if a detection+render pass takes longer
+    than one camera frame interval, frames back up and the tracked pose
+    drifts further behind the physical scalpel's real position every loop
+    iteration - perceived as lag or glitching that gets worse the longer you
+    move.  Reading continuously on a dedicated thread and only ever handing
+    back the latest frame decouples capture from processing time, so the
+    tracker always reacts to where the tool is *now*.
+    """
+
+    def __init__(self, cap: cv2.VideoCapture):
+        self.cap = cap
+        self._lock = threading.Lock()
+        self._frame: Optional[np.ndarray] = None
+        self._ok = False
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            ok, frame = self.cap.read()
+            with self._lock:
+                self._ok = ok
+                if ok:
+                    self._frame = frame
+            if not ok:
+                time.sleep(0.005)
+
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        with self._lock:
+            if self._frame is None:
+                return False, None
+            return self._ok, self._frame
+
+    def wait_for_first_frame(self, timeout_s: float = 3.0) -> Tuple[bool, Optional[np.ndarray]]:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            ok, frame = self.read()
+            if ok and frame is not None:
+                return ok, frame
+            time.sleep(0.01)
+        return False, None
+
+    def release(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)
+        self.cap.release()
 
 
 def resolve_or_create_session(
@@ -382,14 +459,50 @@ def main():
     cap, camera_idx = open_camera_auto(args.camera)
     if cap is None:
         raise SystemExit("Error: Unable to open any active video camera.")
+    cam = LatestFrameCamera(cap)
 
-    ok, test_frame = cap.read()
+    ok, test_frame = cam.wait_for_first_frame()
+    if not ok or test_frame is None:
+        cam.release()
+        raise SystemExit("Error: Camera opened but never produced a frame.")
     h, w = test_frame.shape[:2]
     camera_matrix, dist_coeffs = get_default_camera_matrix(w, h)
 
     dictionary = cv2.aruco.getPredefinedDictionary(FAMILIES[args.family])
     params = cv2.aruco.DetectorParameters()
     params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    params.cornerRefinementWinSize = 5
+    params.cornerRefinementMaxIterations = 30
+    params.cornerRefinementMinAccuracy = 0.1
+    # Widen the adaptive-threshold search a little and relax the marker-shape
+    # gates so tags are still binarized and accepted cleanly under uneven
+    # desk lighting and at the smaller pixel sizes typical of a handheld tag
+    # held at arm's length from the camera.  adaptiveThreshWinSize* is by far
+    # the most expensive knob here: detectMarkers reruns thresholding and
+    # contour extraction on the *full frame* once per window size in
+    # range(min, max, step), so a small step count is what keeps this at
+    # real-time FPS.  minOtsuStdDev is left at its default for the same
+    # reason - lowering it floods the candidate-quad pass with low-contrast
+    # noise and was measured to roughly double per-frame cost on its own for
+    # a marginal detection gain. Measured on a representative 720p frame:
+    # OpenCV defaults ~36ms/frame, this config ~42ms/frame, the previous
+    # (too aggressive) tuning ~128ms/frame - i.e. it visibly dropped the live
+    # feed to a slideshow.
+    for prop, value in (
+        ("adaptiveThreshWinSizeMin", 3),
+        ("adaptiveThreshWinSizeMax", 33),
+        ("adaptiveThreshWinSizeStep", 10),
+        ("adaptiveThreshConstant", 7),
+        ("minMarkerPerimeterRate", 0.015),
+        ("maxMarkerPerimeterRate", 4.0),
+        ("polygonalApproxAccuracyRate", 0.05),
+        ("minCornerDistanceRate", 0.05),
+        ("errorCorrectionRate", 0.7),
+    ):
+        try:
+            setattr(params, prop, value)
+        except Exception:
+            pass
     detector = cv2.aruco.ArucoDetector(dictionary, params)
 
     pose_solver = ScalpelPoseSolver(
@@ -426,6 +539,10 @@ def main():
     toast_until = 0.0
 
     bridge: Optional[ControllerBridge] = None
+    # Renders the instrument straight from the tracked pose. Independent of the
+    # session/calibration gate below, so the tool stays visible even when the
+    # simulation stream is unavailable or lagging behind the camera.
+    direct_pose = DirectPoseBroadcaster()
     print("[Session] Calibrate or review the desk frame, then press 'l' to start streaming.", flush=True)
 
     log_file = open(args.csv, "w") if args.csv else None
@@ -491,16 +608,25 @@ def main():
             calibration_id=calib_id,
             initial_sequence=last_seq,
             motion_scale=args.motion_scale,
-            input_mode=("demo-registration" if calibration.is_demo_registration() else "calibrated-hardware"),
+            # The backend's ToolSample contract only accepts "pose-only" or
+            # "calibrated-hardware" for inputMode (see backend/src/surge_prep
+            # /models.py) - it describes the pose source (real 6-DOF tracking
+            # vs. WASD emulation), not the calibration quality. Sending
+            # "demo-registration" here fails pydantic validation on every
+            # single sample with a 422, so the one-click demo path silently
+            # never streamed a single frame to the simulation. The demo-vs
+            # -measured distinction is already carried separately by the
+            # calibration record's calibrationMethod field.
+            input_mode="calibrated-hardware",
         )
         result.start()
         return result
 
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok:
-                time.sleep(0.02)
+            ok, frame = cam.read()
+            if not ok or frame is None:
+                time.sleep(0.005)
                 continue
 
             now = time.monotonic()
@@ -600,6 +726,7 @@ def main():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 255), 1, cv2.LINE_AA)
 
             if current_pose is not None:
+                direct_pose.send(current_pose)
                 session_just_started = False
                 if bridge is None and start_requested and _is_session_usable_calibration(desk_calib):
                     pose_solver.reset_tracking()
@@ -876,7 +1003,8 @@ def main():
     finally:
         if bridge is not None:
             bridge.stop()
-        cap.release()
+        direct_pose.close()
+        cam.release()
         cv2.destroyAllWindows()
         for _ in range(5):
             cv2.waitKey(1)

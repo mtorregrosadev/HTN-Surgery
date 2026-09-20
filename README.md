@@ -88,6 +88,11 @@ Success ends with a contact/deformation/carving message. Do not continue with
 the showcase if this check fails: the in-memory simulator is useful for API
 development but is not the physics shown in the pitch.
 
+On an Intel Mac, you can try the official SOFA 24.12 macOS package with
+Python 3.12 if the 26.06 package is unavailable for that machine. This path is
+not verified yet; `scripts/check-native-sofa.py` must pass before using the
+showcase.
+
 ### 4. Create and link the Unity project
 
 1. In Unity Hub, install Unity `6000.6.2f1` for Apple Silicon. Desktop preview
@@ -118,16 +123,28 @@ linked package.
 
 ### 5. Start the native showcase stack
 
-Open a terminal at the repository root and make sure Docker Desktop is running:
+For the local MongoDB path, open a terminal at the repository root and make
+sure Docker Desktop is running:
 
 ```bash
 docker compose version
 ./scripts/start-showcase.sh
 ```
 
+If Docker is unavailable, point the launcher at an already running MongoDB.
+The launcher verifies the URI with a bounded PyMongo ping through the selected
+Python environment and skips Docker startup:
+
+```bash
+export SURGE_PREP_MONGODB_URI='mongodb://127.0.0.1:27017'
+./scripts/start-showcase.sh
+```
+
+Leave `SURGE_PREP_MONGODB_URI` unset or empty to use the Docker MongoDB path.
+
 That single script:
 
-1. starts MongoDB in Docker;
+1. starts MongoDB in Docker, or verifies the supplied external MongoDB URI;
 2. verifies native SOFA and SofaCarving;
 3. starts the API at `http://127.0.0.1:8000`;
 4. starts the Scalpel controller at `http://127.0.0.1:8100`; and

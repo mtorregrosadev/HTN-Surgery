@@ -1,8 +1,8 @@
-"""Track an object carrying 3 AprilTags with a webcam.
+"""Track an object carrying AprilTags with a webcam.
 
 Install:  pip install opencv-python numpy
-Run:      python new.py [--camera 0] [--family 36h11] [--csv log.csv]
-Keys:     q / Esc = quit, c = clear trails
+Run:      python new.py [--camera 1] [--family 36h11] [--csv log.csv]
+Keys:     q / Esc = quit, s = switch camera, c = clear trails
 """
 import argparse
 import math
@@ -21,66 +21,108 @@ FAMILIES = {
 }
 COLORS = [(0, 0, 255), (0, 200, 0), (255, 100, 0), (0, 200, 255), (255, 0, 255)]
 TRAIL_LEN = 60
-MAX_WARMUP_FRAMES = 15
+MAX_WARMUP_FRAMES = 12
 MAX_CONSECUTIVE_DROPS = 30
 
 
-def open_camera(preferred_index=0):
-    """Open a camera using a platform-appropriate backend with warmup and auto-fallback."""
-    candidates = [preferred_index] + [i for i in range(5) if i != preferred_index]
-    backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if sys.platform.startswith("win") else [cv2.CAP_ANY]
+def check_stream_active(cap, attempts=MAX_WARMUP_FRAMES):
+    """Read a few frames to warm up sensor and check if the feed contains actual image data."""
+    for _ in range(attempts):
+        ok, frame = cap.read()
+        if ok and frame is not None and frame.size > 0:
+            # Check whether image has non-trivial contrast (not a blank/black continuity dummy stream)
+            if np.mean(frame) > 2.5 and np.std(frame) > 2.5:
+                return True, frame
+        time.sleep(0.04)
+    return False, None
+
+
+def open_camera_device(index):
+    """Open a VideoCapture instance with appropriate backend for the OS."""
+    backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
+    try:
+        cap = cv2.VideoCapture(index, backend) if backend != cv2.CAP_ANY else cv2.VideoCapture(index)
+        if cap.isOpened():
+            return cap
+    except Exception:
+        pass
+    return None
+
+
+def select_best_camera(preferred_index=None):
+    """Find and return an active camera, prioritizing live non-black feeds."""
+    candidates = []
+    if preferred_index is not None:
+        candidates.append(preferred_index)
+    for i in range(5):
+        if i not in candidates:
+            candidates.append(i)
+
+    fallback_cap = None
+    fallback_idx = None
 
     for idx in candidates:
-        for backend in backends:
-            try:
-                cap = cv2.VideoCapture(idx, backend) if backend != cv2.CAP_ANY else cv2.VideoCapture(idx)
-            except Exception:
-                continue
+        cap = open_camera_device(idx)
+        if cap is None:
+            continue
 
-            if not cap.isOpened():
-                cap.release()
-                continue
+        is_active, frame = check_stream_active(cap)
+        if is_active:
+            print(f"[Camera] Active video feed detected on camera index {idx} ({frame.shape[1]}x{frame.shape[0]}).", flush=True)
+            if preferred_index is not None and idx != preferred_index:
+                print(f"[Camera] Note: Requested camera {preferred_index} was blank/inactive; automatically switched to camera {idx}.", flush=True)
+            return cap, idx
 
-            # Warmup: some cameras (e.g. macOS AVFoundation/Continuity) need several frames to produce data
-            ready = False
-            for _ in range(MAX_WARMUP_FRAMES):
-                ok, test_frame = cap.read()
-                if ok and test_frame is not None and test_frame.size > 0:
-                    ready = True
-                    break
-                time.sleep(0.05)
-
-            if ready:
-                if idx != preferred_index:
-                    print(f"[Camera] Preferred camera {preferred_index} was unavailable; using working camera index {idx}.")
-                else:
-                    print(f"[Camera] Successfully opened camera index {idx}.")
-                return cap, idx
-
+        # Store the first camera that at least opened (even if black) as a fallback
+        if fallback_cap is None:
+            fallback_cap = cap
+            fallback_idx = idx
+        else:
             cap.release()
+
+    if fallback_cap is not None:
+        print(f"[Camera] Warning: No active non-black stream detected among candidate cameras. Using camera {fallback_idx}.", flush=True)
+        return fallback_cap, fallback_idx
 
     return None, None
 
 
+def switch_camera(current_idx):
+    """Cycle to the next available camera."""
+    for offset in range(1, 5):
+        next_idx = (current_idx + offset) % 5
+        cap = open_camera_device(next_idx)
+        if cap is not None:
+            is_active, _ = check_stream_active(cap, attempts=5)
+            if is_active:
+                print(f"[Camera] Switched to camera {next_idx}.", flush=True)
+                return cap, next_idx
+            cap.release()
+    print(f"[Camera] No other active camera found; remaining on camera {current_idx}.", flush=True)
+    return open_camera_device(current_idx), current_idx
+
+
 def main():
     ap = argparse.ArgumentParser(description="Track AprilTags in real time using webcam")
-    ap.add_argument("--camera", type=int, default=0, help="Camera device index (default: 0 with auto-fallback)")
+    ap.add_argument("--camera", type=int, default=None, help="Camera device index (default: auto-detect active camera)")
     ap.add_argument("--family", choices=FAMILIES, default="36h11", help="AprilTag dictionary family")
     ap.add_argument("--csv", help="Optional path to log positions")
     args = ap.parse_args()
 
     dictionary = cv2.aruco.getPredefinedDictionary(FAMILIES[args.family])
     params = cv2.aruco.DetectorParameters()
-    if hasattr(cv2.aruco, "CORNER_REFINE_SUBPIX"):
+    if hasattr(cv2.aruco, "CORNER_REFINE_APRILTAG"):
+        params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
+    elif hasattr(cv2.aruco, "CORNER_REFINE_SUBPIX"):
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 
     detector = None
     if hasattr(cv2.aruco, "ArucoDetector"):
         detector = cv2.aruco.ArucoDetector(dictionary, params)
 
-    cap, camera_idx = open_camera(args.camera)
+    cap, camera_idx = select_best_camera(args.camera)
     if cap is None:
-        raise SystemExit(f"Error: Unable to open camera {args.camera} or find an active video input.")
+        raise SystemExit("Error: Unable to open any video capture device.")
 
     trails = defaultdict(lambda: deque(maxlen=TRAIL_LEN))
     obj_trail = deque(maxlen=TRAIL_LEN)
@@ -90,8 +132,9 @@ def main():
     frame_no = 0
     consecutive_drops = 0
 
-    print("AprilTag tracker running. Press 'q' or 'Esc' to exit, 'c' to clear trails.")
-    window_name = f"AprilTag tracker (Camera {camera_idx})"
+    print("AprilTag tracker running.", flush=True)
+    print("Controls: 'q' or Esc = Quit | 's' = Switch camera | 'c' = Clear trails", flush=True)
+    window_name = "AprilTag tracker"
 
     try:
         while True:
@@ -125,7 +168,7 @@ def main():
 
                     col = COLORS[int(tag_id) % len(COLORS)]
                     cv2.polylines(frame, [pts.astype(np.int32)], True, col, 2)
-                    # tag "up" direction (from corner 0->1 edge = tag x-axis)
+                    # Tag label
                     cv2.putText(frame, f"ID {tag_id} ({cx:.0f},{cy:.0f})",
                                 (int(pts[0][0]), int(pts[0][1]) - 8),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 2)
@@ -143,7 +186,7 @@ def main():
                 obj_trail.append((int(ox), int(oy)))
                 cv2.drawMarker(frame, (int(ox), int(oy)), (255, 255, 255),
                                cv2.MARKER_CROSS, 25, 2)
-                status = f"Tags: {len(centers)}  Object: ({ox:.0f},{oy:.0f})"
+                status = f"Tags: {len(centers)}/3  Object: ({ox:.0f},{oy:.0f})"
                 if len(centers) >= 2:
                     ids_sorted = sorted(centers)
                     (x1, y1), (x2, y2) = centers[ids_sorted[0]], centers[ids_sorted[1]]
@@ -156,10 +199,12 @@ def main():
             for a, b in zip(obj_trail_pts, obj_trail_pts[1:]):
                 cv2.line(frame, a, b, (255, 255, 255), 2)
 
-            # Draw status overlay
-            cv2.rectangle(frame, (8, 8), (480, 36), (0, 0, 0), cv2.FILLED)
-            cv2.putText(frame, status, (12, 28), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 255), 2)
+            # Draw status HUD overlay
+            h, w = frame.shape[:2]
+            cv2.rectangle(frame, (8, 8), (min(w - 8, 620), 62), (20, 20, 20), cv2.FILLED)
+            cv2.putText(frame, status, (14, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 255, 255), 2)
+            controls_hint = f"Camera {camera_idx} ({w}x{h}) | [s] Switch Cam | [c] Clear | [q] Quit"
+            cv2.putText(frame, controls_hint, (14, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1)
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -168,6 +213,12 @@ def main():
             if key == ord("c"):
                 trails.clear()
                 obj_trail.clear()
+            if key == ord("s"):
+                cap.release()
+                new_cap, new_idx = switch_camera(camera_idx)
+                if new_cap is not None:
+                    cap = new_cap
+                    camera_idx = new_idx
 
             # Check if user closed the window
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:

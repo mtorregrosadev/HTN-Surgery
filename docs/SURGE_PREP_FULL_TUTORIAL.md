@@ -905,7 +905,9 @@ C:\Users\hasin\HTN-Surgery\client\unity\Packages\com.surgeprep.runtime\package.j
 | `xRangeMm` / `zRangeMm` | 30 / 22 | The carvable field is about this big |
 | `invertX` / `invertZ` | off | Tick if the tool moves the wrong way |
 | `hoverMm` | 6 | Height above skin with no pressure |
-| `maxDepthMm` | 32 | Depth at full pressure (reaches the pleura) |
+| `touchPressure` | 0.03 | Pressure at which the tip reaches the skin. A light touch registers contact |
+| `pressurePoints` / `depthMm` | see `hardware/README.md` | Pressure to depth, one slice per layer |
+| `swapAxes` | off | Tick if the corridor runs along your table's other axis |
 | `deadband` | 0.08 | Raise if sensor noise makes it cut by itself |
 
 **Checkpoint 11:** the scene exists and you can find the **Tag Fsr Input** settings.

@@ -65,8 +65,15 @@ Tuning: `--min-cutoff` (lower = steadier when still) and `--beta` (higher = less
 | `xRangeMm` / `zRangeMm` | 30 / 22 | Half-size of the field the tag movement covers (matches the carvable field) |
 | `invertX` / `invertZ` | off | Flip an axis if the scalpel moves the wrong way |
 | `hoverMm` | 6 | Height above skin with no pressure |
-| `maxDepthMm` | 32 | Depth at full pressure (skin to 3, fat to 15, muscle to 25, pleura to 32) |
-| `deadband` | 0.08 | FSR noise below this is ignored |
+| `deadband` | 0.02 | FSR noise below this is ignored |
+| `touchPressure` | 0.03 | Pressure at which the tip reaches the skin (a light touch registers contact) |
+| `pressurePoints` / `depthMm` | see below | Pressure to tip depth, one slice per layer |
+| `swapAxes` | off | Tick if the cut corridor runs along your table's other axis |
+
+`pressurePoints` = 0.03, 0.25, 0.45, 0.55, 0.75, 0.80, 1.00 and `depthMm` = 0, 2.8, 9.5, 15.3, 22, 25.3, 31.5:
+skin 0 to 2.8 mm, fat to 9.5, muscle 15.3 to 22, pleura 25.3 to 31.5. The tip rests inside the layer being worked.
+
+In the bridge window, press **m** while pressing as hard as you will ever press to set the full-press value.
 
 Bridge options: `--span` (fraction of the camera frame that covers the full field), `--fsr-max` (raw ADC value at
 your hardest press), `--family` (`36h11` default).

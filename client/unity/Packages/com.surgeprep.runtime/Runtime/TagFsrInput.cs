@@ -26,11 +26,19 @@ namespace SurgePrep
         [SerializeField, Min(1f)] private float zRangeMm = 22f;
         [SerializeField] private bool invertX;
         [SerializeField] private bool invertZ;
+        [SerializeField] private bool swapAxes;                   // tick if the cut corridor runs along your table's other axis
 
-        [Header("FSR -> cut depth")]
-        [SerializeField] private float hoverMm = 6f;              // height above skin with no pressure
-        [SerializeField, Min(1f)] private float maxDepthMm = 32f; // depth below skin at full pressure (pleural floor)
-        [SerializeField, Range(0f, 0.5f)] private float deadband = 0.08f;
+        [Header("FSR -> tip height")]
+        [SerializeField] private float hoverMm = 6f;               // height above skin with no pressure
+        [SerializeField, Range(0f, 0.5f)] private float deadband = 0.02f;
+        // Pressure (0..1) at which the tip reaches the skin. Any touch above the deadband lowers the tip here.
+        [SerializeField, Range(0.005f, 0.3f)] private float touchPressure = 0.03f;
+        // Control points: at pressure[i] the tip is depthMm[i] below the skin (linear in between).
+        // Each layer gets a comfortable slice of the range and the tip rests inside the layer being worked:
+        //   0.03-0.25 skin (0-2.8 mm)   0.25-0.45 fat (to 9.5)   0.45-0.55 open tract (to 15.3)
+        //   0.55-0.75 muscle (to 22)    0.75-0.80 open tract (to 25.3)   0.80-1.00 pleura (to 31.5)
+        [SerializeField] private float[] pressurePoints = { 0.03f, 0.25f, 0.45f, 0.55f, 0.75f, 0.80f, 1.00f };
+        [SerializeField] private float[] depthMm = { 0f, 2.8f, 9.5f, 15.3f, 22f, 25.3f, 31.5f };
         [SerializeField, Min(0.1f)] private float maxForceN = 5f;
         [SerializeField, Min(0.05f)] private float staleSeconds = 0.5f;
 
@@ -68,10 +76,12 @@ namespace SurgePrep
                 return;
             }
 
-            var x = (p.x - 0.5f) * 2f * xRangeMm * (invertX ? -1f : 1f);
-            var z = (p.y - 0.5f) * 2f * zRangeMm * (invertZ ? -1f : 1f);
+            var across = swapAxes ? p.y : p.x;
+            var down = swapAxes ? p.x : p.y;
+            var x = (across - 0.5f) * 2f * xRangeMm * (invertX ? -1f : 1f);
+            var z = (down - 0.5f) * 2f * zRangeMm * (invertZ ? -1f : 1f);
             var pressed = tagsVisible ? Mathf.Clamp01((p.force - deadband) / (1f - deadband)) : 0f;
-            var y = hoverMm - pressed * (hoverMm + maxDepthMm);
+            var y = TipHeightMm(pressed);
 
             if (tagsVisible)
             {
@@ -84,7 +94,38 @@ namespace SurgePrep
             lastDepth01 = pressed;
             positionMm = lastPose;
             forceN = pressed * maxForceN;
-            contact = pressed > 0f;
+            contact = pressed >= touchPressure;
+        }
+
+        /// <summary>
+        /// Tip height above (+) or below (-) the skin for a pressure 0..1. A touch lowers the tip onto the skin,
+        /// then the control points map pressure to depth so each layer has its own comfortable slice.
+        /// </summary>
+        public float TipHeightMm(float pressed)
+        {
+            pressed = Mathf.Clamp01(pressed);
+            if (pressed <= touchPressure)
+            {
+                return Mathf.Lerp(hoverMm, 0f, pressed / Mathf.Max(touchPressure, 0.0001f));
+            }
+            var count = Mathf.Min(pressurePoints.Length, depthMm.Length);
+            if (count < 2)
+            {
+                return 0f;
+            }
+            if (pressed >= pressurePoints[count - 1])
+            {
+                return -depthMm[count - 1];
+            }
+            for (var index = 1; index < count; index++)
+            {
+                if (pressed <= pressurePoints[index])
+                {
+                    var t = Mathf.InverseLerp(pressurePoints[index - 1], pressurePoints[index], pressed);
+                    return -Mathf.Lerp(depthMm[index - 1], depthMm[index], t);
+                }
+            }
+            return -depthMm[count - 1];
         }
 
         private void OnEnable()

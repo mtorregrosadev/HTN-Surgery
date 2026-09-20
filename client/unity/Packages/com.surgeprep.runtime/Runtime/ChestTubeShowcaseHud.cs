@@ -62,7 +62,7 @@ namespace SurgePrep
             if (snapshot != null && snapshot.simulationBackend == "sofa-native") sofaNative = true;
             if (snapshot != null && snapshot.simulationBackend == "memory-development-only") sofaNative = false;
 
-            var panel = new Rect(16, 16, 420, completed ? 626 : 524);
+            var panel = new Rect(16, 16, 420, completed ? 690 : 588);
             DrawRect(panel, new Color(0.07f, 0.1f, 0.14f, 0.94f));
             DrawRect(new Rect(panel.x, panel.y, 4, panel.height), new Color(0.2f, 0.55f, 0.72f));
 
@@ -90,7 +90,7 @@ namespace SurgePrep
                     new Rect(38, y, 380, 20),
                     contact
                         ? "Contact  " + snapshot.tool.reactionForceN.ToString("0.00")
-                            + " N    depth  " + snapshot.tool.penetrationDepthMm.ToString("0.1") + " mm"
+                            + " N    depth  " + snapshot.tool.penetrationDepthMm.ToString("0.0") + " mm"
                         : "No tissue contact",
                     smallStyle
                 );
@@ -105,6 +105,16 @@ namespace SurgePrep
                     smallStyle
                 );
                 y += 20f;
+                GUI.Label(
+                    new Rect(38, y, 380, 18),
+                    "Tip height  " + TipHeightText(snapshot.tool.positionMm.y),
+                    smallStyle
+                );
+                y += 20f;
+                GUI.color = new Color(1f, 0.85f, 0.4f);
+                GUI.Label(new Rect(38, y, 380, 36), ContactHint(snapshot), smallStyle);
+                GUI.color = Color.white;
+                y += 38f;
                 var progress = snapshot.tissue != null ? snapshot.tissue.incisionProgress : 0f;
                 DrawRect(new Rect(38, y, 360, 8), new Color(0.12f, 0.16f, 0.2f));
                 DrawRect(new Rect(38, y, 360f * Mathf.Clamp01(progress), 8), new Color(0.25f, 0.62f, 0.7f));
@@ -185,6 +195,36 @@ namespace SurgePrep
                 case "degraded": return "Session degraded";
                 default: return stage ?? "Approach";
             }
+        }
+
+        private static string TipHeightText(float yMm)
+        {
+            if (yMm > 0.15f) return yMm.ToString("0.0") + " mm above the skin";
+            if (yMm > -0.15f) return "on the skin surface";
+            return (-yMm).ToString("0.0") + " mm below the skin surface";
+        }
+
+        // Plain-language reason for what the tool is (not) doing, so a missing cut is easy to diagnose.
+        private static string ContactHint(SimulationSnapshotDto snapshot)
+        {
+            var events = snapshot.events ?? new string[0];
+            foreach (var name in events)
+            {
+                if (name == "layer-violation") return "Wrong tool or layer: scalpel for skin and pleura, dissector for fat and muscle.";
+                if (name == "excessive-force") return "Pressing too hard here: ease off, or you are past the opened tract.";
+                if (name == "outside-corridor") return "Outside the marked corridor: move over the highlighted line.";
+                if (name == "protected-anatomy") return "That is a rib: move above it.";
+            }
+            var mode = snapshot.tissue != null ? snapshot.tissue.interactionMode : null;
+            if (snapshot.tool != null && !snapshot.tool.contact)
+            {
+                return snapshot.tool.positionMm.y > 0.15f
+                    ? "Not touching yet: press lightly to lower the tip onto the skin."
+                    : "Above the opened tract: press a little more to reach the next layer.";
+            }
+            if (mode == "cutting") return "Cutting: keep moving along the corridor at a steady pace.";
+            if (mode == "low-force") return "Touching very lightly: press a little more.";
+            return "In contact: draw the tool along the corridor to cut.";
         }
 
         private string Instruction(SimulationSnapshotDto snapshot)

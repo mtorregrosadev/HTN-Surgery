@@ -39,6 +39,9 @@ RIB_TOP_Y_MM = -18.0
 WORKSPACE_MIN_Y_MM = -80.0
 WORKSPACE_MAX_Y_MM = 40.0
 JITTER_HOLD_MS = 180
+# Visual opening of an incision (mesh only; scoring cells stay 3 mm wide)
+MESH_SUBDIVISIONS = 2
+MAX_GAPE_MM = 5.0
 DEGRADE_TIMEOUT_MS = 500
 
 LAYER_ORDER = ("skin", "subcutaneous", "intercostal-muscle", "pleura")
@@ -241,7 +244,9 @@ class LayeredChestState:
         if reaction_n < MINIMUM_REACTION_N:
             return "low-force", events, blocked_by_rib
 
-        active = self.active_layer_for_depth(penetration_mm)
+        # The layer being worked is the one the tip is physically inside. Measuring depth from the
+        # exposed surface (penetration) would call muscle 'skin' again once the skin above it is open.
+        active = self.layer_at_height(sample.position_mm.y)
         required = LAYER_TOOLS[active]
         if sample.tool_id != required:
             self.layer_violations += 1
@@ -342,6 +347,14 @@ class LayeredChestState:
                 return
         self.blade_path.append(point)
 
+    @staticmethod
+    def layer_at_height(y_mm: float) -> str:
+        """The tissue layer that contains an absolute tip height (0 = skin surface, negative = deeper)."""
+        for name in LAYER_ORDER:
+            if y_mm >= LAYER_BOTTOMS_MM[name]:
+                return name
+        return "pleura"
+
     def active_layer_for_depth(self, penetration_mm: float) -> str:
         y_mm = SURFACE_Y_MM - penetration_mm
         for name in LAYER_ORDER:
@@ -393,35 +406,81 @@ class LayeredChestState:
         meshes.append(self.wound_mesh())
         return meshes
 
+    def _gape_profile(self, layer_id: str, columns: int, step_mm: float) -> tuple[list[float], list[float]]:
+        """Half-width of the opening (mm) and the depth (mm) at every mesh column.
+
+        Built from the 3 mm scoring cells but sampled between cell centres and smoothed, so the incision is a
+        tapered, lens-shaped opening (pointed ends, widest in the middle) instead of a staircase. Layers above
+        an opened layer are drawn further apart, as if the wound edges were retracted.
+        """
+        opening = self.layers[layer_id]
+        deeper = LAYER_ORDER[LAYER_ORDER.index(layer_id) + 1:]
+        cells = cell_count()
+        cell_gape, cell_depth = [], []
+        for cell in range(cells):
+            if cell in opening.cut_cells:
+                depth = opening.depths_mm.get(cell, 0.0)
+                retract = 1.0 + 0.3 * sum(1 for name in deeper if cell in self.layers[name].cut_cells)
+                cell_gape.append(min(MAX_GAPE_MM, (1.2 + depth * 0.9) * retract))
+                cell_depth.append(depth)
+            else:
+                cell_gape.append(0.0)
+                cell_depth.append(0.0)
+
+        def sample(values: list[float], x_mm: float) -> float:
+            u = (x_mm - CORRIDOR_MIN_X_MM) / CELL_WIDTH_MM - 0.5      # position in cell-centre coordinates
+            i0 = math.floor(u)
+            t = u - i0
+            a = values[i0] if 0 <= i0 < cells else 0.0
+            b = values[i0 + 1] if 0 <= i0 + 1 < cells else 0.0
+            return a * (1 - t) + b * t
+
+        gape = [sample(cell_gape, CORRIDOR_MIN_X_MM + column * step_mm) for column in range(columns)]
+        depth = [sample(cell_depth, CORRIDOR_MIN_X_MM + column * step_mm) for column in range(columns)]
+        for _ in range(2):                                             # light smoothing, keeps the ends pointed
+            gape = [
+                0.25 * gape[max(0, i - 1)] + 0.5 * gape[i] + 0.25 * gape[min(columns - 1, i + 1)]
+                for i in range(columns)
+            ]
+        return gape, depth
+
     def _layer_mesh(
         self, layer_id: str, sample: ToolSample, deformation_mm: float, contact: bool
     ) -> DeformableMeshState:
         opening = self.layers[layer_id]
         y_mm = LAYER_TOPS_MM[layer_id]
-        x_columns = cell_count() + 1
+        step_mm = CELL_WIDTH_MM / MESH_SUBDIVISIONS
+        x_columns = cell_count() * MESH_SUBDIVISIONS + 1
+        gape, depth = self._gape_profile(layer_id, x_columns, step_mm)
         z_rows = [-32.0, -18.0, -12.0, -6.0, -0.15, 0.15, 6.0, 12.0, 18.0, 32.0]
         vertices: list[Vector3] = []
         for row, original_z in enumerate(z_rows):
+            sign = -1.0 if row < 5 else 1.0
             for column in range(x_columns):
-                x = CORRIDOR_MIN_X_MM + column * CELL_WIDTH_MM
+                x = CORRIDOR_MIN_X_MM + column * step_mm
+                g = gape[column]
+                g_norm = g / MAX_GAPE_MM
                 z = original_z
-                bordering = [index for index in (column - 1, column) if index in opening.cut_cells]
-                local_depth = max((opening.depths_mm.get(index, 0.0) for index in bordering), default=0.0)
-                if row in (4, 5) and bordering:
-                    opening_width = min(6.0, 1.5 + local_depth * 0.8)
-                    z = (-1 if row == 4 else 1) * opening_width
+                lift = 0.0
+                if row in (4, 5):
+                    z = sign * max(0.15, g)                              # the cut edges part
+                    lift = 0.45 * g_norm                                 # a raised lip along the cut
+                elif row in (3, 6):
+                    z = original_z + sign * 0.55 * g                     # skin beside the cut is drawn outward
+                    lift = 0.2 * g_norm                                  # and curls slightly upward
+                elif row in (2, 7):
+                    z = original_z + sign * 0.25 * g
                 distance_squared = (x - sample.position_mm.x) ** 2 + (original_z - sample.position_mm.z) ** 2
                 contact_deformation = (
                     -deformation_mm * math.exp(-distance_squared / 80.0) if contact else 0.0
                 )
-                seam_drop = -local_depth * 0.55 if row in (4, 5) else 0.0
-                vertices.append(Vector3(x=x, y=y_mm + contact_deformation + seam_drop, z=z))
+                vertices.append(Vector3(x=x, y=y_mm + contact_deformation + lift, z=z))
 
         triangles: list[int] = []
         for row in range(len(z_rows) - 1):
-            for column in range(cell_count()):
-                if row == 4 and column in opening.cut_cells:
-                    continue
+            for column in range(x_columns - 1):
+                if row == 4 and (gape[column] + gape[column + 1]) / 2 > 0.12:
+                    continue                                              # open wound: no skin across the cut
                 a = row * x_columns + column
                 b = a + 1
                 c = (row + 1) * x_columns + column + 1
@@ -464,6 +523,14 @@ class LayeredChestState:
                 (x_mm + 1.6, z_mm, depth, surface),
             ]
 
+        first_x, last_x = points[0][0], points[-1][0]
+
+        def taper(x_mm: float) -> float:
+            """1 in the middle of the wound, easing to 0.3 at both ends so it closes to a point."""
+            edge = min(x_mm - first_x, last_x - x_mm)
+            t = max(0.0, min(1.0, edge / 4.0))
+            return 0.3 + 0.7 * t * t * (3 - 2 * t)
+
         vertices: list[Vector3] = []
         triangles: list[int] = []
 
@@ -482,8 +549,8 @@ class LayeredChestState:
             x1, z1, depth1, surface1 = points[index + 1]
             depth0 = max(0.9, depth0)
             depth1 = max(0.9, depth1)
-            half0 = min(5.8, 0.7 + depth0 * 0.32)
-            half1 = min(5.8, 0.7 + depth1 * 0.32)
+            half0 = min(5.8, 0.7 + depth0 * 0.32) * taper(x0)
+            half1 = min(5.8, 0.7 + depth1 * 0.32) * taper(x1)
             left0 = Vector3(x=x0, y=surface0 + 0.2, z=z0 - half0)
             left1 = Vector3(x=x1, y=surface1 + 0.2, z=z1 - half1)
             right0 = Vector3(x=x0, y=surface0 + 0.2, z=z0 + half0)

@@ -123,21 +123,31 @@ and carving.
 
 ## 5. Calibrate your hand: force to depth
 
-With the default settings (`hoverMm = 6`, `maxDepthMm = 32`, `deadband = 0.08`), the FSR reading (0 = untouched,
-1 = your hardest press, after `--fsr-max` scaling) maps to depth like this:
+With the default settings (`hoverMm = 6`, `deadband = 0.02`, `touchPressure = 0.03`), the FSR reading
+(0 = untouched, 1 = your hardest press, after `--fsr-max` scaling) maps to the tip like this. Every layer has its own
+comfortable slice of the pressure range, and the tip rests *inside* the layer you are working:
 
-| Target | Depth reached | Approx. FSR reading (0 to 1) | How it should feel |
+| Pressure (0 to 1) | Where the tip is | Tool | How it should feel |
 | --- | --- | --- | --- |
-| Hovering | 6 mm above skin | below 0.08 | Fingers resting on the handle, no press |
-| Touching skin | 0 mm | about 0.15 | The lightest press that registers |
-| Through skin | 3 mm | about 0.30 | Light, deliberate press |
-| Through fat | 15 mm | about 0.59 | Moderate press |
-| Through muscle | 25 mm | about 0.83 | Firm press |
-| Pleural floor | 32 mm | 1.00 | Full press: this is the limit, not a target |
+| 0 to 0.03 | Hovering, then lowering onto the skin | any | Fingers resting on the handle |
+| 0.03 to 0.25 | Inside the skin (0 to 2.8 mm) | scalpel | A light touch. **Even a light touch registers contact** |
+| 0.25 to 0.45 | In the fat (to 9.5 mm) | blunt dissector | Moderate press |
+| 0.45 to 0.55 | Moving down through the opened fat | (no contact) | Sinking through the tract you made |
+| 0.55 to 0.75 | In the muscle (to 22 mm) | blunt dissector | Firm press |
+| 0.75 to 0.80 | Moving down through the opened muscle | (no contact) | Sinking through the tract |
+| 0.80 to 1.00 | In the pleura (to 31.5 mm) | scalpel, then chest tube | Full press. This is the limit, not a target |
+
+Once a layer is open you no longer touch it: the tip passes through the opening until it reaches the next layer.
+Pressing with the wrong tool for the layer counts as a **layer violation**.
+
+**If the tool never seems to touch the skin:** watch the *Tip height* and hint lines in the guidance panel. If it says
+"Not touching yet", the sensor reading is too low: hold your hardest press, tap **m** in the bridge window (this sets the
+full-press value), then tap **c** with no pressure to re-zero. Set the tip's start with a light touch: the panel should
+change to "In contact".
 
 **Do this once per session:** in the HUD, slowly increase pressure over the practice patch and note where each layer
 opens. If your layers open earlier or later than the table, adjust `--fsr-max` on the bridge (raise it if you reach
-full depth too easily, lower it if you cannot get deep enough) or `maxDepthMm` / `deadband` in the `TagFsrInput`
+full depth too easily, lower it if you cannot get deep enough) or `pressurePoints` / `deadband` in the `TagFsrInput`
 inspector.
 
 **The most important habit in this whole tutorial:** *the FSR is a depth control, not a "cut harder" control.* You

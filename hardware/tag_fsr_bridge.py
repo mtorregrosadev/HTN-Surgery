@@ -14,7 +14,8 @@ ONE-TIME CALIBRATION (each takes a few seconds; results are saved in hardware/tr
   l   hold the scalpel still with all 3 tags visible; it learns how the tags sit on the handle.
   t   touch the scalpel TIP to the centre of the practice area, then press t. This teaches the
       bridge where the cutting tip is relative to the tags.
-Other keys: c zero the FSR (no pressure), z set the origin (only when no table is calibrated), q quit.
+Other keys: c zero the FSR (no pressure), m set the full-press value (press as hard as you will ever press,
+then tap m), z set the origin (only when no table is calibrated), q quit.
 
 UDP packet (JSON, ~30+ Hz, default 127.0.0.1:5005), read by TagFsrInput.cs:
     {"x": 0..1, "y": 0..1, "force": 0..1, "tags": 0..3, "t": unix_seconds,
@@ -246,7 +247,8 @@ def main():
                "angle": round(angle_deg, 1), "quality": round(float(quality), 3)}
         sock.sendto(json.dumps(msg).encode(), dest)
 
-        cv2.putText(view, f"tags={tags} q={quality:.2f} force={force_smooth:.2f} pos=({pos[0]:.3f},{pos[1]:.3f})",
+        raw_text = f" raw={forcer.raw}/{forcer.raw_max:.0f}" if forcer else ""
+        cv2.putText(view, f"tags={tags} q={quality:.2f} force={force_smooth:.2f}{raw_text} pos=({pos[0]:.3f},{pos[1]:.3f})",
                     (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
         cv2.imshow("Bridge", view)
         key = cv2.waitKey(1) & 0xFF
@@ -270,6 +272,9 @@ def main():
             origin = norm.copy()
         if key == ord("c") and forcer:
             forcer.recalibrate()
+        if key == ord("m") and forcer:
+            forcer.raw_max = max(forcer.zero + 50.0, float(forcer.raw))
+            state["note"] = f"Full-press value set to {forcer.raw_max:.0f}."
 
     if cap:
         cap.release()

@@ -1,5 +1,47 @@
 # AprilTag + FSR scalpel input
 
+## One-tag 6-DoF stylus trial in Unity
+
+For the quickest orientation test, the Unity client can use a single rigidly
+mounted tag through Keijiro's `jp.keijiro.apriltag` package. This mode tracks
+the stylus position and complete quaternion rotation from the webcam. It does
+not need the Python bridge or an FSR: moving the physical tip down supplies the
+depth, while SOFA remains responsible for collision, reaction force,
+deformation, and cutting.
+
+1. In Unity, select **Surge Prep > Install AprilTag Stylus Tracking** and wait
+   for scripts to compile.
+2. Leave Play Mode and select **Surge Prep > Build Chest-Tube Showcase** again.
+3. Print `tagStandard41h12` ID `0` from the official
+   [AprilTag image repository](https://github.com/AprilRobotics/apriltag-imgs/tree/master/tagStandard41h12).
+   Scale it to a measured size, keep its white border, and mount it flat and
+   rigidly on the back of a blunt training stylus.
+4. Select `RegistrationAnchor_SimulationPatch` and configure its
+   `April Tag Stylus Input` component:
+   - `Tag Size Metres`: measured outer black-square edge length.
+   - `Camera Field Of View Degrees`: the webcam field of view used for pose
+     estimation. An incorrect value makes depth scale incorrectly.
+   - `Tag To Tip Metres`: measured vector from the tag centre to the stylus
+     tip in tag-local axes. The default assumes the tip is 140 mm down the
+     tag's local Y axis; adjust it for the actual mount.
+5. Start the showcase stack, enter Play Mode, and allow camera access.
+6. Hold the physical tip at the centre of the highlighted procedure target,
+   with the stylus at the angle the virtual tool should copy. Press **Space**
+   once. Translation and rotation now stream through client -> Scalpel
+   controller -> API -> SOFA. Cover the tag to verify that the HUD reports the
+   loss and keyboard fallback resumes safely.
+
+This is a one-camera prototype, not a precision measurement claim. A correctly
+measured tag and fixed camera can look close to one-to-one, but motion blur,
+glare, shallow viewing angles, lens distortion, and marker occlusion introduce
+jitter and pose error. Keep the tag large in frame and the camera fixed. The
+package only accepts `tagStandard41h12`; the older three-tag bridge below uses
+`36h11`, so those printed markers are not interchangeable.
+
+The Keijiro package is pinned to `1.0.3`. The integration is optional: without
+it, the Surge Prep Unity package still compiles and retains WASD plus the
+existing tag/FSR path.
+
 Drives the Unity scalpel from real hardware:
 
 - **AprilTags 1, 2, 3** on the scalpel handle, seen by a webcam, set the scalpel's position over the skin (x/z).

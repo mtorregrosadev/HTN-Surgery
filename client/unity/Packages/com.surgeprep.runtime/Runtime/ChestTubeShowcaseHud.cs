@@ -142,7 +142,8 @@ namespace SurgePrep
             ControlLine(ref y, "W A S D", "move on the chest");
             ControlLine(ref y, "Q / E", "raise / lower the tool");
             ControlLine(ref y, "1 / 2 / 3", "scalpel / dissector / tube");
-            ControlLine(ref y, "F / C / O", "close-up / surgeon / room");
+            ControlLine(ref y, "D / Space", "desk workspace view (wide)");
+            ControlLine(ref y, "C / F / O", "surgeon / incision / room");
             ControlLine(ref y, "K", "anatomy cutaway");
             ControlLine(ref y, "R then R", "reset the attempt");
             ControlLine(ref y, "Tab", "hide this panel");

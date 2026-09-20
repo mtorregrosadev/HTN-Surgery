@@ -51,6 +51,8 @@ namespace SurgePrep
         private string sessionId;
         private Stopwatch clock;
         private float resetArmedUntil;
+        private bool hasKeyboardMovement;
+        private bool isSessionOwner;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
         public string SessionId => sessionId;
@@ -109,6 +111,17 @@ namespace SurgePrep
                     Status = "SOFA stream recovering…";
                 }
                 sceneRenderer.SetTarget(snapshot);
+
+                // When keyboard is not being actively moved, mirror physical scalpel pose
+                if (!hasKeyboardMovement && snapshot.tool != null && snapshot.tool.positionMm != null)
+                {
+                    lock (stateLock)
+                    {
+                        xMm = snapshot.tool.positionMm.x;
+                        yMm = snapshot.tool.positionMm.y;
+                        zMm = snapshot.tool.positionMm.z;
+                    }
+                }
             }
         }
 
@@ -124,6 +137,8 @@ namespace SurgePrep
             var raise = 0f;
             if (ShowcaseInput.Held(KeyCode.Q)) raise += 1f;
             if (ShowcaseInput.Held(KeyCode.E)) raise -= 1f;
+
+            hasKeyboardMovement = (horizontal != 0f || vertical != 0f || raise != 0f);
 
             var world = Vector3.zero;
             var speedMm = movementSpeedMmPerSecond;
@@ -184,7 +199,7 @@ namespace SurgePrep
                 if (ShowcaseInput.Pressed(KeyCode.Alpha3)) toolId = "chest-tube";
                 if (ShowcaseInput.Pressed(KeyCode.R))
                 {
-                    if (Time.unscaledTime <= resetArmedUntil)
+                    if (Time.unscaledTime < resetArmedUntil)
                     {
                         xMm = 0f;
                         yMm = 12f;
@@ -228,7 +243,36 @@ namespace SurgePrep
 
         private async Task CreateSession(CancellationToken token)
         {
-            Status = SofaNative ? "Validating demo calibration…" : "SOFA OFFLINE";
+            Status = SofaNative ? "Connecting to active session…" : "SOFA OFFLINE";
+
+            // 1. Check if there is already an active session (e.g. from physical scalpel tracker)
+            try
+            {
+                using (var response = await http.GetAsync("v1/sessions/active", token))
+                {
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var payload = await response.Content.ReadAsStringAsync();
+                        var active = JsonUtility.FromJson<SessionDto>(payload);
+                        if (active != null && !string.IsNullOrEmpty(active.sessionId))
+                        {
+                            sessionId = active.sessionId;
+                            calibrationId = "calib-demo-default";
+                            clock = Stopwatch.StartNew();
+                            isSessionOwner = false;
+                            Status = SofaNative ? "LIVE — Attached to physical scalpel session" : "SOFA OFFLINE";
+                            UnityEngine.Debug.Log($"[UnityManualDemoClient] Auto-attached to active tracker session: {sessionId}");
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogWarning($"[UnityManualDemoClient] Could not query active session: {ex.Message}");
+            }
+
+            // 2. Fallback: create fresh session if none exists
             var calibration = await Post<CalibrationCreateDto, CalibrationDto>(
                 "v1/calibrations",
                 new CalibrationCreateDto
@@ -253,7 +297,8 @@ namespace SurgePrep
             );
             sessionId = session.sessionId;
             clock = Stopwatch.StartNew();
-            Status = SofaNative ? "Connecting to native SOFA…" : "SOFA OFFLINE";
+            isSessionOwner = true;
+            Status = SofaNative ? "LIVE — Calibrated session started" : "SOFA OFFLINE";
         }
 
         private async Task<TResponse> Post<TRequest, TResponse>(
@@ -278,21 +323,72 @@ namespace SurgePrep
             var websocketBase = controllerUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
                 ? "wss://" + controllerUrl.Substring(8)
                 : "ws://" + controllerUrl.Substring(controllerUrl.IndexOf("://", StringComparison.Ordinal) + 3);
-            var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/hardware-stream");
+            var uri = new Uri($"{websocketBase.TrimEnd('/')}/v1/sessions/{sessionId}/client-stream");
             await socket.ConnectAsync(uri, token);
             Status = SofaNative
-                ? "LIVE — WASD fallback; calibrated hardware uses the same pose contract"
+                ? "LIVE — Tracking physical scalpel (WASD fallback available)"
                 : "SOFA OFFLINE";
 
+            // Launch background receiver for authoritative client broadcast stream
+            _ = ReceiveClientStreamLoop(token);
+
+            // Forward keyboard inputs only when user presses WASD keys
             while (!token.IsCancellationRequested && socket.State == WebSocketState.Open)
             {
-                var sample = NextSample();
-                var bytes = Encoding.UTF8.GetBytes(JsonUtility.ToJson(sample));
-                await socket.SendAsync(
-                    new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token
-                );
-                received.Enqueue(await ReceiveMessage(token));
+                if (hasKeyboardMovement)
+                {
+                    var sample = NextSample();
+                    try
+                    {
+                        var content = new StringContent(JsonUtility.ToJson(sample), Encoding.UTF8, "application/json");
+                        using (var response = await http.PostAsync($"v1/sessions/{sessionId}/samples", content, token))
+                        {
+                            if (response.IsSuccessStatusCode)
+                            {
+                                var payload = await response.Content.ReadAsStringAsync();
+                                received.Enqueue(payload);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
                 await Task.Delay(33, token);
+            }
+        }
+
+        private async Task ReceiveClientStreamLoop(CancellationToken token)
+        {
+            var buffer = new byte[1024 * 512];
+            try
+            {
+                while (!token.IsCancellationRequested && socket != null && socket.State == WebSocketState.Open)
+                {
+                    var count = 0;
+                    WebSocketReceiveResult result;
+                    do
+                    {
+                        result = await socket.ReceiveAsync(
+                            new ArraySegment<byte>(buffer, count, buffer.Length - count), token
+                        );
+                        count += result.Count;
+                        if (count == buffer.Length && !result.EndOfMessage)
+                        {
+                            throw new InvalidOperationException("Simulation snapshot exceeds 512 KiB");
+                        }
+                    } while (!result.EndOfMessage);
+
+                    if (result.MessageType == WebSocketMessageType.Close) break;
+                    received.Enqueue(Encoding.UTF8.GetString(buffer, 0, count));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogWarning($"[UnityManualDemoClient] Client stream receive loop ended: {ex.Message}");
             }
         }
 
@@ -329,25 +425,6 @@ namespace SurgePrep
             };
         }
 
-        private async Task<string> ReceiveMessage(CancellationToken token)
-        {
-            var buffer = new byte[1024 * 1024];
-            var count = 0;
-            WebSocketReceiveResult result;
-            do
-            {
-                result = await socket.ReceiveAsync(
-                    new ArraySegment<byte>(buffer, count, buffer.Length - count), token
-                );
-                count += result.Count;
-                if (count == buffer.Length && !result.EndOfMessage)
-                {
-                    throw new InvalidOperationException("Simulation snapshot exceeds 1 MiB");
-                }
-            } while (!result.EndOfMessage);
-            return Encoding.UTF8.GetString(buffer, 0, count);
-        }
-
         private static bool IsFinite(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
@@ -363,7 +440,7 @@ namespace SurgePrep
             cancellation?.Cancel();
             socket?.Dispose();
             socket = null;
-            if (http != null && !string.IsNullOrEmpty(sessionId))
+            if (isSessionOwner && http != null && !string.IsNullOrEmpty(sessionId))
             {
                 try
                 {

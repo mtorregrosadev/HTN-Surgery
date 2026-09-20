@@ -44,7 +44,7 @@ namespace SurgePrep
             {
                 sceneCamera = Camera.main;
             }
-            SetRoomView(false);
+            SetDeskWorkspaceView(false);
             introRemaining = introOrbitSeconds;
             ApplyCamera(true);
         }
@@ -62,11 +62,12 @@ namespace SurgePrep
                 targetYaw += 42f * Time.unscaledDeltaTime;
                 if (introRemaining <= 0f)
                 {
-                    SetSurgeonView(false);
+                    SetDeskWorkspaceView(false);
                 }
             }
             else
             {
+                if (ShowcaseInput.Pressed(KeyCode.D) || ShowcaseInput.Pressed(KeyCode.Space)) SetDeskWorkspaceView(false);
                 if (ShowcaseInput.Pressed(KeyCode.C)) SetSurgeonView(false);
                 if (ShowcaseInput.Pressed(KeyCode.F)) SetTargetView(false);
                 if (ShowcaseInput.Pressed(KeyCode.O)) SetRoomView(false);
@@ -116,6 +117,15 @@ namespace SurgePrep
             targetDistance = Mathf.Clamp(targetDistance, MinOrbitDistance, maxDistance);
             distance = Mathf.Clamp(Mathf.Lerp(distance, targetDistance, amount), MinOrbitDistance, maxDistance);
             ApplyCamera(false);
+        }
+
+        public void SetDeskWorkspaceView(bool snap)
+        {
+            targetFocusPoint = chestFocus != null ? chestFocus.position : new Vector3(0.12f, 0.98f, 0.04f);
+            targetDistance = 1.45f;
+            targetYaw = 24f;
+            targetPitch = 42f;
+            if (snap) Snap();
         }
 
         public void SetSurgeonView(bool snap)

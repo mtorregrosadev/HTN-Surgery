@@ -292,9 +292,9 @@ def draw_desk_plane_grid(
     calib: DeskCalibration,
     camera_matrix: np.ndarray,
     dist_coeffs: np.ndarray,
-    extent_x_mm: float = 140.0,
-    extent_z_mm: float = 100.0,
-    step_mm: float = 20.0
+    extent_x_mm: float = 240.0,
+    extent_z_mm: float = 180.0,
+    step_mm: float = 30.0
 ) -> None:
     """Render an augmented-reality 3D grid and coordinate triad directly on the desk surface."""
     r_cam_to_desk = np.asarray(calib.r_cam_to_desk, dtype=np.float64)

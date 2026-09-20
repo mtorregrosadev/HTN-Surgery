@@ -227,7 +227,7 @@ def main():
     ap = argparse.ArgumentParser(description="Track AprilTag scalpel in 3D desk space & stream to controller")
     ap.add_argument("--camera", type=int, default=None, help="Camera index (default: auto-detect)")
     ap.add_argument("--family", choices=FAMILIES, default="36h11", help="AprilTag family")
-    ap.add_argument("--scale", type=float, default=0.5, help="Detection scale (0.5 for fast 100FPS detection)")
+    ap.add_argument("--scale", type=float, default=1.0, help="Detection scale (1.0 for full space reach, 0.5 for fast)")
     ap.add_argument("--desk-tag", type=int, default=0, help="Fiducial AprilTag ID for desk registration")
     ap.add_argument("--desk-tag-size", type=float, default=50.0, help="Desk tag physical size in mm")
     ap.add_argument("--tool-tag-size", type=float, default=24.0, help="Tool tags physical size in mm")
@@ -283,6 +283,8 @@ def main():
     prev_time = time.perf_counter()
     trail = deque(maxlen=60)
     window_name = "Surge Prep - 3D Desk & Scalpel Tracker"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1280, 720)
 
     print("\nSurge Prep Physical Scalpel Tracker Live.")
     print("Controls:")

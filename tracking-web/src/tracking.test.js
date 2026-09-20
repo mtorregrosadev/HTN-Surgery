@@ -133,6 +133,45 @@ test('each supported dictionary detects its generated marker at quarter-turn rot
   }
 });
 
+test('the printed AmarUco sheet style (white cells on black square) decodes for every Surge Prep ID', () => {
+  // The physical demo sheet is printed from generateSVG: black marker square,
+  // white cells for '1' bits, wide white paper margin. Render that exact
+  // polarity for several IDs and require detection each time.
+  const family = DICTIONARIES.SURGE_PREP;
+  const detector = createDetector(family);
+  const bitsFor = (id) => detector.dictionary.codeList[id];
+  const renderPrinted = (id, cell = 12, markerCells = 8) => {
+    const size = markerCells * cell;
+    const margin = size;
+    const width = size + margin * 2;
+    const data = new Uint8ClampedArray(width * width * 4);
+    for (let y = 0; y < width; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const mx = Math.floor((x - margin) / cell);
+        const my = Math.floor((y - margin) / cell);
+        const inside = mx >= 0 && mx < markerCells && my >= 0 && my < markerCells;
+        const isDataCell = mx >= 1 && mx < markerCells - 1 && my >= 1 && my < markerCells - 1;
+        const bit = isDataCell ? bitsFor(id)[(my - 1) * 6 + (mx - 1)] === '1' : false;
+        const value = inside && bit ? 255 : inside ? 0 : 255;
+        const index = (y * width + x) * 4;
+        data[index] = data[index + 1] = data[index + 2] = value;
+        data[index + 3] = 255;
+      }
+    }
+    return { width, height: width, data };
+  };
+  for (const id of [0, 1, 2, 7, 42, 123, 249]) {
+    const raw = detector.detect(renderPrinted(id));
+    const hit = raw.find((m) => m.id === id && m.hammingDistance === 0);
+    assert.ok(hit, `printed AmarUco id ${id} decodes exactly`);
+  }
+  // Selection policy: without a lock, the Surge Prep family pins to marker #0.
+  assert.equal(selectMarker(detector.detect(renderPrinted(0)), family)?.id, 0);
+  // Rotated copies keep decoding too.
+  const rotated = rotateImage(renderPrinted(0), 2);
+  assert.equal(selectMarker(detector.detect(rotated), family)?.id, 0);
+});
+
 test('pose and speed use image coordinates and elapsed time', () => {
   const marker = { id: 0, corners: [{ x: 10, y: 20 }, { x: 30, y: 20 }, { x: 30, y: 40 }, { x: 10, y: 40 }] };
   const pose = markerPose2d(marker, 1000);

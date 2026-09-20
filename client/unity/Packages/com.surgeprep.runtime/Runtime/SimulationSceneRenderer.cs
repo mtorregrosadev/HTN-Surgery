@@ -46,7 +46,7 @@ namespace SurgePrep
             }
         }
 
-        public bool BindSession(string sessionId)
+        public bool BindSession(string sessionId, bool forceRebind = false)
         {
             if (string.IsNullOrEmpty(sessionId))
             {
@@ -61,7 +61,7 @@ namespace SurgePrep
             {
                 return true;
             }
-            if (!hasSnapshot || SnapshotStale)
+            if (forceRebind || SnapshotStale)
             {
                 boundSessionId = sessionId;
                 latestTick = -1;
@@ -69,6 +69,14 @@ namespace SurgePrep
                 hasSnapshot = false;
                 LatestSnapshot = null;
                 SnapshotStale = false;
+                if (toolTransform != null)
+                {
+                    toolTransform.gameObject.SetActive(false);
+                }
+                foreach (var view in meshes.Values)
+                {
+                    view.SetVisible(false);
+                }
                 return true;
             }
             return false;

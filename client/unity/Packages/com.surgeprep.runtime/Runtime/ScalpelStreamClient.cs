@@ -23,6 +23,7 @@ namespace SurgePrep
         private const int MaxSnapshotBytes = 4 * 1024 * 1024;
         private const int InitialReconnectDelayMs = 250;
         private const int MaxReconnectDelayMs = 5000;
+        private const int ActiveSessionPollIntervalMs = 1000;
 
         [SerializeField] private string controllerUrl = "http://localhost:8100";
         [SerializeField] private string sessionId = ActiveSessionPlaceholder;
@@ -102,13 +103,28 @@ namespace SurgePrep
         private async Task RunStreamLoop(CancellationToken token, int generation)
         {
             var reconnectDelayMs = InitialReconnectDelayMs;
+            var followActiveSession = IsSessionPlaceholder();
             while (!token.IsCancellationRequested)
             {
-                var discoveredSession = IsSessionPlaceholder();
+                var switchedSession = false;
                 try
                 {
-                    await ConnectAndReceive(token);
+                    await ConnectAndReceive(token, followActiveSession);
                     reconnectDelayMs = InitialReconnectDelayMs;
+                }
+                catch (SessionChangedException change)
+                {
+                    if (!followActiveSession || string.IsNullOrEmpty(change.NewSessionId))
+                    {
+                        throw;
+                    }
+                    sessionId = change.NewSessionId;
+                    DrainReceivedSnapshots();
+                    switchedSession = true;
+                    reconnectDelayMs = InitialReconnectDelayMs;
+                    Debug.Log(
+                        $"[ScalpelStreamClient] Active session changed; reconnecting to {sessionId}"
+                    );
                 }
                 catch (OperationCanceledException)
                 {
@@ -132,7 +148,11 @@ namespace SurgePrep
                 {
                     return;
                 }
-                if (discoveredSession)
+                if (switchedSession)
+                {
+                    continue;
+                }
+                if (followActiveSession)
                 {
                     sessionId = ActiveSessionPlaceholder;
                 }
@@ -141,7 +161,7 @@ namespace SurgePrep
             }
         }
 
-        private async Task ConnectAndReceive(CancellationToken token)
+        private async Task ConnectAndReceive(CancellationToken token, bool followActiveSession)
         {
             var httpBase = controllerUrl.TrimEnd('/')
                 .Replace("ws://", "http://")
@@ -151,7 +171,7 @@ namespace SurgePrep
                 .Replace("https://", "wss://");
 
             // Auto-discover active session if not configured
-            if (IsSessionPlaceholder())
+            if (followActiveSession && IsSessionPlaceholder())
             {
                 using (var http = new HttpClient())
                 {
@@ -188,19 +208,124 @@ namespace SurgePrep
                 return;
             }
 
+            var connectedSession = sessionId;
             var connectedSocket = new ClientWebSocket();
             socket = connectedSocket;
-            var uri = new Uri($"{wsBase}/v1/sessions/{sessionId}/client-stream");
-            await connectedSocket.ConnectAsync(uri, token);
-            sceneRenderer?.BindSession(sessionId);
-            while (!token.IsCancellationRequested && connectedSocket.State == WebSocketState.Open)
+            using (var connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                var payload = await ReceiveTextMessage(connectedSocket, token);
-                if (payload == null)
+                Task<string> monitorTask = null;
+                Task<string> receiveTask = null;
+                try
                 {
-                    break;
+                    var uri = new Uri($"{wsBase}/v1/sessions/{connectedSession}/client-stream");
+                    await connectedSocket.ConnectAsync(uri, connectionCancellation.Token);
+                    sceneRenderer?.BindSession(connectedSession, true);
+                    if (followActiveSession)
+                    {
+                        monitorTask = MonitorActiveSession(
+                            httpBase, connectedSession, connectionCancellation.Token
+                        );
+                    }
+                    while (!connectionCancellation.IsCancellationRequested
+                        && connectedSocket.State == WebSocketState.Open)
+                    {
+                        receiveTask = ReceiveTextMessage(
+                            connectedSocket, connectionCancellation.Token
+                        );
+                        Task completed = monitorTask == null
+                            ? (Task)receiveTask
+                            : await Task.WhenAny(receiveTask, monitorTask);
+                        if (monitorTask != null && completed == monitorTask)
+                        {
+                            var changedSession = await monitorTask;
+                            if (!string.IsNullOrEmpty(changedSession))
+                            {
+                                throw new SessionChangedException(changedSession);
+                            }
+                            break;
+                        }
+                        var payload = await receiveTask;
+                        receiveTask = null;
+                        if (payload == null)
+                        {
+                            break;
+                        }
+                        received.Enqueue(payload);
+                    }
                 }
-                received.Enqueue(payload);
+                finally
+                {
+                    connectionCancellation.Cancel();
+                    CloseSocket(connectedSocket);
+                    await ObserveTask(receiveTask);
+                    await ObserveTask(monitorTask);
+                }
+            }
+        }
+
+        private async Task<string> MonitorActiveSession(
+            string httpBase, string connectedSession, CancellationToken token
+        )
+        {
+            using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) })
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(ActiveSessionPollIntervalMs, token);
+                    try
+                    {
+                        using (var response = await http.GetAsync(
+                            $"{httpBase}/v1/sessions/active", token
+                        ))
+                        {
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                continue;
+                            }
+                            var json = await response.Content.ReadAsStringAsync();
+                            var active = JsonUtility.FromJson<SessionDto>(json);
+                            if (active != null
+                                && !string.IsNullOrEmpty(active.sessionId)
+                                && active.sessionId != connectedSession)
+                            {
+                                return active.sessionId;
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // Keep the current stream when active-session discovery is unavailable.
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static async Task ObserveTask(Task task)
+        {
+            if (task == null)
+            {
+                return;
+            }
+            try
+            {
+                await task;
+            }
+            catch
+            {
+                // The connection task owns the original exception, if any.
+            }
+        }
+
+        private void DrainReceivedSnapshots()
+        {
+            while (received.TryDequeue(out _))
+            {
+                // Discard snapshots queued for the previous session.
             }
         }
 
@@ -253,6 +378,26 @@ namespace SurgePrep
             if (activeSocket != null)
             {
                 activeSocket.Dispose();
+            }
+        }
+
+        private void CloseSocket(ClientWebSocket expectedSocket)
+        {
+            if (ReferenceEquals(socket, expectedSocket))
+            {
+                socket = null;
+            }
+            expectedSocket?.Dispose();
+        }
+
+        private sealed class SessionChangedException : Exception
+        {
+            public readonly string NewSessionId;
+
+            public SessionChangedException(string newSessionId)
+                : base($"Active session changed to {newSessionId}")
+            {
+                NewSessionId = newSessionId;
             }
         }
 

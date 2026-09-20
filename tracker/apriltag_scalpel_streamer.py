@@ -55,11 +55,7 @@ TRACKER_EXERCISE_ID = "chest-tube-access-demo"
 
 def _is_measured_calibration(calibration: Optional[DeskCalibration]) -> bool:
     """Return whether a desk frame is safe to bind to a live session."""
-    return bool(
-        calibration is not None
-        and calibration.is_valid()
-        and calibration.calibration_method != "nominal-controller"
-    )
+    return bool(calibration is not None and calibration.is_measured())
 
 
 def _calibration_transform_matches(
@@ -328,7 +324,10 @@ def resolve_or_create_session(
         "coordinateFrame": "right-handed-x-right-y-up-z-away",
         "transform": desk_calib.camera_to_desk_transform(),
         "rmsErrorMm": float(desk_calib.rms_error_mm),
-        "valid": True,
+        # Keep this derived from the same gate used before session creation.
+        # A nominal tare has a geometrically valid matrix but is not a measured
+        # calibration and must never be advertised as valid to the API.
+        "valid": _is_measured_calibration(desk_calib),
         "calibrationMethod": desk_calib.calibration_method,
     }).encode("utf-8")
     calib = read_json(urllib.request.Request(
@@ -406,7 +405,14 @@ def main():
         save_desk_calibration(desk_calib)
         print("[Desk] 6-DOF Controller Tracking active. (Hold scalpel at start position and press Space to Tare/Recenter).", flush=True)
     else:
-        print(f"[Desk] Loaded existing desk calibration ({desk_calib.calibration_method}).", flush=True)
+        if _is_measured_calibration(desk_calib):
+            print(f"[Desk] Loaded measured desk calibration ({desk_calib.calibration_method}).", flush=True)
+        else:
+            print(
+                f"[Desk] Loaded nominal/preview desk frame ({desk_calib.calibration_method}); "
+                "run Pivot or place the desk reference tag before starting.",
+                flush=True,
+            )
 
     pivot_calibrator = PivotCalibrator(min_samples=45)
     pivot_mode = False
@@ -635,7 +641,10 @@ def main():
                 method_name = desk_calib.calibration_method.upper()
                 ext_w = int(getattr(desk_calib, "extent_x_mm", 160.0) * 2)
                 ext_d = int(getattr(desk_calib, "extent_z_mm", 110.0) * 2)
-                desk_str = f"LOCKED ({ext_w}x{ext_d}mm {method_name})"
+                if _is_measured_calibration(desk_calib):
+                    desk_str = f"MEASURED ({ext_w}x{ext_d}mm {method_name})"
+                else:
+                    desk_str = f"PREVIEW ({ext_w}x{ext_d}mm {method_name}; MEASURE REQUIRED)"
             else:
                 desk_str = "UNSET (Place flat & press 't')"
             stream_str = f"LIVE ({bridge.sofa_backend})" if bridge is not None and bridge.connected else "OFFLINE"
@@ -689,7 +698,7 @@ def main():
                     status_toast = "Starting session with the current measured calibration..."
                     toast_until = now + 2.0
                 else:
-                    status_toast = "Calibrate with Tare, Snap Desk, Pivot, or a desk tag before starting."
+                    status_toast = "Live requires measured calibration: run Pivot ('p') or place the desk tag, then press 'l'."
                     toast_until = now + 3.0
             if bridge is None and key in (ord("t"), ord(" "), ord("z")):
                 if current_pose is not None:
@@ -699,7 +708,7 @@ def main():
                     desk_calib = get_default_desk_calibration(origin_cam=tip_cam, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
                     desk_calib.calibration_method = "start-tumbado"
                     save_desk_calibration(desk_calib)
-                    status_toast = "TUMBADO CALIBRATED: Scalpel flat on desk (Z=0). 1:1 Linked to Unity!"
+                    status_toast = "TARE SAVED FOR PREVIEW: run Pivot ('p') or use desk tag ('s') before Live ('l')."
                     toast_until = now + 4.0
                     print(f"[Tumbado] {status_toast}", flush=True)
                 else:
@@ -713,7 +722,7 @@ def main():
                     desk_calib = get_default_desk_calibration(origin_cam=tip_cam, tilt_deg=tilt_deg, extent_x_mm=ext_x, extent_z_mm=ext_z)
                     desk_calib.calibration_method = "scalpel-surface"
                     save_desk_calibration(desk_calib)
-                    status_toast = "LOCKED DESK to scalpel position on table!"
+                    status_toast = "DESK POSITION SAVED FOR PREVIEW: run Pivot ('p') or use desk tag before Live ('l')."
                     toast_until = now + 3.5
                     print(f"[Desk] {status_toast}", flush=True)
                 elif args.desk_tag in detected_tags:

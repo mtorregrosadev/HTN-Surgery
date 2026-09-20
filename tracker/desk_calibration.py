@@ -9,10 +9,11 @@ using either:
 from __future__ import annotations
 
 import json
+import math
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import ClassVar, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -33,6 +34,13 @@ class DeskCalibration:
     timestamp: float = 0.0
     extent_x_mm: float = 160.0  # Half-width of workspace rectangle (mm)
     extent_z_mm: float = 110.0  # Half-depth of workspace rectangle (mm)
+
+    # These methods produce a frame from observations rather than from the
+    # nominal controller geometry.  Keep this allow-list narrow: a valid
+    # rotation matrix alone only proves that a frame is mathematically usable,
+    # not that it was measured against the physical workspace.
+    MEASURED_METHODS: ClassVar[frozenset[str]] = frozenset(("pivot", "tag", "probe"))
+    MAX_MEASURED_RMS_ERROR_MM: ClassVar[float] = 3.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -91,7 +99,25 @@ class DeskCalibration:
         # Desk should not be tilted crazy sideways (nx within reasonable range)
         if abs(self.normal_cam[0]) > 0.65:
             return False
+        try:
+            rms_error_mm = float(self.rms_error_mm)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(rms_error_mm) or rms_error_mm < 0.0:
+            return False
         return True
+
+    def is_measured(self) -> bool:
+        """Return whether this frame is measured and good enough for a session.
+
+        ``is_valid`` intentionally only checks geometric safety so the camera
+        preview can still use a nominal frame.  A tare/recenter copies nominal
+        tilt and reports zero error; it must never be promoted to a measured
+        session calibration by that geometric check alone.
+        """
+        if not self.is_valid() or self.calibration_method not in self.MEASURED_METHODS:
+            return False
+        return float(self.rms_error_mm) <= self.MAX_MEASURED_RMS_ERROR_MM
 
     def point_cam_to_desk(self, point_cam: np.ndarray | list[float]) -> np.ndarray:
         """Transform a 3D point from camera frame (mm) to desk frame (mm)."""
@@ -490,8 +516,15 @@ def desk_rect_from_pixels(
         r_cam_to_desk=calib.r_cam_to_desk,
         normal_cam=calib.normal_cam,
         calibrated_tip_offset_mm=calib.calibrated_tip_offset_mm,
-        calibration_method="user-drawn-area",
-        rms_error_mm=0.0,
+        # Preserve measured provenance when the rectangle is drawn on a
+        # measured desk.  A rectangle drawn over nominal geometry remains a
+        # preview-only frame and keeps this derived method name.
+        calibration_method=(
+            calib.calibration_method
+            if calib.is_measured()
+            else "user-drawn-area"
+        ),
+        rms_error_mm=(calib.rms_error_mm if calib.is_measured() else 0.0),
         extent_x_mm=round(ext_x, 1),
         extent_z_mm=round(ext_z, 1)
     )

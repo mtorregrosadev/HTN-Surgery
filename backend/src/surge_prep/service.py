@@ -83,7 +83,14 @@ class TrainingService:
         gap = 0
         if last is not None:
             gap = sample.timestamp_ms - last.timestamp_ms
-            if gap > DEGRADE_TIMEOUT_MS:
+            # Calibrated hardware has a continuous device clock, so a long
+            # gap means tracking was lost and the authoritative pose must
+            # freeze. The keyboard fallback is driven by Unity's frame clock;
+            # changing editor focus can pause it and is not a sensor failure.
+            if (
+                sample.input_mode == "calibrated-hardware"
+                and gap > DEGRADE_TIMEOUT_MS
+            ):
                 degraded = True
                 self._frozen[session_id] = True
         if unhealthy and last is not None and not self._frozen.get(session_id):

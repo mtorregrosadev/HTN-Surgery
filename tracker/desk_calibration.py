@@ -686,3 +686,252 @@ def draw_desk_plane_grid(
                 cv2.circle(frame, p_shadow, 6, ring_col, 1, cv2.LINE_AA)
                 if p_tip is not None:
                     cv2.line(frame, p_shadow, p_tip, (0, 200, 255), 1, cv2.LINE_AA)
+
+
+# ---------------------------------------------------------------------------
+# Incision guide AR overlay
+# ---------------------------------------------------------------------------
+# These mirror UpdateIncisionGuide in the Unity SimulationSceneRenderer, which
+# defines the guide analytically in desk millimetres rather than baking it into
+# a mesh. Because both sides use the same desk frame, the curve can be redrawn
+# here without Unity running at all. If the Unity curve is ever retuned, these
+# four constants must be retuned with it or the table overlay will quietly
+# disagree with the simulator.
+INCISION_HALF_LENGTH_MM = 18.0
+INCISION_BOW_MM = 6.0
+INCISION_OFFSET_Z_MM = -3.0
+INCISION_SAMPLES = 17
+
+# Distance from the guide, in millimetres, at which the operator is considered
+# on target. Drives only the overlay colour, never the recorded score.
+INCISION_ON_TARGET_MM = 4.0
+INCISION_NEAR_TARGET_MM = 10.0
+
+
+def incision_guide_points_mm(samples: int = INCISION_SAMPLES) -> List[Tuple[float, float, float]]:
+    """Sample the incision guide curve in desk millimetres (y = 0 is the desk)."""
+    points: List[Tuple[float, float, float]] = []
+    for index in range(samples):
+        t = index / float(samples - 1)
+        x = -INCISION_HALF_LENGTH_MM + (2.0 * INCISION_HALF_LENGTH_MM) * t
+        z = INCISION_OFFSET_Z_MM + INCISION_BOW_MM * math.sin(t * math.pi)
+        points.append((x, 0.0, z))
+    return points
+
+
+def nearest_point_on_polyline(
+    point_xz: Tuple[float, float],
+    polyline: List[Tuple[float, float, float]],
+) -> Tuple[Tuple[float, float], float]:
+    """Closest point on the guide to ``point_xz`` and its distance, in mm.
+
+    Measured against the line *segments* rather than only the sampled vertices,
+    so the reported distance does not jump as the tip slides between samples.
+    """
+    px, pz = point_xz
+    best_point = (polyline[0][0], polyline[0][2])
+    best_distance = float("inf")
+    for (ax, _, az), (bx, _, bz) in zip(polyline, polyline[1:]):
+        dx, dz = bx - ax, bz - az
+        length_squared = dx * dx + dz * dz
+        if length_squared <= 1e-9:
+            t = 0.0
+        else:
+            t = ((px - ax) * dx + (pz - az) * dz) / length_squared
+            t = max(0.0, min(1.0, t))
+        qx, qz = ax + t * dx, az + t * dz
+        distance = math.hypot(px - qx, pz - qz)
+        if distance < best_distance:
+            best_distance = distance
+            best_point = (qx, qz)
+    return best_point, best_distance
+
+
+def draw_incision_overlay(
+    frame: np.ndarray,
+    calib: DeskCalibration,
+    camera_matrix: np.ndarray,
+    dist_coeffs: np.ndarray,
+    scalpel_tip_desk: Optional[np.ndarray] = None,
+) -> None:
+    """Draw the simulator's incision site onto the physical desk, in AR.
+
+    Renders where the cut is going to land right now: the guide curve itself,
+    the tip's vertical drop point on the desk, and the offset between them.
+    Height above the desk is shown too, because a tip that looks perfectly on
+    the line from the camera can still be centimetres above the tissue.
+    """
+    if not calib.is_valid():
+        return
+
+    r_cam_to_desk = np.asarray(calib.r_cam_to_desk, dtype=np.float64)
+    r_desk_to_cam = r_cam_to_desk.T
+    tvec = np.asarray(calib.origin_cam, dtype=np.float64)
+
+    fx = camera_matrix[0, 0]
+    fy = camera_matrix[1, 1]
+    cx = camera_matrix[0, 2]
+    cy = camera_matrix[1, 2]
+    height, width = frame.shape[:2]
+
+    def project(p_desk) -> Optional[Tuple[int, int]]:
+        p_c = (r_desk_to_cam @ np.asarray(p_desk, dtype=np.float64)) + tvec
+        if p_c[2] < 120.0:
+            return None
+        u = int(round(fx * p_c[0] / p_c[2] + cx))
+        v = int(round(fy * p_c[1] / p_c[2] + cy))
+        if -400 <= u <= width + 400 and -400 <= v <= height + 400:
+            return (u, v)
+        return None
+
+    guide = incision_guide_points_mm()
+    projected = [project(p) for p in guide]
+
+    # The guide line, drawn thick and dark first so it stays readable against
+    # a bright desk, then overlaid in colour.
+    for a, b in zip(projected, projected[1:]):
+        if a is None or b is None:
+            continue
+        cv2.line(frame, a, b, (10, 10, 10), 5, cv2.LINE_AA)
+    for a, b in zip(projected, projected[1:]):
+        if a is None or b is None:
+            continue
+        cv2.line(frame, a, b, (80, 200, 255), 2, cv2.LINE_AA)
+
+    start, end = projected[0], projected[-1]
+    if start is not None:
+        cv2.circle(frame, start, 6, (80, 200, 255), -1, cv2.LINE_AA)
+        cv2.putText(frame, "INCISION", (start[0] - 30, start[1] - 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (80, 200, 255), 1, cv2.LINE_AA)
+    if end is not None:
+        cv2.circle(frame, end, 6, (80, 200, 255), -1, cv2.LINE_AA)
+
+    if scalpel_tip_desk is None:
+        return
+
+    tip = np.asarray(scalpel_tip_desk, dtype=np.float64).reshape(3)
+    tip_x, tip_height, tip_z = float(tip[0]), float(tip[1]), float(tip[2])
+
+    (near_x, near_z), offset_mm = nearest_point_on_polyline((tip_x, tip_z), guide)
+
+    if offset_mm <= INCISION_ON_TARGET_MM:
+        colour = (60, 255, 60)
+        verdict = "ON TARGET"
+    elif offset_mm <= INCISION_NEAR_TARGET_MM:
+        colour = (60, 220, 255)
+        verdict = "NEAR"
+    else:
+        colour = (60, 60, 255)
+        verdict = "OFF TARGET"
+
+    ground = project((tip_x, 0.0, tip_z))
+    target = project((near_x, 0.0, near_z))
+    tip_point = project((tip_x, tip_height, tip_z))
+
+    # Vertical drop line: where the tip actually meets the desk plane.
+    if ground is not None and tip_point is not None:
+        cv2.line(frame, tip_point, ground, (200, 200, 200), 1, cv2.LINE_AA)
+    if ground is not None:
+        cv2.drawMarker(frame, ground, colour, cv2.MARKER_CROSS, 18, 2, cv2.LINE_AA)
+        cv2.circle(frame, ground, 11, colour, 1, cv2.LINE_AA)
+    # The miss vector, so the direction of the correction is obvious.
+    if ground is not None and target is not None and offset_mm > INCISION_ON_TARGET_MM:
+        cv2.line(frame, ground, target, colour, 1, cv2.LINE_AA)
+
+    if ground is not None:
+        label = f"{verdict}  {offset_mm:.0f}mm off  |  {tip_height:.0f}mm up"
+        cv2.putText(frame, label, (ground[0] + 16, ground[1] + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.44, (10, 10, 10), 3, cv2.LINE_AA)
+        cv2.putText(frame, label, (ground[0] + 16, ground[1] + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.44, colour, 1, cv2.LINE_AA)
+
+
+def draw_operating_area_projection(
+    frame: np.ndarray,
+    calib: DeskCalibration,
+    camera_matrix: np.ndarray,
+    sim_image: Optional[np.ndarray],
+    extent_x_mm: Optional[float] = None,
+    extent_z_mm: Optional[float] = None,
+    opacity: float = 0.95,
+) -> bool:
+    """Project the simulator's plan view onto the desk operating area, in AR.
+
+    The simulator renders a top-down orthographic image of the surgical field.
+    Mapping its four image corners onto the four projected desk corners with a
+    homography makes it sit flat on the physical desk with correct perspective,
+    so the operator works *inside* the virtual field rather than glancing at a
+    separate picture.
+
+    Returns True when the area was drawn. False means the quad is not usable
+    this frame - behind the camera, or off screen - and the caller should fall
+    back rather than assume the overlay is visible.
+    """
+    if sim_image is None or not calib.is_valid():
+        return False
+
+    ext_x = extent_x_mm if extent_x_mm is not None else getattr(calib, "extent_x_mm", 160.0)
+    ext_z = extent_z_mm if extent_z_mm is not None else getattr(calib, "extent_z_mm", 110.0)
+
+    r_desk_to_cam = np.asarray(calib.r_cam_to_desk, dtype=np.float64).T
+    tvec = np.asarray(calib.origin_cam, dtype=np.float64)
+    fx, fy = camera_matrix[0, 0], camera_matrix[1, 1]
+    cx, cy = camera_matrix[0, 2], camera_matrix[1, 2]
+    height, width = frame.shape[:2]
+
+    # Desk corners ordered to match the image corners below: the simulator
+    # camera looks down -Y with +X to image right and +Z to image up, so the
+    # image's top edge is the far (-Z) edge of the desk area.
+    corners_desk = [
+        (-ext_x, 0.0, -ext_z),  # image top-left
+        ( ext_x, 0.0, -ext_z),  # image top-right
+        ( ext_x, 0.0,  ext_z),  # image bottom-right
+        (-ext_x, 0.0,  ext_z),  # image bottom-left
+    ]
+
+    projected = []
+    for corner in corners_desk:
+        p_c = (r_desk_to_cam @ np.asarray(corner, dtype=np.float64)) + tvec
+        if p_c[2] < 120.0:
+            # A corner behind or too near the camera makes the homography
+            # meaningless, so refuse rather than draw a smeared quad.
+            return False
+        projected.append((fx * p_c[0] / p_c[2] + cx, fy * p_c[1] / p_c[2] + cy))
+
+    # Reject a quad that is essentially entirely off screen; warping a huge
+    # destination costs real time for pixels nobody sees.
+    xs = [p[0] for p in projected]
+    ys = [p[1] for p in projected]
+    if max(xs) < 0 or min(xs) > width or max(ys) < 0 or min(ys) > height:
+        return False
+
+    src_h, src_w = sim_image.shape[:2]
+    source = np.array(
+        [(0, 0), (src_w - 1, 0), (src_w - 1, src_h - 1), (0, src_h - 1)],
+        dtype=np.float32,
+    )
+    destination = np.array(projected, dtype=np.float32)
+
+    matrix = cv2.getPerspectiveTransform(source, destination)
+    warped = cv2.warpPerspective(
+        sim_image, matrix, (width, height),
+        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0),
+    )
+
+    # A mask from the quad itself, so only the operating area is replaced and
+    # the rest of the live camera view is untouched.
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillConvexPoly(mask, destination.astype(np.int32), 255)
+    if opacity >= 0.999:
+        np.copyto(frame, warped, where=mask[:, :, None].astype(bool))
+    else:
+        blended = cv2.addWeighted(warped, opacity, frame, 1.0 - opacity, 0.0)
+        np.copyto(frame, blended, where=mask[:, :, None].astype(bool))
+
+    cv2.polylines(frame, [destination.astype(np.int32)], True, (0, 255, 255), 2, cv2.LINE_AA)
+    corner_label = destination[0].astype(int)
+    cv2.putText(
+        frame, "OPERATING AREA", (corner_label[0] + 6, max(18, corner_label[1] - 8)),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 255, 255), 1, cv2.LINE_AA
+    )
+    return True

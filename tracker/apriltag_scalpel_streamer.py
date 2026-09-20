@@ -28,6 +28,8 @@ from .desk_calibration import (
     PivotCalibrator,
     desk_rect_from_pixels,
     draw_desk_plane_grid,
+    draw_incision_overlay,
+    draw_operating_area_projection,
     estimate_desk_from_tag,
     get_default_camera_matrix,
     get_default_desk_calibration,
@@ -35,6 +37,11 @@ from .desk_calibration import (
     save_desk_calibration,
 )
 from .direct_pose_broadcast import DirectPoseBroadcaster
+from .sim_view_receiver import (
+    DEFAULT_PORT as SIM_VIEW_DEFAULT_PORT,
+    SimulatorViewReceiver,
+    draw_simulator_inset,
+)
 from .tool_pose_solver import ScalpelPoseSolver, ToolPose6DOF
 
 FAMILIES = {
@@ -526,6 +533,8 @@ def main():
     ap.add_argument("--session", default="auto", help="Controller session ID or 'auto' to attach to active session")
     ap.add_argument("--new-session", action="store_true", help="Force creating a new active session instead of attaching")
     ap.add_argument("--csv", help="Optional CSV logging path")
+    ap.add_argument("--sim-view-port", type=int, default=SIM_VIEW_DEFAULT_PORT,
+                    help="UDP port Unity streams its rendered simulator view on")
     args = ap.parse_args()
 
     cap, camera_idx = open_camera_auto(args.camera)
@@ -615,6 +624,9 @@ def main():
     # session/calibration gate below, so the tool stays visible even when the
     # simulation stream is unavailable or lagging behind the camera.
     direct_pose = DirectPoseBroadcaster()
+    # Receives Unity's rendered view for the corner inset. Optional: binding
+    # failure or a silent Unity only costs the inset, never the tracking loop.
+    sim_view = SimulatorViewReceiver(port=args.sim_view_port)
     print("[Session] Calibrate or review the desk frame, then press 'l' to start streaming.", flush=True)
 
     log_file = open(args.csv, "w") if args.csv else None
@@ -628,6 +640,14 @@ def main():
     prev_time = time.monotonic()
     trail = deque(maxlen=60)
     show_grid = False
+    show_sim_view = False
+    show_incision_ar = True
+    show_operating_area = True
+    # A frame older than this means Unity stopped sending, which the inset
+    # border reports rather than silently showing a frozen picture.
+    sim_view_stale_after_s = 1.0
+    last_sim_count = 0
+    last_sim_arrival = 0.0
     window_name = "Surge Prep - 3D Desk & Scalpel Tracker"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1280, 720)
@@ -662,7 +682,9 @@ def main():
     print("\nSurge Prep Physical Scalpel Tracker Live.")
     print("Quick demo: centre the scalpel tip and press Space. The stream starts automatically.")
     print("This is labelled DEMO (~15 mm registration). Press P for measured pivot calibration, X to recalibrate, or Q to quit.")
-    print("Press N to switch webcam, V to toggle view: FLAT (camera in front at desk height) / BIRD'S EYE (camera raised, angled down).\n", flush=True)
+    print("Press N to switch webcam, V to toggle view: FLAT (camera in front at desk height) / BIRD'S EYE (camera raised, angled down).")
+    print("Press O for the operating area (Unity's plan view mapped onto the desk), A for the incision guide.")
+    print("Press I for the simulator view as a corner inset instead.\n", flush=True)
 
     start_requested = False
     pivot_feedback = ""
@@ -787,7 +809,16 @@ def main():
             # 4. Render AR 3D Desk Grid & Area
             if desk_calib is not None:
                 tip_pos_desk = np.array([current_pose.x_mm, current_pose.y_mm, current_pose.z_mm]) if current_pose else None
+                if show_operating_area:
+                    sim_area_frame, _ = sim_view.read()
+                    draw_operating_area_projection(
+                        frame, desk_calib, camera_matrix, sim_area_frame
+                    )
                 draw_desk_plane_grid(frame, desk_calib, camera_matrix, dist_coeffs, scalpel_tip_desk=tip_pos_desk, show_grid=show_grid)
+                if show_incision_ar:
+                    # AR incision site on the physical desk, registered through
+                    # the same desk frame as the grid above.
+                    draw_incision_overlay(frame, desk_calib, camera_matrix, dist_coeffs, scalpel_tip_desk=tip_pos_desk)
 
             # 5. Render live mouse dragging rectangle
             if mouse_state["dragging"]:
@@ -840,6 +871,16 @@ def main():
             for a, b in zip(trail_pts, trail_pts[1:]):
                 if a is not None and b is not None and math.hypot(a[0] - b[0], a[1] - b[1]) < 35:
                     cv2.line(frame, a, b, (0, 255, 255), 2, cv2.LINE_AA)
+
+            # 5b. Simulator view inset. Drawn after the scene overlays but
+            # before the HUD panel, so status text is never hidden behind it.
+            if show_sim_view:
+                sim_frame, sim_count = sim_view.read()
+                if sim_count != last_sim_count:
+                    last_sim_count = sim_count
+                    last_sim_arrival = now
+                sim_connected = (now - last_sim_arrival) < sim_view_stale_after_s
+                draw_simulator_inset(frame, sim_frame, sim_connected)
 
             # 6. Render HUD Overlay
             cv2.rectangle(frame, (8, 8), (min(w - 8, 860), 78), (20, 20, 20), cv2.FILLED)
@@ -1126,6 +1167,21 @@ def main():
             if key == ord("f"):
                 current_scale = 1.0 if current_scale < 0.99 else 0.5
                 print(f"[Performance] Switched detection scale to {current_scale}x.", flush=True)
+            if key == ord("o"):
+                show_operating_area = not show_operating_area
+                status_toast = f"Operating area AR: {'ON' if show_operating_area else 'OFF'}"
+                toast_until = now + 1.5
+                print(f"[AR] {status_toast}", flush=True)
+            if key == ord("a"):
+                show_incision_ar = not show_incision_ar
+                status_toast = f"Incision AR: {'ON' if show_incision_ar else 'OFF'}"
+                toast_until = now + 1.5
+                print(f"[AR] {status_toast}", flush=True)
+            if key == ord("i"):
+                show_sim_view = not show_sim_view
+                status_toast = f"Simulator inset: {'ON' if show_sim_view else 'OFF'}"
+                toast_until = now + 1.5
+                print(f"[SimView] {status_toast}", flush=True)
 
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
                 break
@@ -1133,6 +1189,7 @@ def main():
         if bridge is not None:
             bridge.stop()
         direct_pose.close()
+        sim_view.close()
         cam.release()
         cv2.destroyAllWindows()
         for _ in range(5):

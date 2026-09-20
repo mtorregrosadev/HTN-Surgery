@@ -40,8 +40,20 @@ WORKSPACE_MIN_Y_MM = -80.0
 WORKSPACE_MAX_Y_MM = 40.0
 JITTER_HOLD_MS = 180
 # Visual opening of an incision (mesh only; scoring cells stay 3 mm wide)
-MESH_SUBDIVISIONS = 2
+FINE_STEP_MM = 0.75                                  # resolution of the recorded incision
+FINE_BINS = int(round((36.0) / FINE_STEP_MM)) + 1
+FINE_CUT_THRESHOLD_MM = 0.2                          # a column counts as cut once the blade went 0.2 mm deep
+MESH_SUBDIVISIONS = int(round(3.0 / FINE_STEP_MM))
 MAX_GAPE_MM = 5.0
+GAPE_BASE_MM = 0.6
+END_TAPER_MM = 3.5                                   # a blade enters and leaves at an angle: the cut runs out to a point
+GAPE_PER_MM_DEPTH = 0.95
+MAX_CENTRE_SHIFT_MM = 3.0
+SEAM_OFFSET_MM = 0.15
+# Rows across the layer, dense near the cut so the edge can roll over smoothly
+MESH_ROW_Z = [-32.0, -18.0, -12.0, -7.0, -4.0, -2.2, -0.9, -0.15,
+              0.15, 0.9, 2.2, 4.0, 7.0, 12.0, 18.0, 32.0]
+SEAM_ROW = 7
 DEGRADE_TIMEOUT_MS = 500
 
 LAYER_ORDER = ("skin", "subcutaneous", "intercostal-muscle", "pleura")
@@ -69,6 +81,11 @@ LAYER_STAGES = {
     "intercostal-muscle": "blunt-dissection",
     "pleura": "pleural-entry",
 }
+
+
+def fine_bin(x_mm: float) -> int:
+    """Index of the 0.75 mm column nearest to x, clamped to the corridor."""
+    return max(0, min(FINE_BINS - 1, int(round((x_mm - CORRIDOR_MIN_X_MM) / FINE_STEP_MM))))
 
 
 def cell_count() -> int:
@@ -152,6 +169,21 @@ class LayerOpening:
     depths_mm: dict[int, float] = field(default_factory=dict)
     cut_cells: set[int] = field(default_factory=set)
     previous_x_mm: float | None = None
+    previous_fine: tuple[float, float, float] | None = None       # last tracked (x, z, depth)
+    # Sub-cell record of the incision (0.75 mm columns): how deep the blade went and where it was sideways
+    fine_depth: dict[int, float] = field(default_factory=dict)
+    fine_z: dict[int, float] = field(default_factory=dict)
+    fine_cells: set[int] = field(default_factory=set)
+
+    def bin_depth(self, column: int) -> float:
+        """Cut depth at a 0.75 mm column, 0 if the blade has not opened it."""
+        cell = min(cell_count() - 1, int(column * FINE_STEP_MM / CELL_WIDTH_MM))
+        if cell in self.fine_cells:
+            d = self.fine_depth.get(column, 0.0)
+            return d if d >= FINE_CUT_THRESHOLD_MM else 0.0
+        if cell in self.cut_cells:                    # only recorded per 3 mm cell (e.g. by native SOFA)
+            return self.depths_mm.get(cell, 0.0)
+        return 0.0
 
     @property
     def length_mm(self) -> float:
@@ -219,6 +251,7 @@ class LayeredChestState:
         advance_opening: bool = True,
     ) -> tuple[str, list[str], bool]:
         events: list[str] = []
+        self._track_fine(sample, contact, reaction_n)
         blocked_by_rib = hits_protected_rib(
             sample.position_mm.x, sample.position_mm.y, sample.position_mm.z
         )
@@ -285,6 +318,54 @@ class LayeredChestState:
                 events.append("stage-completed")
         mode = "cutting" if opening.cut_cells else "contact"
         return mode, events, blocked_by_rib
+
+    def _track_fine(self, sample: ToolSample, contact: bool, reaction_n: float) -> None:
+        """Record the incision at 0.75 mm: the deepest the tip went at each column, and where it was sideways.
+
+        This follows the tip itself rather than the 3 mm scoring cells, so the cut starts where the blade first
+        entered the layer, ends where it left, keeps going while the tip is inside a layer whose cell is already
+        counted as open, and follows sideways drift. The scoring cells are untouched.
+        """
+        x, y, z = sample.position_mm.x, sample.position_mm.y, sample.position_mm.z
+        layer = self.layer_at_height(y)
+        opening = self.layers[layer]
+        for other in self.layers.values():
+            if other is not opening:
+                other.previous_fine = None                     # only the layer the tip is inside is tracked
+        top, bottom = LAYER_TOPS_MM[layer], LAYER_BOTTOMS_MM[layer]
+        depth = top - y
+        column = fine_bin(x)
+        upper_open = all(
+            self.layers[name].bin_depth(column) > 0 for name in LAYER_ORDER[:LAYER_ORDER.index(layer)]
+        )
+        valid = (
+            depth > 0.0
+            and in_corridor(x, z)
+            and sample.tool_id == LAYER_TOOLS[layer]
+            and self._predecessors_open(layer)
+            and upper_open
+            and not (contact and reaction_n > MAXIMUM_REACTION_N)
+        )
+        if not valid:
+            opening.previous_fine = None
+            return
+        depth = min(depth, top - bottom, 6.0)
+        previous = opening.previous_fine
+        if previous is None:
+            spans = [(column, z, depth)]
+        else:
+            prev_x, prev_z, prev_depth = previous
+            first, last = fine_bin(prev_x), fine_bin(x)
+            step = 1 if last >= first else -1
+            spans = []
+            for b in range(first, last + step, step):
+                t = 1.0 if last == first else (b - first) / (last - first)
+                spans.append((b, prev_z + (z - prev_z) * t, prev_depth + (depth - prev_depth) * t))
+        for b, bz, bd in spans:
+            opening.fine_depth[b] = max(opening.fine_depth.get(b, 0.0), bd)
+            opening.fine_z[b] = bz
+            opening.fine_cells.add(min(cell_count() - 1, int(b * FINE_STEP_MM / CELL_WIDTH_MM)))
+        opening.previous_fine = (x, z, depth)
 
     def record_sofa_cut(
         self, layer_id: str, sample: ToolSample, penetration_mm: float
@@ -406,70 +487,70 @@ class LayeredChestState:
         meshes.append(self.wound_mesh())
         return meshes
 
-    def _gape_profile(self, layer_id: str, columns: int, step_mm: float) -> tuple[list[float], list[float]]:
-        """Half-width of the opening (mm) and the depth (mm) at every mesh column.
+    def _gape_profile(
+        self, layer_id: str, columns: int
+    ) -> tuple[list[float], list[float], list[float]]:
+        """Opening half-width, depth and centre-line offset (mm) at every 0.75 mm column of the layer.
 
-        Built from the 3 mm scoring cells but sampled between cell centres and smoothed, so the incision is a
-        tapered, lens-shaped opening (pointed ends, widest in the middle) instead of a staircase. Layers above
-        an opened layer are drawn further apart, as if the wound edges were retracted.
+        Built from the blade's recorded path (sub-cell accurate, follows sideways drift), falling back to the 3 mm
+        scoring cells when only those exist (for example a cut reported by native SOFA). Layers above an opened layer
+        are drawn further apart, as if the wound edges were retracted.
         """
         opening = self.layers[layer_id]
         deeper = LAYER_ORDER[LAYER_ORDER.index(layer_id) + 1:]
-        cells = cell_count()
-        cell_gape, cell_depth = [], []
-        for cell in range(cells):
-            if cell in opening.cut_cells:
-                depth = opening.depths_mm.get(cell, 0.0)
-                retract = 1.0 + 0.3 * sum(1 for name in deeper if cell in self.layers[name].cut_cells)
-                cell_gape.append(min(MAX_GAPE_MM, (1.2 + depth * 0.9) * retract))
-                cell_depth.append(depth)
+        gape, depth, centre = [], [], []
+        for column in range(columns):
+            d = opening.bin_depth(column)
+            if d > 0:
+                retract = 1.0 + 0.3 * sum(1 for name in deeper if self.layers[name].bin_depth(column) > 0)
+                gape.append(min(MAX_GAPE_MM, (GAPE_BASE_MM + GAPE_PER_MM_DEPTH * d) * retract))
             else:
-                cell_gape.append(0.0)
-                cell_depth.append(0.0)
-
-        def sample(values: list[float], x_mm: float) -> float:
-            u = (x_mm - CORRIDOR_MIN_X_MM) / CELL_WIDTH_MM - 0.5      # position in cell-centre coordinates
-            i0 = math.floor(u)
-            t = u - i0
-            a = values[i0] if 0 <= i0 < cells else 0.0
-            b = values[i0 + 1] if 0 <= i0 + 1 < cells else 0.0
-            return a * (1 - t) + b * t
-
-        gape = [sample(cell_gape, CORRIDOR_MIN_X_MM + column * step_mm) for column in range(columns)]
-        depth = [sample(cell_depth, CORRIDOR_MIN_X_MM + column * step_mm) for column in range(columns)]
-        for _ in range(2):                                             # light smoothing, keeps the ends pointed
-            gape = [
-                0.25 * gape[max(0, i - 1)] + 0.5 * gape[i] + 0.25 * gape[min(columns - 1, i + 1)]
-                for i in range(columns)
-            ]
-        return gape, depth
+                gape.append(0.0)
+            depth.append(d)
+            centre.append(opening.fine_z.get(column, 0.0) if d > 0 else 0.0)
+        # Taper every unbroken run of cut columns toward both of its ends
+        column = 0
+        while column < columns:
+            if gape[column] <= 0.0:
+                column += 1
+                continue
+            end = column
+            while end + 1 < columns and gape[end + 1] > 0.0:
+                end += 1
+            for i in range(column, end + 1):
+                distance = min(i - column + 1, end - i + 1) * FINE_STEP_MM
+                t = min(1.0, distance / END_TAPER_MM)
+                gape[i] *= 0.12 + 0.88 * t * t * (3.0 - 2.0 * t)
+            column = end + 1
+        for _ in range(3):                                             # light smoothing keeps the ends pointed
+            gape = [0.25 * gape[max(0, i - 1)] + 0.5 * gape[i] + 0.25 * gape[min(columns - 1, i + 1)]
+                    for i in range(columns)]
+            centre = [0.25 * centre[max(0, i - 1)] + 0.5 * centre[i] + 0.25 * centre[min(columns - 1, i + 1)]
+                      for i in range(columns)]
+        return gape, depth, centre
 
     def _layer_mesh(
         self, layer_id: str, sample: ToolSample, deformation_mm: float, contact: bool
     ) -> DeformableMeshState:
         opening = self.layers[layer_id]
         y_mm = LAYER_TOPS_MM[layer_id]
-        step_mm = CELL_WIDTH_MM / MESH_SUBDIVISIONS
-        x_columns = cell_count() * MESH_SUBDIVISIONS + 1
-        gape, depth = self._gape_profile(layer_id, x_columns, step_mm)
-        z_rows = [-32.0, -18.0, -12.0, -6.0, -0.15, 0.15, 6.0, 12.0, 18.0, 32.0]
+        x_columns = FINE_BINS
+        gape, _, centre = self._gape_profile(layer_id, x_columns)
         vertices: list[Vector3] = []
-        for row, original_z in enumerate(z_rows):
-            sign = -1.0 if row < 5 else 1.0
+        for original_z in MESH_ROW_Z:
+            sign = -1.0 if original_z < 0 else 1.0
+            r0 = abs(original_z)
             for column in range(x_columns):
-                x = CORRIDOR_MIN_X_MM + column * step_mm
+                x = CORRIDOR_MIN_X_MM + column * FINE_STEP_MM
                 g = gape[column]
                 g_norm = g / MAX_GAPE_MM
                 z = original_z
                 lift = 0.0
-                if row in (4, 5):
-                    z = sign * max(0.15, g)                              # the cut edges part
-                    lift = 0.45 * g_norm                                 # a raised lip along the cut
-                elif row in (3, 6):
-                    z = original_z + sign * 0.55 * g                     # skin beside the cut is drawn outward
-                    lift = 0.2 * g_norm                                  # and curls slightly upward
-                elif row in (2, 7):
-                    z = original_z + sign * 0.25 * g
+                if r0 < 32.0 and g > 0.0:
+                    c = max(-MAX_CENTRE_SHIFT_MM, min(MAX_CENTRE_SHIFT_MM, centre[column]))
+                    spread = math.exp(-max(0.0, r0 - SEAM_OFFSET_MM) / (3.0 + g))
+                    z = c * math.exp(-r0 / 12.0) + sign * (r0 + g * spread)   # the skin beside the cut is drawn outward
+                    lift = 0.45 * g_norm * math.exp(-(r0 - SEAM_OFFSET_MM) / 1.4)   # raised lip, easing off outward
                 distance_squared = (x - sample.position_mm.x) ** 2 + (original_z - sample.position_mm.z) ** 2
                 contact_deformation = (
                     -deformation_mm * math.exp(-distance_squared / 80.0) if contact else 0.0
@@ -477,9 +558,10 @@ class LayeredChestState:
                 vertices.append(Vector3(x=x, y=y_mm + contact_deformation + lift, z=z))
 
         triangles: list[int] = []
-        for row in range(len(z_rows) - 1):
+        rows = len(MESH_ROW_Z)
+        for row in range(rows - 1):
             for column in range(x_columns - 1):
-                if row == 4 and (gape[column] + gape[column + 1]) / 2 > 0.12:
+                if row == SEAM_ROW and (gape[column] + gape[column + 1]) / 2 > 0.12:
                     continue                                              # open wound: no skin across the cut
                 a = row * x_columns + column
                 b = a + 1
@@ -493,7 +575,62 @@ class LayeredChestState:
             triangle_indices=triangles,
         )
 
+    def _bed_height(self, column: int) -> float:
+        """Height of the wound floor at a column: the bottom of the deepest opened layer's cut."""
+        bed = 0.0
+        for name in LAYER_ORDER:
+            d = self.layers[name].bin_depth(column)
+            if d <= 0:
+                break
+            thickness = LAYER_TOPS_MM[name] - LAYER_BOTTOMS_MM[name]
+            bed = LAYER_TOPS_MM[name] - min(d, thickness)
+        return bed
+
+    def _wound_detailed(self) -> DeformableMeshState:
+        """The wound channel from the recorded incision: a rounded, stepped profile that follows the blade."""
+        gape, _, centre = self._gape_profile("skin", FINE_BINS)
+        skin = self.layers["skin"]
+        # every column where the skin actually parts, including the smoothed run-out at both ends, so the
+        # channel always sits under the gap and the fat below never shows through the tips
+        columns = [b for b in range(FINE_BINS) if gape[b] > 0.005]
+        vertices: list[Vector3] = []
+        triangles: list[int] = []
+        rings: dict[int, list[int]] = {}
+        for b in columns:
+            x = CORRIDOR_MIN_X_MM + b * FINE_STEP_MM
+            width = max(0.4, gape[b] + SEAM_OFFSET_MM)
+            c = max(-MAX_CENTRE_SHIFT_MM, min(MAX_CENTRE_SHIFT_MM, centre[b]))
+            bed = self._bed_height(b) * min(1.0, 0.35 + gape[b] / 2.0)       # ends run out shallow
+            bed = min(bed, -0.3)
+            profile = [
+                (-width, 0.25), (-width * 0.94, bed * 0.3), (-width * 0.66, bed * 0.78),
+                (0.0, bed), (width * 0.66, bed * 0.78), (width * 0.94, bed * 0.3), (width, 0.25),
+            ]
+            rings[b] = []
+            for dz, y in profile:
+                rings[b].append(len(vertices))
+                vertices.append(Vector3(x=x, y=y, z=c + dz))
+        for b in columns:
+            if b + 1 not in rings:
+                continue
+            for k in range(6):
+                a, bb = rings[b][k], rings[b][k + 1]
+                c2, d2 = rings[b + 1][k + 1], rings[b + 1][k]
+                triangles.extend([a, bb, c2, a, c2, d2, a, c2, bb, a, d2, c2])   # both faces are visible
+        return DeformableMeshState(
+            object_id="wound-channel",
+            topology_revision=max(1, len(columns)),
+            vertices_mm=vertices,
+            triangle_indices=triangles,
+        )
+
     def wound_mesh(self, surface_y_fn=None) -> DeformableMeshState:
+        skin = self.layers["skin"]
+        if surface_y_fn is None and skin.fine_cells and any(skin.bin_depth(b) > 0 for b in range(FINE_BINS)):
+            return self._wound_detailed()
+        return self._wound_from_path(surface_y_fn)
+
+    def _wound_from_path(self, surface_y_fn=None) -> DeformableMeshState:
         def height(x_mm: float, z_mm: float) -> float:
             if surface_y_fn is None:
                 return SURFACE_Y_MM

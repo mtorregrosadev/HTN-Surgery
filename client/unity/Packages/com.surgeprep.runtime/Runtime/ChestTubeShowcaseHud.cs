@@ -62,7 +62,7 @@ namespace SurgePrep
             if (snapshot != null && snapshot.simulationBackend == "sofa-native") sofaNative = true;
             if (snapshot != null && snapshot.simulationBackend == "memory-development-only") sofaNative = false;
 
-            var panel = new Rect(16, 16, 420, completed ? 582 : 480);
+            var panel = new Rect(16, 16, 420, completed ? 622 : 520);
             DrawRect(panel, new Color(0.07f, 0.1f, 0.14f, 0.94f));
             DrawRect(new Rect(panel.x, panel.y, 4, panel.height), new Color(0.2f, 0.55f, 0.72f));
 
@@ -83,6 +83,12 @@ namespace SurgePrep
             GUI.color = Color.white;
             y += 22f;
 
+            if (manualDemo != null)
+            {
+                GUI.Label(new Rect(38, y, 380, 18), manualDemo.Status, smallStyle);
+                y += 20f;
+            }
+
             if (snapshot != null && snapshot.tool != null)
             {
                 var contact = snapshot.tool.contact;
@@ -95,13 +101,21 @@ namespace SurgePrep
                     smallStyle
                 );
                 y += 20f;
-                var offset = Mathf.Sqrt(
-                    snapshot.tool.positionMm.x * snapshot.tool.positionMm.x +
-                    snapshot.tool.positionMm.z * snapshot.tool.positionMm.z
-                );
                 GUI.Label(
                     new Rect(38, y, 380, 18),
-                    "Alignment  " + offset.ToString("0.0") + " mm from corridor centre",
+                    "Pose  x " + snapshot.tool.positionMm.x.ToString("0.0")
+                        + "  y " + snapshot.tool.positionMm.y.ToString("0.0")
+                        + "  z " + snapshot.tool.positionMm.z.ToString("0.0") + " mm",
+                    smallStyle
+                );
+                y += 20f;
+                GUI.Label(
+                    new Rect(38, y, 380, 18),
+                    "SOFA deformation  "
+                        + (snapshot.tissue != null
+                            ? snapshot.tissue.deformationMm.ToString("0.00")
+                            : "0.00")
+                        + " mm    tick " + snapshot.tick,
                     smallStyle
                 );
                 y += 20f;

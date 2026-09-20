@@ -210,6 +210,10 @@ namespace SurgePrep.Editor
                 instance.name = FriendlyName(file);
                 AssignMaterial(instance, MaterialFor(file, bone, cartilage, muscle, diaphragm, skin));
             }
+            // The authoritative SOFA surface occupies this registered window.
+            // Without removing the matching triangles from the static anatomy,
+            // the high-resolution skin completely occludes deformation and cuts.
+            CutProcedureWindow(skinLayer.gameObject);
             muscleLayer.gameObject.SetActive(false);
             boneLayer.gameObject.SetActive(false);
             cartilageLayer.gameObject.SetActive(false);

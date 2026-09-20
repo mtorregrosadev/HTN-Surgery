@@ -117,6 +117,16 @@ class PivotCalibrator:
         b_vec = np.concatenate(b)
 
         x, residuals, rank, _ = np.linalg.lstsq(A_mat, b_vec, rcond=None)
+        tip_offset = x[:3]
+        contact_point = x[3:]
+
+        # Calculate residual RMS error
+        predicted_t = []
+        for R in self.rotations:
+            predicted_t.append(contact_point - R @ tip_offset)
+        errs = [np.linalg.norm(p - a) for p, a in zip(predicted_t, self.translations)]
+        rms_err = float(np.mean(errs)) if len(errs) > 0 else 0.5
+
         # Sanity check: contact point depth must be positive in front of camera (Z > 100 mm)
         if contact_point[2] < 100.0 or contact_point[2] > 1500.0 or np.linalg.norm(tip_offset) > 150.0:
             tip_offset = np.array([0.0, 65.0, 0.0], dtype=np.float64)

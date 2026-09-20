@@ -267,6 +267,8 @@ class SofaSimulator(Simulator):
                 if blocked_by_rib
                 else sample.position_mm.y
             )
+            # Ghost tool compliance safeguard: prevent severe negative depth locking SOFA solver
+            effective_y_mm = max(effective_y_mm, -8.0)
             target_pose = [
                 sample.position_mm.x, effective_y_mm + surface_y, sample.position_mm.z,
                 sample.orientation.qx, sample.orientation.qy,

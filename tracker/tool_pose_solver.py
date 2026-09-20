@@ -100,9 +100,11 @@ class ScalpelPoseSolver:
 
         self.pos_filter = OneEuroFilter(min_cutoff=0.8, beta=0.01)
         self.rot_filter = OneEuroFilter(min_cutoff=1.0, beta=0.015)
+        self._last_valid_tip_cam: Optional[np.ndarray] = None
+        self._jump_reject_count: int = 0
 
     def solve_tag_pose(self, corners: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-        """Solve 3D pose of a single tag in camera coordinates."""
+        """Solve 3D pose of a single tag in camera coordinates with reprojection validation."""
         half = self.tag_size_mm / 2.0
         obj_pts = np.array([
             [-half, -half, 0.0],
@@ -116,13 +118,28 @@ class ScalpelPoseSolver:
             obj_pts, img_pts, self.camera_matrix, self.dist_coeffs,
             flags=cv2.SOLVEPNP_IPPE_SQUARE
         )
-        if not ok:
+        if ok:
+            proj_pts, _ = cv2.projectPoints(obj_pts, rvec, tvec, self.camera_matrix, self.dist_coeffs)
+            reproj_err = float(np.mean(np.linalg.norm(img_pts - proj_pts.reshape(4, 2), axis=1)))
+        else:
+            reproj_err = 999.0
+
+        # Fallback to standard iterative Levenberg-Marquardt solver if IPPE failed or reprojection error is poor
+        if not ok or reproj_err > 4.5:
             ok, rvec, tvec = cv2.solvePnP(
                 obj_pts, img_pts, self.camera_matrix, self.dist_coeffs,
                 flags=cv2.SOLVEPNP_ITERATIVE
             )
-        if not ok:
+            if ok:
+                proj_pts, _ = cv2.projectPoints(obj_pts, rvec, tvec, self.camera_matrix, self.dist_coeffs)
+                reproj_err = float(np.mean(np.linalg.norm(img_pts - proj_pts.reshape(4, 2), axis=1)))
+            else:
+                return None
+
+        # Guard against severely distorted or occluded corner detections
+        if not ok or reproj_err > 5.5:
             return None
+
         r_mat, _ = cv2.Rodrigues(rvec)
         return r_mat, tvec.flatten()
 
@@ -169,8 +186,21 @@ class ScalpelPoseSolver:
             tool_handle_axis_cam = mean_rot_cam[:, 1]
             blade_tip_cam = mean_tag_pos_cam + (tool_handle_axis_cam * self.tip_offset_along_handle_mm)
 
+        # Outlier Jump Check (guard against planar ambiguity or sudden occlusion jump > 45mm/frame)
+        if self._last_valid_tip_cam is not None:
+            jump_mm = float(np.linalg.norm(blade_tip_cam - self._last_valid_tip_cam))
+            if jump_mm > 45.0:
+                self._jump_reject_count += 1
+                if self._jump_reject_count <= 6:
+                    blade_tip_cam = self._last_valid_tip_cam.copy()
+                else:
+                    self._jump_reject_count = 0
+            else:
+                self._jump_reject_count = 0
+
         # Apply One-Euro filter in camera frame before desk projection
         filtered_tip_cam = self.pos_filter.filter(blade_tip_cam, timestamp)
+        self._last_valid_tip_cam = filtered_tip_cam.copy()
 
         # Transform blade tip into Desk Coordinates
         tip_desk = desk_calib.point_cam_to_desk(filtered_tip_cam)

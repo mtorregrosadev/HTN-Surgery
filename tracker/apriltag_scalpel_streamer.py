@@ -52,10 +52,18 @@ COLORS = [(0, 0, 255), (0, 200, 0), (255, 100, 0), (0, 200, 255), (255, 0, 255)]
 class ControllerBridge:
     """Streams physical scalpel poses to the Scalpel Controller over WebSockets."""
 
-    def __init__(self, controller_url: str, session_id: str, calibration_id: str, initial_sequence: int = 0):
+    def __init__(
+        self,
+        controller_url: str,
+        session_id: str,
+        calibration_id: str,
+        initial_sequence: int = 0,
+        motion_scale: float = 0.45,
+    ):
         self.controller_url = controller_url.rstrip("/")
         self.session_id = session_id
         self.calibration_id = calibration_id
+        self.motion_scale = motion_scale
         self.connected = False
         self.latest_snapshot: Optional[dict] = None
         self.sofa_backend = "unknown"
@@ -78,6 +86,22 @@ class ControllerBridge:
     def queue_sample(self, pose: ToolPose6DOF):
         now_ms = int(time.time() * 1000)
         self._sequence += 1
+
+        # 1. Motion scaling (Prevents tool flying out of view with wrist gestures)
+        scaled_x = pose.x_mm * self.motion_scale
+        scaled_z = pose.z_mm * self.motion_scale
+
+        # 2. Compliance Proxy / Ghost Tool (Soft exponential tissue compression prevents getting stuck in collision geometry)
+        if pose.y_mm <= 0.0:
+            scaled_y = -3.5 * (1.0 - math.exp(min(0.0, pose.y_mm) / 8.0))
+        else:
+            scaled_y = pose.y_mm * self.motion_scale
+
+        # 3. Clamp strictly inside virtual surgical field so tool never flies away
+        virt_x = round(max(-35.0, min(35.0, scaled_x)), 2)
+        virt_y = round(max(-5.0, min(45.0, scaled_y)), 2)
+        virt_z = round(max(-28.0, min(28.0, scaled_z)), 2)
+
         sample = {
             "contractVersion": "1.1",
             "sessionId": self.session_id,
@@ -87,9 +111,9 @@ class ControllerBridge:
             "sequence": self._sequence,
             "timestampMs": now_ms,
             "positionMm": {
-                "x": round(pose.x_mm, 2),
-                "y": round(pose.y_mm, 2),
-                "z": round(pose.z_mm, 2),
+                "x": virt_x,
+                "y": virt_y,
+                "z": virt_z,
             },
             "orientation": {
                 "qx": round(pose.qx, 5),
@@ -97,7 +121,7 @@ class ControllerBridge:
                 "qz": round(pose.qz, 5),
                 "qw": round(pose.qw, 5),
             },
-            "forceN": 0.0,
+            "forceN": round(max(0.0, -pose.y_mm * 0.18), 2) if pose.y_mm <= 0.0 else 0.0,
             "contact": pose.y_mm <= 0.0,
             "quality": round(pose.confidence, 2),
             "sourceHealthy": True,
@@ -241,6 +265,7 @@ def main():
     ap.add_argument("--desk-tag-size", type=float, default=50.0, help="Desk tag physical size in mm")
     ap.add_argument("--tool-tag-size", type=float, default=24.0, help="Tool tags physical size in mm")
     ap.add_argument("--tip-offset", type=float, default=65.0, help="Blade tip offset along handle in mm")
+    ap.add_argument("--motion-scale", type=float, default=0.45, help="Physical-to-virtual motion scaling factor (default: 0.45)")
     ap.add_argument("--controller", default="http://localhost:8100", help="Scalpel controller URL")
     ap.add_argument("--session", default="auto", help="Controller session ID or 'auto' to attach to active session")
     ap.add_argument("--new-session", action="store_true", help="Force creating a new active session instead of attaching")
@@ -287,7 +312,13 @@ def main():
     toast_until = 0.0
 
     session_id, calib_id, last_seq = resolve_or_create_session(args.controller, args.session, force_new=args.new_session)
-    bridge = ControllerBridge(controller_url=args.controller, session_id=session_id, calibration_id=calib_id, initial_sequence=last_seq)
+    bridge = ControllerBridge(
+        controller_url=args.controller,
+        session_id=session_id,
+        calibration_id=calib_id,
+        initial_sequence=last_seq,
+        motion_scale=args.motion_scale,
+    )
     bridge.start()
 
     log_file = open(args.csv, "w") if args.csv else None
@@ -299,6 +330,7 @@ def main():
     fps = 0.0
     prev_time = time.perf_counter()
     trail = deque(maxlen=60)
+    show_grid = False
     window_name = "Surge Prep - 3D Desk & Scalpel Tracker"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1280, 720)
@@ -433,7 +465,7 @@ def main():
             # 4. Render AR 3D Desk Grid & Area
             if desk_calib is not None:
                 tip_pos_desk = np.array([current_pose.x_mm, current_pose.y_mm, current_pose.z_mm]) if current_pose else None
-                draw_desk_plane_grid(frame, desk_calib, camera_matrix, dist_coeffs, scalpel_tip_desk=tip_pos_desk)
+                draw_desk_plane_grid(frame, desk_calib, camera_matrix, dist_coeffs, scalpel_tip_desk=tip_pos_desk, show_grid=show_grid)
 
             # 5. Render live mouse dragging rectangle
             if mouse_state["dragging"]:
@@ -475,10 +507,13 @@ def main():
                         f"{current_pose.z_mm:.2f},{current_pose.qx:.4f},{current_pose.qy:.4f},"
                         f"{current_pose.qz:.4f},{current_pose.qw:.4f},{int(current_pose.y_mm <= 0.0)}\n"
                     )
+            else:
+                trail.append(None)
 
             trail_pts = list(trail)
             for a, b in zip(trail_pts, trail_pts[1:]):
-                cv2.line(frame, a, b, (0, 255, 255), 2, cv2.LINE_AA)
+                if a is not None and b is not None and math.hypot(a[0] - b[0], a[1] - b[1]) < 35:
+                    cv2.line(frame, a, b, (0, 255, 255), 2, cv2.LINE_AA)
 
             # 6. Render HUD Overlay
             cv2.rectangle(frame, (8, 8), (min(w - 8, 860), 78), (20, 20, 20), cv2.FILLED)
@@ -516,7 +551,7 @@ def main():
                 cv2.putText(frame, "Scalpel: Searching for Tag 1 on tool handle...", (14, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 200, 200), 1, cv2.LINE_AA)
 
-            line3 = "[t] Start Tumbado / Zero | [Drag Mouse] Draw Area | [s] Snap Desk | [d] Default | [[ / ]] Tilt | [q] Quit"
+            line3 = "[t] Start Tumbado / Zero | [Drag Mouse] Draw Area | [g] Grid | [s] Snap Desk | [d] Default | [[ / ]] Tilt | [q] Quit"
             cv2.putText(frame, line3, (14, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (170, 170, 170), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, frame)
@@ -617,6 +652,11 @@ def main():
                 status_toast = "Pivot Calibration Started: keep tip on desk and rotate handle"
                 toast_until = now + 3.0
                 print(f"[Pivot] {status_toast}", flush=True)
+            if key == ord("g"):
+                show_grid = not show_grid
+                status_toast = f"Grid lines: {'ON' if show_grid else 'OFF'}"
+                toast_until = now + 1.5
+                print(f"[HUD] {status_toast}", flush=True)
             if key == ord("f"):
                 current_scale = 1.0 if current_scale < 0.99 else 0.5
                 print(f"[Performance] Switched detection scale to {current_scale}x.", flush=True)

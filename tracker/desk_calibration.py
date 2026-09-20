@@ -457,7 +457,8 @@ def draw_desk_plane_grid(
     extent_x_mm: Optional[float] = None,
     extent_z_mm: Optional[float] = None,
     step_mm: float = 25.0,
-    scalpel_tip_desk: Optional[np.ndarray] = None
+    scalpel_tip_desk: Optional[np.ndarray] = None,
+    show_grid: bool = False,
 ) -> None:
     """Render an augmented-reality 3D boundary rectangle and shaded area on the desk."""
     if not calib.is_valid():
@@ -535,11 +536,12 @@ def draw_desk_plane_grid(
         cv2.putText(frame, label, (top_u - 75, top_v),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 200), 1, cv2.LINE_AA)
 
-    # 2. Internal Grid Lines clipped strictly inside the rectangle
-    for x in np.arange(-ext_x + step_mm, ext_x, step_mm):
-        draw_segment([x, 0.0, -ext_z], [x, 0.0, ext_z], (60, 110, 60), 1)
-    for z in np.arange(-ext_z + step_mm, ext_z, step_mm):
-        draw_segment([-ext_x, 0.0, z], [ext_x, 0.0, z], (60, 110, 60), 1)
+    # 2. Internal Grid Lines (optional, default off to keep view clean)
+    if show_grid:
+        for x in np.arange(-ext_x + step_mm, ext_x, step_mm):
+            draw_segment([x, 0.0, -ext_z], [x, 0.0, ext_z], (60, 110, 60), 1)
+        for z in np.arange(-ext_z + step_mm, ext_z, step_mm):
+            draw_segment([-ext_x, 0.0, z], [ext_x, 0.0, z], (60, 110, 60), 1)
 
     # 3. Desk Origin Triad at (0, 0, 0)
     p_orig = project_safe([0.0, 0.0, 0.0])

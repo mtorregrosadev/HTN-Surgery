@@ -24,6 +24,12 @@ def configure_native_sofa() -> None:
     except SystemExit:
         pytest.skip("native SOFA is not installed")
     checker.configure_paths(root)
+    try:
+        import Sofa
+        import Sofa.Simulation
+        import SofaRuntime
+    except Exception as err:
+        pytest.skip(f"native SOFA is incompatible with current Python runtime: {err}")
 
 
 def sample(

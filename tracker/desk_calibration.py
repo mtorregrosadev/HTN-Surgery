@@ -9,6 +9,7 @@ using either:
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -36,6 +37,23 @@ class DeskCalibration:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def camera_to_desk_transform(self) -> list[float]:
+        """Return the measured camera-to-desk transform as row-major 4x4 data.
+
+        ``point_cam_to_desk`` applies ``R @ (p_cam - origin_cam)``.  The
+        equivalent homogeneous transform is therefore ``[R, -R @ origin]``;
+        keeping this conversion next to the calibration prevents callers from
+        accidentally registering an identity transform for a calibrated desk.
+        """
+        if not self.is_valid():
+            raise ValueError("cannot export an invalid desk calibration")
+        rotation = np.asarray(self.r_cam_to_desk, dtype=np.float64)
+        origin = np.asarray(self.origin_cam, dtype=np.float64)
+        transform = np.eye(4, dtype=np.float64)
+        transform[:3, :3] = rotation
+        transform[:3, 3] = -(rotation @ origin)
+        return transform.reshape(-1).tolist()
+
     @classmethod
     def from_dict(cls, data: dict) -> DeskCalibration:
         import dataclasses
@@ -47,10 +65,25 @@ class DeskCalibration:
         """Verify the calibration represents a physically plausible desk in front of the camera."""
         if not self.origin_cam or len(self.origin_cam) != 3:
             return False
+        if self.r_cam_to_desk is None:
+            return False
+        rotation = np.asarray(self.r_cam_to_desk, dtype=np.float64)
+        if rotation.shape != (3, 3) or not np.all(np.isfinite(rotation)):
+            return False
+        if not np.allclose(rotation @ rotation.T, np.eye(3), atol=2e-2):
+            return False
+        if np.linalg.det(rotation) <= 0.0:
+            return False
+        origin = np.asarray(self.origin_cam, dtype=np.float64)
+        if not np.all(np.isfinite(origin)):
+            return False
         z = self.origin_cam[2]
         if z < 150.0 or z > 1500.0:
             return False
         if not self.normal_cam or len(self.normal_cam) != 3:
+            return False
+        normal = np.asarray(self.normal_cam, dtype=np.float64)
+        if not np.all(np.isfinite(normal)) or not 0.9 <= np.linalg.norm(normal) <= 1.1:
             return False
         # Desk normal in camera coordinates must point upwards (negative Y in OpenCV frame)
         if self.normal_cam[1] > -0.2:
@@ -101,8 +134,9 @@ class DeskCalibration:
 class PivotCalibrator:
     """Solves the scalpel tip offset and desk contact point by rotating the tool around a stationary point."""
 
-    def __init__(self, min_samples: int = 40):
+    def __init__(self, min_samples: int = 40, max_rms_error_mm: float = 3.0):
         self.min_samples = min_samples
+        self.max_rms_error_mm = max_rms_error_mm
         self.rotations: List[np.ndarray] = []
         self.translations: List[np.ndarray] = []
 
@@ -138,7 +172,12 @@ class PivotCalibrator:
         A_mat = np.vstack(A)
         b_vec = np.concatenate(b)
 
-        x, residuals, rank, _ = np.linalg.lstsq(A_mat, b_vec, rcond=None)
+        x, _, rank, _ = np.linalg.lstsq(A_mat, b_vec, rcond=None)
+        if rank < 6:
+            # A stationary or nearly one-axis motion cannot identify both the
+            # tip offset and the contact point.  Do not manufacture a nominal
+            # calibration for an under-constrained solve.
+            return None
         tip_offset = x[:3]
         contact_point = x[3:]
 
@@ -146,14 +185,24 @@ class PivotCalibrator:
         predicted_t = []
         for R in self.rotations:
             predicted_t.append(contact_point - R @ tip_offset)
-        errs = [np.linalg.norm(p - a) for p, a in zip(predicted_t, self.translations)]
-        rms_err = float(np.mean(errs)) if len(errs) > 0 else 0.5
+        errs = np.asarray(
+            [np.linalg.norm(p - a) for p, a in zip(predicted_t, self.translations)],
+            dtype=np.float64,
+        )
+        rms_err = float(np.sqrt(np.mean(errs**2))) if errs.size else float("inf")
 
-        # Sanity check: contact point depth must be positive in front of camera (Z > 100 mm)
-        if contact_point[2] < 100.0 or contact_point[2] > 1500.0 or np.linalg.norm(tip_offset) > 150.0:
-            tip_offset = np.array([0.0, 65.0, 0.0], dtype=np.float64)
-            contact_point = np.mean([t + R @ tip_offset for R, t in zip(self.rotations, self.translations)], axis=0)
-            rms_err = 0.5
+        # Reject poor or physically impossible solves.  Returning ``None`` is
+        # safer than replacing measured data with nominal geometry.
+        if (
+            not np.isfinite(rms_err)
+            or rms_err > self.max_rms_error_mm
+            or contact_point[2] < 150.0
+            or contact_point[2] > 1500.0
+            or not 20.0 <= np.linalg.norm(tip_offset) <= 150.0
+            or not np.all(np.isfinite(tip_offset))
+            or not np.all(np.isfinite(contact_point))
+        ):
+            return None
 
         # Desk normal is estimated from the symmetry axis of the rotation cone
         # Average tool handle axis (column 1 / Y) across all pivot samples
@@ -161,23 +210,18 @@ class PivotCalibrator:
         mean_axis = np.mean(handle_axes, axis=0)
         norm_val = np.linalg.norm(mean_axis)
         if norm_val < 1e-4:
-            mean_axis = np.array([0.0, -1.0, 0.0])
-        else:
-            mean_axis = mean_axis / norm_val
+            return None
+        mean_axis = mean_axis / norm_val
 
         # Desk normal points upward toward camera (opposite to gravity / looking up)
         normal_cam = mean_axis
-        if np.dot(normal_cam, contact_point) > 0:
+        if normal_cam[1] > 0.0:
             normal_cam = -normal_cam
 
-        # If estimated normal is not pointing upwards (ny > -0.35) or depth is degenerate,
-        # fallback to nominal upward desk normal (tilt = 28 deg)
-        if normal_cam[1] > -0.35 or contact_point[2] < 150.0 or contact_point[2] > 1500.0:
-            import math
-            rad = math.radians(28.0)
-            normal_cam = np.array([0.0, -math.cos(rad), -math.sin(rad)], dtype=np.float64)
-            if contact_point[2] < 150.0 or contact_point[2] > 1500.0:
-                contact_point = np.array([0.0, 110.0, 450.0], dtype=np.float64)
+        # A sideways normal means the pivot motion did not provide a useful
+        # desk orientation.  Do not silently substitute a nominal plane.
+        if normal_cam[1] > -0.35:
+            return None
 
         u_y = normal_cam / np.linalg.norm(normal_cam)
 
@@ -204,6 +248,7 @@ class PivotCalibrator:
             calibrated_tip_offset_mm=tip_offset.tolist(),
             calibration_method="pivot",
             rms_error_mm=round(rms_err, 3),
+            timestamp=time.time(),
             extent_x_mm=160.0,
             extent_z_mm=110.0
         )
@@ -242,7 +287,10 @@ def get_default_desk_calibration(
         origin_cam=origin_cam.tolist(),
         r_cam_to_desk=r_cam_to_desk.tolist(),
         normal_cam=u_y.tolist(),
-        calibrated_tip_offset_mm=[0.0, 65.0, 0.0],
+        # The nominal desk frame has no measured tag-to-tip offset.  The pose
+        # solver uses its explicit configured fallback until pivot calibration
+        # supplies this value.
+        calibrated_tip_offset_mm=None,
         calibration_method="nominal-controller",
         rms_error_mm=0.0,
         extent_x_mm=extent_x_mm,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import math
 import sys
@@ -58,11 +59,13 @@ class ControllerBridge:
         session_id: str,
         calibration_id: str,
         initial_sequence: int = 0,
-        motion_scale: float = 0.45,
+        motion_scale: float = 1.0,
     ):
         self.controller_url = controller_url.rstrip("/")
         self.session_id = session_id
         self.calibration_id = calibration_id
+        if motion_scale <= 0.0:
+            raise ValueError("motion_scale must be positive")
         self.motion_scale = motion_scale
         self.connected = False
         self.latest_snapshot: Optional[dict] = None
@@ -71,7 +74,10 @@ class ControllerBridge:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._sequence = initial_sequence
-        self.start_time = time.time()
+        self.start_time = time.monotonic()
+        self._last_sample: Optional[dict] = None
+        self._last_loss_report_ms: Optional[int] = None
+        self.tracking_lost = False
 
     def start(self):
         self._stop_event.clear()
@@ -84,23 +90,15 @@ class ControllerBridge:
             self._thread.join(timeout=1.0)
 
     def queue_sample(self, pose: ToolPose6DOF):
-        now_ms = int(time.time() * 1000)
+        now_ms = int(time.monotonic_ns() // 1_000_000)
         self._sequence += 1
 
-        # 1. Motion scaling (Prevents tool flying out of view with wrist gestures)
+        # Keep physical desk-space millimetres by default.  An explicit
+        # motion_scale remains available for experiments, but the normal live
+        # path is one-to-one and does not clamp or reshape penetration.
         scaled_x = pose.x_mm * self.motion_scale
+        scaled_y = pose.y_mm * self.motion_scale
         scaled_z = pose.z_mm * self.motion_scale
-
-        # 2. Compliance Proxy / Ghost Tool (Soft exponential tissue compression prevents getting stuck in collision geometry)
-        if pose.y_mm <= 0.0:
-            scaled_y = -3.5 * (1.0 - math.exp(min(0.0, pose.y_mm) / 8.0))
-        else:
-            scaled_y = pose.y_mm * self.motion_scale
-
-        # 3. Clamp strictly inside virtual surgical field so tool never flies away
-        virt_x = round(max(-35.0, min(35.0, scaled_x)), 2)
-        virt_y = round(max(-5.0, min(45.0, scaled_y)), 2)
-        virt_z = round(max(-28.0, min(28.0, scaled_z)), 2)
 
         sample = {
             "contractVersion": "1.1",
@@ -111,9 +109,9 @@ class ControllerBridge:
             "sequence": self._sequence,
             "timestampMs": now_ms,
             "positionMm": {
-                "x": virt_x,
-                "y": virt_y,
-                "z": virt_z,
+                "x": round(scaled_x, 3),
+                "y": round(scaled_y, 3),
+                "z": round(scaled_z, 3),
             },
             "orientation": {
                 "qx": round(pose.qx, 5),
@@ -128,7 +126,43 @@ class ControllerBridge:
             "inputMode": "calibrated-hardware",
             "forceMeasurementValid": False,
         }
+        self._last_sample = sample
+        self._last_loss_report_ms = None
+        self.tracking_lost = False
         self._sample_queue.append(sample)
+
+    def queue_unhealthy(self) -> bool:
+        """Queue an explicit loss-of-tracking sample using the last pose.
+
+        A missing tag cannot provide a new pose, so reusing the last pose is
+        intentional and marked unhealthy.  The API can then freeze the last
+        valid simulation state and surface the degraded session to clients.
+        """
+        if self._last_sample is None:
+            return False
+        now_ms = int(time.monotonic_ns() // 1_000_000)
+        # Avoid flooding the queue faster than the camera can report a useful
+        # state while still emitting a visible health transition promptly.
+        if self._last_loss_report_ms is not None and now_ms - self._last_loss_report_ms < 50:
+            return False
+        sample = copy.deepcopy(self._last_sample)
+        self._sequence += 1
+        sample.update(
+            sequence=self._sequence,
+            timestampMs=now_ms,
+            quality=0.0,
+            sourceHealthy=False,
+            contact=False,
+            forceN=0.0,
+            forceMeasurementValid=False,
+        )
+        self._last_loss_report_ms = now_ms
+        self.tracking_lost = True
+        self._sample_queue.append(sample)
+        return True
+
+    def elapsed_ms(self) -> int:
+        return int((time.monotonic() - self.start_time) * 1000.0)
 
     def _run_loop(self):
         asyncio.run(self._worker())
@@ -196,64 +230,84 @@ def open_camera_auto(preferred_index: Optional[int] = None) -> Tuple[Optional[cv
     return None, 0
 
 
-def resolve_or_create_session(controller_url: str, session_id: str, force_new: bool = False) -> tuple[str, str, int]:
-    """Resolve an active session from the controller or create a new calibrated session."""
+def resolve_or_create_session(
+    controller_url: str,
+    session_id: str,
+    force_new: bool = False,
+    desk_calib: Optional[DeskCalibration] = None,
+) -> tuple[str, str, int]:
+    """Resolve a real session or create one from the measured desk transform."""
     import urllib.request
     ctrl = controller_url.rstrip("/")
+
+    def read_json(request: urllib.request.Request) -> dict:
+        try:
+            with urllib.request.urlopen(request, timeout=3.0) as response:
+                if response.status >= 400:
+                    raise RuntimeError(f"controller returned HTTP {response.status}")
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError(f"controller request failed: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("controller returned a non-object response")
+        return payload
+
     if not force_new and session_id and session_id not in ("auto", "demo-session-1"):
-        return session_id, "calib-demo-default", 0
+        data = read_json(urllib.request.Request(f"{ctrl}/v1/sessions/{session_id}"))
+        calibration_id = data.get("calibrationId")
+        if not calibration_id or data.get("status") not in (None, "active"):
+            raise RuntimeError(f"session {session_id!r} is missing an active calibration")
+        return session_id, str(calibration_id), int(data.get("lastSequence") or 0)
 
     # 1. Check for active session on controller if not forcing new
     if not force_new:
         try:
-            req = urllib.request.Request(f"{ctrl}/v1/sessions/active")
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    active_id = data.get("sessionId")
-                    if active_id:
-                        last_seq = data.get("lastSequence", 0) or 0
-                        calib_id = data.get("calibrationId", "calib-demo-default")
-                        print(f"[Session] Auto-attached to active controller session: {active_id} (lastSequence: {last_seq})", flush=True)
-                        return active_id, calib_id, last_seq
-        except Exception:
+            data = read_json(urllib.request.Request(f"{ctrl}/v1/sessions/active"))
+            active_id = data.get("sessionId")
+            calibration_id = data.get("calibrationId")
+            if active_id and calibration_id and data.get("status") in (None, "active"):
+                last_seq = data.get("lastSequence", 0) or 0
+                print(f"[Session] Auto-attached to active controller session: {active_id} (lastSequence: {last_seq})", flush=True)
+                return str(active_id), str(calibration_id), int(last_seq)
+        except RuntimeError:
             pass
 
-    # 2. Create new session with demo calibration if none exists
-    try:
-        calib_data = json.dumps({
-            "deviceId": "apriltag-scalpel-tracker",
-            "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-            "rmsErrorMm": 0.05
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            f"{ctrl}/v1/calibrations",
-            data=calib_data,
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
-            calib = json.loads(resp.read().decode("utf-8"))
-            calib_id = calib.get("calibrationId", "calib-demo-default")
+    if desk_calib is None or not desk_calib.is_valid():
+        raise RuntimeError("a valid measured desk calibration is required before creating a session")
 
-        sess_data = json.dumps({
-            "exerciseId": "chest-tube-access-demo",
-            "calibrationId": calib_id,
-            "toolId": "scalpel",
-            "deviceId": "apriltag-scalpel-tracker"
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            f"{ctrl}/v1/sessions",
-            data=sess_data,
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
-            sess = json.loads(resp.read().decode("utf-8"))
-            new_id = sess.get("sessionId", "demo-session-live")
-            print(f"[Session] Created active surgical training session: {new_id}", flush=True)
-            return new_id, calib_id, 0
-    except Exception as e:
-        print(f"[Session] Note: Controller session creation ({e}); using default session ID.", flush=True)
-        return "demo-session-live", "calib-demo-default", 0
+    calib_data = json.dumps({
+        "deviceId": "apriltag-scalpel-tracker",
+        "coordinateFrame": "right-handed-x-right-y-up-z-away",
+        "transform": desk_calib.camera_to_desk_transform(),
+        "rmsErrorMm": float(desk_calib.rms_error_mm),
+        "valid": True,
+        "calibrationMethod": desk_calib.calibration_method,
+    }).encode("utf-8")
+    calib = read_json(urllib.request.Request(
+        f"{ctrl}/v1/calibrations",
+        data=calib_data,
+        headers={"Content-Type": "application/json"}
+    ))
+    calibration_id = calib.get("calibrationId")
+    if not calibration_id:
+        raise RuntimeError("controller calibration response did not include calibrationId")
+
+    sess_data = json.dumps({
+        "exerciseId": "chest-tube-access-demo",
+        "calibrationId": calibration_id,
+        "toolId": "scalpel",
+        "deviceId": "apriltag-scalpel-tracker"
+    }).encode("utf-8")
+    session = read_json(urllib.request.Request(
+        f"{ctrl}/v1/sessions",
+        data=sess_data,
+        headers={"Content-Type": "application/json"}
+    ))
+    new_id = session.get("sessionId")
+    if not new_id:
+        raise RuntimeError("controller session response did not include sessionId")
+    print(f"[Session] Created active surgical training session: {new_id}", flush=True)
+    return str(new_id), str(calibration_id), 0
 
 
 def main():
@@ -265,7 +319,7 @@ def main():
     ap.add_argument("--desk-tag-size", type=float, default=50.0, help="Desk tag physical size in mm")
     ap.add_argument("--tool-tag-size", type=float, default=24.0, help="Tool tags physical size in mm")
     ap.add_argument("--tip-offset", type=float, default=65.0, help="Blade tip offset along handle in mm")
-    ap.add_argument("--motion-scale", type=float, default=0.45, help="Physical-to-virtual motion scaling factor (default: 0.45)")
+    ap.add_argument("--motion-scale", type=float, default=1.0, help="Optional physical-to-virtual scale (default: 1.0, one-to-one)")
     ap.add_argument("--controller", default="http://localhost:8100", help="Scalpel controller URL")
     ap.add_argument("--session", default="auto", help="Controller session ID or 'auto' to attach to active session")
     ap.add_argument("--new-session", action="store_true", help="Force creating a new active session instead of attaching")
@@ -311,15 +365,27 @@ def main():
     status_toast = ""
     toast_until = 0.0
 
-    session_id, calib_id, last_seq = resolve_or_create_session(args.controller, args.session, force_new=args.new_session)
-    bridge = ControllerBridge(
-        controller_url=args.controller,
-        session_id=session_id,
-        calibration_id=calib_id,
-        initial_sequence=last_seq,
-        motion_scale=args.motion_scale,
-    )
-    bridge.start()
+    bridge: Optional[ControllerBridge] = None
+    # A nominal desk frame is useful for displaying the camera feed while the
+    # user places the tool, but it is not a session calibration.  The bridge is
+    # started only after the initial tare creates a real, session-bound frame.
+    if desk_calib.calibration_method != "nominal-controller":
+        session_id, calib_id, last_seq = resolve_or_create_session(
+            args.controller,
+            args.session,
+            force_new=args.new_session,
+            desk_calib=desk_calib,
+        )
+        bridge = ControllerBridge(
+            controller_url=args.controller,
+            session_id=session_id,
+            calibration_id=calib_id,
+            initial_sequence=last_seq,
+            motion_scale=args.motion_scale,
+        )
+        bridge.start()
+    else:
+        print("[Session] Waiting for the first measured tare before creating a session.", flush=True)
 
     log_file = open(args.csv, "w") if args.csv else None
     if log_file:
@@ -328,7 +394,8 @@ def main():
     current_scale = args.scale
     frame_no = 0
     fps = 0.0
-    prev_time = time.perf_counter()
+    tracker_start_time = time.monotonic()
+    prev_time = time.monotonic()
     trail = deque(maxlen=60)
     show_grid = False
     window_name = "Surge Prep - 3D Desk & Scalpel Tracker"
@@ -376,6 +443,24 @@ def main():
     initial_tumbado_locked = False
     settle_counter = 0
 
+    def start_session_bridge(calibration: DeskCalibration) -> ControllerBridge:
+        """Create a stream only after the calibration frame is finalized."""
+        session_id, calib_id, last_seq = resolve_or_create_session(
+            args.controller,
+            args.session,
+            force_new=args.new_session,
+            desk_calib=calibration,
+        )
+        result = ControllerBridge(
+            controller_url=args.controller,
+            session_id=session_id,
+            calibration_id=calib_id,
+            initial_sequence=last_seq,
+            motion_scale=args.motion_scale,
+        )
+        result.start()
+        return result
+
     try:
         while True:
             ok, frame = cap.read()
@@ -383,7 +468,7 @@ def main():
                 time.sleep(0.02)
                 continue
 
-            now = time.perf_counter()
+            now = time.monotonic()
             dt = now - prev_time
             prev_time = now
             if dt > 0:
@@ -413,7 +498,7 @@ def main():
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
 
             # 1. Check if user drew a rectangle on the video feed
-            if mouse_state["drawn_rect"] is not None:
+            if bridge is None and mouse_state["drawn_rect"] is not None:
                 u0, v0, u1, v1 = mouse_state["drawn_rect"]
                 mouse_state["drawn_rect"] = None
                 if desk_calib is None or not desk_calib.is_valid():
@@ -430,11 +515,10 @@ def main():
                     toast_until = now + 2.5
 
             # 2. Pivot Calibration Mode
-            if pivot_mode:
-                tool_visible = [tid for tid in detected_tags if tid in pose_solver.tool_tag_ids]
-                if tool_visible:
-                    tag_pts = [detected_tags[tid] for tid in tool_visible]
-                    res = pose_solver.solve_tag_pose(tag_pts[0])
+            if bridge is None and pivot_mode:
+                primary_tag = pose_solver.primary_tag_visible(detected_tags)
+                if primary_tag is not None:
+                    res = pose_solver.solve_reference_tag_pose(primary_tag, detected_tags[primary_tag])
                     if res is not None:
                         r_mat, t_vec = res
                         pivot_calibrator.add_sample(r_mat, t_vec)
@@ -477,8 +561,9 @@ def main():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 255), 1, cv2.LINE_AA)
 
             if current_pose is not None:
+                session_just_started = False
                 # Auto-calibrate initial resting Tumbado position if uncalibrated
-                if not initial_tumbado_locked and desk_calib and desk_calib.calibration_method == "nominal-controller":
+                if bridge is None and not initial_tumbado_locked and desk_calib and desk_calib.calibration_method == "nominal-controller":
                     settle_counter += 1
                     if settle_counter >= 6:
                         tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
@@ -488,11 +573,25 @@ def main():
                         desk_calib.calibration_method = "start-tumbado"
                         save_desk_calibration(desk_calib)
                         initial_tumbado_locked = True
+                        pose_solver.reset_tracking()
+                        bridge = start_session_bridge(desk_calib)
+                        # The pose above was solved in the nominal frame.  Do
+                        # not send it under the newly-created calibration; the
+                        # next camera sample will be the first session sample.
+                        session_just_started = True
                         status_toast = "TUMBADO (RESTING ON TABLE): (0, 0, 0) LOCKED -> 1:1 Unity Live!"
                         toast_until = now + 4.0
                         print(f"[Tumbado] {status_toast}", flush=True)
 
-                bridge.queue_sample(current_pose)
+                # Tare, tag, drawn-area, and successful pivot calibration all
+                # finalize a real frame before the first session sample.
+                if bridge is None and desk_calib and desk_calib.calibration_method != "nominal-controller":
+                    pose_solver.reset_tracking()
+                    bridge = start_session_bridge(desk_calib)
+                    session_just_started = True
+
+                if bridge is not None and not session_just_started:
+                    bridge.queue_sample(current_pose)
                 pose_solver.draw_tool_3d(frame, current_pose, desk_calib)
 
                 tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64).reshape(1, 3)
@@ -501,13 +600,20 @@ def main():
                 trail.append((tx, ty))
 
                 if log_file:
-                    now_ms = int((now - bridge.start_time) * 1000)
+                    now_ms = (
+                        bridge.elapsed_ms()
+                        if bridge is not None
+                        else int((now - tracker_start_time) * 1000)
+                    )
                     log_file.write(
                         f"{frame_no},{now_ms},{current_pose.x_mm:.2f},{current_pose.y_mm:.2f},"
                         f"{current_pose.z_mm:.2f},{current_pose.qx:.4f},{current_pose.qy:.4f},"
                         f"{current_pose.qz:.4f},{current_pose.qw:.4f},{int(current_pose.y_mm <= 0.0)}\n"
                     )
             else:
+                pose_solver.reset_tracking()
+                if bridge is not None:
+                    bridge.queue_unhealthy()
                 trail.append(None)
 
             trail_pts = list(trail)
@@ -524,7 +630,7 @@ def main():
                 desk_str = f"LOCKED ({ext_w}x{ext_d}mm {method_name})"
             else:
                 desk_str = "UNSET (Place flat & press 't')"
-            stream_str = f"LIVE ({bridge.sofa_backend})" if bridge.connected else "OFFLINE"
+            stream_str = f"LIVE ({bridge.sofa_backend})" if bridge is not None and bridge.connected else "OFFLINE"
             line1 = f"FPS: {fps:4.1f} | Table: {desk_str} | Stream: {stream_str}"
             cv2.putText(frame, line1, (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1, cv2.LINE_AA)
 
@@ -548,8 +654,14 @@ def main():
                 line2 = f"Scalpel: ({current_pose.x_mm:4.0f}, {current_pose.y_mm:4.0f}, {current_pose.z_mm:4.0f} mm) | [{mode_str}] [{area_tag}] -> Unity 1:1"
                 cv2.putText(frame, line2, (14, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.44, txt_col, 1, cv2.LINE_AA)
             else:
-                cv2.putText(frame, "Scalpel: Searching for Tag 1 on tool handle...", (14, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 200, 200), 1, cv2.LINE_AA)
+                lost_text = (
+                    "TRACKING LOST: unhealthy state sent to controller"
+                    if bridge is not None and bridge.tracking_lost
+                    else "Scalpel: Searching for Tag 1 on tool handle..."
+                )
+                lost_color = (0, 80, 255) if bridge is not None and bridge.tracking_lost else (200, 200, 200)
+                cv2.putText(frame, lost_text, (14, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, lost_color, 1, cv2.LINE_AA)
 
             line3 = "[t] Start Tumbado / Zero | [Drag Mouse] Draw Area | [g] Grid | [s] Snap Desk | [d] Default | [[ / ]] Tilt | [q] Quit"
             cv2.putText(frame, line3, (14, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (170, 170, 170), 1, cv2.LINE_AA)
@@ -558,7 +670,7 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 break
-            if key in (ord("t"), ord(" "), ord("z")):
+            if bridge is None and key in (ord("t"), ord(" "), ord("z")):
                 if current_pose is not None:
                     tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
                     ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
@@ -572,7 +684,7 @@ def main():
                 else:
                     status_toast = "Cannot Tare: Place scalpel flat in view of camera"
                     toast_until = now + 2.0
-            if key in (ord("s"), ord("c")):
+            if bridge is None and key in (ord("s"), ord("c")):
                 if current_pose is not None:
                     tip_cam = np.array(current_pose.cam_pos_mm, dtype=np.float64)
                     ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
@@ -600,19 +712,19 @@ def main():
                 else:
                     status_toast = "Place scalpel on desk and press 's', or drag rectangle with mouse"
                     toast_until = now + 2.5
-            if key == ord("d"):
+            if bridge is None and key == ord("d"):
                 desk_calib = get_default_desk_calibration(tilt_deg=tilt_deg, extent_x_mm=160.0, extent_z_mm=110.0)
                 save_desk_calibration(desk_calib)
                 status_toast = "RESET AREA: Default 320x220 mm workspace"
                 toast_until = now + 3.0
                 print(f"[Area] {status_toast}", flush=True)
-            if key == ord("r"):
+            if bridge is None and key == ord("r"):
                 desk_calib = get_default_desk_calibration(tilt_deg=tilt_deg)
                 save_desk_calibration(desk_calib)
                 status_toast = "RESET: Restored default 6-DOF controller space"
                 toast_until = now + 3.0
                 print(f"[Reset] {status_toast}", flush=True)
-            if key == ord("["):
+            if bridge is None and key == ord("["):
                 tilt_deg = max(12.0, tilt_deg - 1.5)
                 orig = np.array(desk_calib.origin_cam) if desk_calib else None
                 ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
@@ -621,7 +733,7 @@ def main():
                 save_desk_calibration(desk_calib)
                 status_toast = f"Desk Tilt Adjusted: {tilt_deg:.1f} deg"
                 toast_until = now + 2.0
-            elif key == ord("]"):
+            elif bridge is None and key == ord("]"):
                 tilt_deg = min(48.0, tilt_deg + 1.5)
                 orig = np.array(desk_calib.origin_cam) if desk_calib else None
                 ext_x = getattr(desk_calib, "extent_x_mm", 160.0) if desk_calib else 160.0
@@ -630,7 +742,7 @@ def main():
                 save_desk_calibration(desk_calib)
                 status_toast = f"Desk Tilt Adjusted: {tilt_deg:.1f} deg"
                 toast_until = now + 2.0
-            if key in (ord("+"), ord("=")):
+            if bridge is None and key in (ord("+"), ord("=")):
                 if desk_calib:
                     orig = np.array(desk_calib.origin_cam)
                     orig[1] -= 5.0
@@ -638,7 +750,7 @@ def main():
                     save_desk_calibration(desk_calib)
                     status_toast = "Raised Desk Plane (+5mm)"
                     toast_until = now + 1.5
-            elif key in (ord("-"), ord("_")):
+            elif bridge is None and key in (ord("-"), ord("_")):
                 if desk_calib:
                     orig = np.array(desk_calib.origin_cam)
                     orig[1] += 5.0
@@ -646,7 +758,7 @@ def main():
                     save_desk_calibration(desk_calib)
                     status_toast = "Lowered Desk Plane (-5mm)"
                     toast_until = now + 1.5
-            if key == ord("p"):
+            if bridge is None and key == ord("p"):
                 pivot_mode = not pivot_mode
                 pivot_calibrator.reset()
                 status_toast = "Pivot Calibration Started: keep tip on desk and rotate handle"
@@ -664,7 +776,8 @@ def main():
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
                 break
     finally:
-        bridge.stop()
+        if bridge is not None:
+            bridge.stop()
         cap.release()
         cv2.destroyAllWindows()
         for _ in range(5):

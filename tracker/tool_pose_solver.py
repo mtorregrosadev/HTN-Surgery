@@ -91,17 +91,72 @@ class ScalpelPoseSolver:
         tag_size_mm: float = 24.0,
         tip_offset_along_handle_mm: float = 65.0,
         tool_tag_ids: Tuple[int, ...] = (1, 2, 3),
+        tag_to_tool_transforms: Optional[Dict[int, np.ndarray]] = None,
     ):
         self.camera_matrix = camera_matrix
         self.dist_coeffs = dist_coeffs
         self.tag_size_mm = tag_size_mm
         self.tip_offset_along_handle_mm = tip_offset_along_handle_mm
         self.tool_tag_ids = set(tool_tag_ids)
+        self.primary_tag_id = min(self.tool_tag_ids) if self.tool_tag_ids else None
+        # A tag-to-tool transform is only available after a physical marker
+        # mount calibration.  Without one, using multiple tag frames as if
+        # they shared an origin makes the calculated tip jump as visibility
+        # changes, so the primary tag is used exclusively.
+        self.tag_to_tool_transforms = {
+            int(tag_id): np.asarray(transform, dtype=np.float64)
+            for tag_id, transform in (tag_to_tool_transforms or {}).items()
+        }
 
         self.pos_filter = OneEuroFilter(min_cutoff=0.8, beta=0.01)
         self.rot_filter = OneEuroFilter(min_cutoff=1.0, beta=0.015)
         self._last_valid_tip_cam: Optional[np.ndarray] = None
         self._jump_reject_count: int = 0
+        self._last_quaternion: Optional[np.ndarray] = None
+
+    def reset_tracking(self) -> None:
+        """Forget filtered state after a tracking gap."""
+        self.pos_filter.reset()
+        self.rot_filter.reset()
+        self._last_valid_tip_cam = None
+        self._jump_reject_count = 0
+        self._last_quaternion = None
+
+    def primary_tag_visible(self, detected_tags: Dict[int, np.ndarray]) -> Optional[int]:
+        """Return the stable reference tag to use for this frame."""
+        if self.tag_to_tool_transforms:
+            candidates = sorted(tid for tid in detected_tags if tid in self.tool_tag_ids)
+            return candidates[0] if candidates else None
+        if self.primary_tag_id is not None and self.primary_tag_id in detected_tags:
+            return self.primary_tag_id
+        return None
+
+    def _tag_pose_to_tool(
+        self, tag_id: int, rotation_cam: np.ndarray, position_cam: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Express a detected tag pose in the configured tool reference frame."""
+        transform = self.tag_to_tool_transforms.get(tag_id)
+        if transform is None:
+            return rotation_cam, position_cam
+        if transform.shape != (4, 4) or not np.all(np.isfinite(transform)):
+            raise ValueError(f"invalid tag-to-tool transform for tag {tag_id}")
+        tag_to_tool = transform.copy()
+        tag_to_tool[3, :] = [0.0, 0.0, 0.0, 1.0]
+        cam_from_tag = np.eye(4, dtype=np.float64)
+        cam_from_tag[:3, :3] = rotation_cam
+        cam_from_tag[:3, 3] = position_cam
+        cam_from_tool = cam_from_tag @ tag_to_tool
+        return cam_from_tool[:3, :3], cam_from_tool[:3, 3]
+
+    def solve_reference_tag_pose(
+        self, tag_id: int, corners: np.ndarray
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """Solve the selected tag and convert it to the tool reference frame."""
+        result = self.solve_tag_pose(corners)
+        if result is None:
+            return None
+        rotation_cam, position_cam = result
+        return self._tag_pose_to_tool(tag_id, rotation_cam, position_cam)
 
     def solve_tag_pose(self, corners: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """Solve 3D pose of a single tag in camera coordinates with reprojection validation."""
@@ -150,25 +205,39 @@ class ScalpelPoseSolver:
         timestamp: Optional[float] = None
     ) -> Optional[ToolPose6DOF]:
         """Compute the physical blade tip pose in desk coordinates from detected tags."""
-        visible = [tid for tid in detected_tags if tid in self.tool_tag_ids]
-        if not visible:
+        visible_tag = self.primary_tag_visible(detected_tags)
+        if visible_tag is None:
             return None
 
-        # Solve poses for each visible tool tag
-        tag_positions_cam = []
-        tag_rotations_cam = []
+        # Only combine tags when all observed tags have measured extrinsics.
+        # The default path intentionally uses one stable reference tag.
+        if self.tag_to_tool_transforms:
+            selected_ids = sorted(
+                tid
+                for tid in detected_tags
+                if tid in self.tool_tag_ids and tid in self.tag_to_tool_transforms
+            )
+            if not selected_ids:
+                return None
+        else:
+            selected_ids = [visible_tag]
 
-        for tid in visible:
-            res = self.solve_tag_pose(detected_tags[tid])
+        tag_positions_cam: list[np.ndarray] = []
+        tag_rotations_cam: list[np.ndarray] = []
+        visible: list[int] = []
+        for tid in selected_ids:
+            res = self.solve_reference_tag_pose(tid, detected_tags[tid])
             if res is not None:
                 r_mat, t_cam = res
                 tag_positions_cam.append(t_cam)
                 tag_rotations_cam.append(r_mat)
+                visible.append(tid)
 
-        if not tag_positions_cam:
+        if not tag_positions_cam or visible_tag not in visible and not self.tag_to_tool_transforms:
             return None
 
-        # Mean tag cluster position and rotation
+        # Mean tool-reference position.  Orientation uses the first calibrated
+        # reference; uncalibrated tag rotations cannot be averaged safely.
         mean_tag_pos_cam = np.mean(tag_positions_cam, axis=0)
         mean_rot_cam = tag_rotations_cam[0]  # Primary orientation reference
 
@@ -210,11 +279,18 @@ class ScalpelPoseSolver:
 
         # Convert 3x3 rotation matrix to Quaternion [qx, qy, qz, qw]
         quat = rotation_matrix_to_quaternion(rot_desk)
+        if self._last_quaternion is not None and float(np.dot(quat, self._last_quaternion)) < 0.0:
+            # q and -q describe the same rotation.  Align signs before the
+            # component-wise filter so equivalent poses cannot cancel out.
+            quat = -quat
         filtered_quat = self.rot_filter.filter(quat, timestamp)
+        if self._last_quaternion is not None and float(np.dot(filtered_quat, self._last_quaternion)) < 0.0:
+            filtered_quat = -filtered_quat
         # Normalize quaternion
         norm_q = np.linalg.norm(filtered_quat)
         if norm_q > 1e-6:
             filtered_quat = filtered_quat / norm_q
+        self._last_quaternion = filtered_quat.copy()
 
         confidence = min(1.0, len(visible) / float(len(self.tool_tag_ids)))
 

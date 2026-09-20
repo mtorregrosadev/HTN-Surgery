@@ -1,5 +1,6 @@
 from typing import Any
 
+import httpx
 from fastapi.testclient import TestClient
 
 from scalpel_controller.app import create_app
@@ -50,3 +51,32 @@ def test_hardware_snapshot_reaches_vr_client():
                 snapshot = vr.receive_json()
                 assert snapshot["sessionId"] == "demo"
                 assert snapshot["events"] == ["contact-start"]
+
+
+class RecoveringUpstream(FakeUpstream):
+    def __init__(self) -> None:
+        self.failed = False
+
+    async def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+        if path.endswith("/samples") and not self.failed:
+            self.failed = True
+            raise httpx.ReadTimeout("native solver was busy")
+        return await super().request(method, path, body)
+
+
+def test_hardware_stream_survives_a_temporary_sofa_timeout():
+    with TestClient(create_app(RecoveringUpstream())) as client:
+        with client.websocket_connect("/v1/sessions/demo/hardware-stream") as hardware:
+            sample = {
+                "sessionId": "demo",
+                "positionMm": {"x": 1, "y": 2, "z": 3},
+                "forceN": 0.0,
+                "contact": False,
+            }
+            hardware.send_json(sample)
+            error = hardware.receive_json()
+            assert error["status"] == 503
+            assert error["message"] == "SOFA API temporarily unavailable"
+
+            hardware.send_json(sample)
+            assert hardware.receive_json()["tick"] == 1

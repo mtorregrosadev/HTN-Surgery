@@ -292,6 +292,12 @@ namespace SurgePrep
                             }
                         }
                     }
+                    catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                    {
+                        // HttpClient.Timeout also uses cancellation. A slow
+                        // active-session poll must not tear down a healthy
+                        // WebSocket stream.
+                    }
                     catch (OperationCanceledException)
                     {
                         throw;

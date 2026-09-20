@@ -5,7 +5,7 @@ using UnityEngine.InputSystem;
 
 namespace SurgePrep
 {
-    public static class ShowcaseInput
+    internal static class ShowcaseInput
     {
         public static bool Held(KeyCode key)
         {

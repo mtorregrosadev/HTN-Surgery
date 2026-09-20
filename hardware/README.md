@@ -1,48 +1,44 @@
 # AprilTag + FSR scalpel input
 
-## One-tag 6-DoF stylus trial in Unity
+## One existing 36h11 tag: 6-DoF stylus
 
-For the quickest orientation test, the Unity client can use a single rigidly
-mounted tag through Keijiro's `jp.keijiro.apriltag` package. This mode tracks
-the stylus position and complete quaternion rotation from the webcam. It does
-not need the Python bridge or an FSR: moving the physical tip down supplies the
-depth, while SOFA remains responsible for collision, reaction force,
-deformation, and cutting.
+`single_tag_stylus_bridge.py` tracks one existing AprilTag `36h11`, including
+3D position and complete quaternion rotation. It automatically locks onto the
+first visible tag, so its ID does not need to be known. No FSR is required:
+physical tip depth drives the pose while SOFA remains responsible for contact,
+reaction, deformation, and cutting.
 
-1. In Unity, select **Surge Prep > Install AprilTag Stylus Tracking** and wait
-   for scripts to compile.
-2. Leave Play Mode and select **Surge Prep > Build Chest-Tube Showcase** again.
-3. Print `tagStandard41h12` ID `0` from the official
-   [AprilTag image repository](https://github.com/AprilRobotics/apriltag-imgs/tree/master/tagStandard41h12).
-   Scale it to a measured size, keep its white border, and mount it flat and
-   rigidly on the back of a blunt training stylus.
-4. Select `RegistrationAnchor_SimulationPatch` and configure its
-   `April Tag Stylus Input` component:
-   - `Tag Size Metres`: measured outer black-square edge length.
-   - `Camera Field Of View Degrees`: the webcam field of view used for pose
-     estimation. An incorrect value makes depth scale incorrectly.
-   - `Tag To Tip Metres`: measured vector from the tag centre to the stylus
-     tip in tag-local axes. The default assumes the tip is 140 mm down the
-     tag's local Y axis; adjust it for the actual mount.
-5. Start the showcase stack, enter Play Mode, and allow camera access.
-6. Hold the physical tip at the centre of the highlighted procedure target,
-   with the stylus at the angle the virtual tool should copy. Press **Space**
-   once. Translation and rotation now stream through client -> Scalpel
-   controller -> API -> SOFA. Cover the tag to verify that the HUD reports the
-   loss and keyboard fallback resumes safely.
+1. Measure the tag's outer black-square width. If it is 50 mm, use `50` below.
+2. Mount it flat on the back of a blunt training stylus, with the printed
+   bottom edge pointing toward the tip. Measure tag-centre to tip distance.
+3. Leave Play Mode and run **Surge Prep > Build Chest-Tube Showcase**.
+4. Select `RegistrationAnchor_SimulationPatch`, find `Tag Fsr Input`, and set
+   `Tag To Tip Metres`. A 140 mm centre-to-tip distance is `X 0, Y -0.14, Z 0`.
+5. Start the stack, then open a second terminal:
 
-This is a one-camera prototype, not a precision measurement claim. A correctly
-measured tag and fixed camera can look close to one-to-one, but motion blur,
-glare, shallow viewing angles, lens distortion, and marker occlusion introduce
-jitter and pose error. Keep the tag large in frame and the camera fixed. The
-package only accepts `tagStandard41h12`; the older three-tag bridge below uses
-`36h11`, so those printed markers are not interchangeable.
+   ```bash
+   .venv-sofa/bin/python -m pip install opencv-python
+   .venv-sofa/bin/python hardware/single_tag_stylus_bridge.py --tag-size-mm 50
+   ```
 
-The Keijiro package is pinned to `1.0.3`. The integration is optional: without
-it, the Surge Prep Unity package still compiles and retains WASD plus the
-existing tag/FSR path.
+   The camera window must outline the tag in green and report `6-DoF`.
+6. Enter Play Mode. Put the physical tip at the chosen centre of the training
+   surface, hold the desired starting angle, click the Unity Game view, and
+   press **Space** once. The HUD changes to `LIVE — one 36h11 tag, 6-DoF stylus`.
+7. Cover the tag or stop the bridge to test fallback. Click the Game view and
+   use `W/A/S/D`, `Q/E`, and `1/2/3`. Losing the tag never removes keyboard
+   controls.
 
-Drives the Unity scalpel from real hardware:
+If the wrong camera opens, add `--camera 1`. If physical motion is scaled
+incorrectly, verify `--tag-size-mm`; optionally tune webcam scale with
+`--fov-deg`. For calibrated lens intrinsics, run `camera_calibration.py` and
+pass its file using `--camera-calib hardware/camera_calib.npz`.
+
+This is a one-camera prototype, not a precision measurement claim. Motion
+blur, glare, shallow viewing angles, lens distortion, and marker occlusion
+introduce error. Keep the camera fixed and the complete tag large in frame.
+
+The older multi-tag + FSR option remains available:
 
 - **AprilTags 1, 2, 3** on the scalpel handle, seen by a webcam, set the scalpel's position over the skin (x/z).
 - **FSR sensor** on an ESP32-C3 Mini sets how deep the cut is: no pressure hovers just above the skin, and harder pressure lowers the blade through skin, fat and muscle.

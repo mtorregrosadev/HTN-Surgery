@@ -258,7 +258,6 @@ namespace SurgePrep.Editor
             stream.enabled = false;
             var manualDemo = simulation.AddComponent<UnityManualDemoClient>();
             var tagInput = simulation.AddComponent<TagFsrInput>();
-            AddOptionalAprilTagStylusInput(simulation);
             var hud = simulation.AddComponent<ChestTubeShowcaseHud>();
             SetObject(renderer, "tissueMaterial", tissue);
             SetObject(renderer, "subcutaneousMaterial", fat);
@@ -303,17 +302,6 @@ namespace SurgePrep.Editor
             Debug.Log(
                 "Surge Prep OR showcase created. Run scripts/start-showcase.sh, then Play Mode."
             );
-        }
-
-        private static void AddOptionalAprilTagStylusInput(GameObject simulation)
-        {
-            var trackerType = Type.GetType(
-                "SurgePrep.AprilTagStylusInput, SurgePrep.AprilTag"
-            );
-            if (trackerType != null && typeof(TrackedToolInput).IsAssignableFrom(trackerType))
-            {
-                simulation.AddComponent(trackerType);
-            }
         }
 
         private static GameObject CreateOperatingRoom(

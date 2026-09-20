@@ -145,12 +145,14 @@ def test_components_added_by_the_builder_exist():
 
 
 def test_tag_fsr_packet_fields_match_the_bridge():
-    """TagFsrInput reads x, y, force, tags; the bridge must send them (extra fields are ignored by JsonUtility)."""
+    """Both legacy and six-DoF UDP packet fields stay aligned with Unity."""
     unity = read(os.path.join(PACKAGE, "Runtime", "TagFsrInput.cs"))
-    assert re.search(r"class Packet \{ public float x, y, force; public int tags; \}", unity)
     bridge = read(os.path.join(ROOT, "hardware", "tag_fsr_bridge.py"))
     for key in ('"x"', '"y"', '"force"', '"tags"'):
-        assert key in bridge
+        assert key in bridge and key.strip('"') in unity
+    pose_bridge = read(os.path.join(ROOT, "hardware", "single_tag_stylus_bridge.py"))
+    for key in ('"mode"', '"px"', '"py"', '"pz"', '"qx"', '"qy"', '"qz"', '"qw"'):
+        assert key in pose_bridge and key.strip('"') in unity
 
 
 def test_physical_inputs_share_the_controller_bound_pose_contract():
@@ -163,19 +165,12 @@ def test_physical_inputs_share_the_controller_bound_pose_contract():
     assert 'inputMode = hardware ? "calibrated-hardware" : "pose-only"' in client
 
 
-def test_optional_keijiro_tracker_is_isolated_and_six_dof():
-    integration = os.path.join(PACKAGE, "Runtime", "AprilTag")
-    asmdef = read(os.path.join(integration, "SurgePrep.AprilTag.asmdef"))
-    tracker = read(os.path.join(integration, "AprilTagStylusInput.cs"))
-    installer = read(os.path.join(PACKAGE, "Editor", "AprilTagPackageInstaller.cs"))
-    builder = read(os.path.join(PACKAGE, "Editor", "ChestTubeShowcaseBuilder.cs"))
-    assert '"AprilTag.Runtime"' in asmdef
-    assert '"SURGE_PREP_HAS_APRILTAG"' in asmdef
-    assert "tagStandard41h12" in tracker
-    assert "tag.Position" in tracker and "tag.Rotation" in tracker
-    assert "orientationApi" in tracker and "PositionMm" in tracker
-    assert "Client.Add(PackageUrl)" in installer
-    assert "AddOptionalAprilTagStylusInput(simulation)" in builder
+def test_keyboard_fallback_keeps_every_tool_control():
+    client = read(os.path.join(PACKAGE, "Runtime", "UnityManualDemoClient.cs"))
+    for key in ("W", "A", "S", "D", "Q", "E", "Alpha1", "Alpha2", "Alpha3"):
+        assert f"KeyCode.{key}" in client
+    assert "while (!token.IsCancellationRequested)" in client
+    assert "Stream interrupted — reconnecting" in client
 
 
 # ---------------------------------------------------------------- generated hair mesh

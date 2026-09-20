@@ -163,19 +163,19 @@ its own calibration and session, so there is no session ID to paste.
 | `V` | Desktop-only side-by-side phone-view preview |
 | `R` twice | Reset the attempt |
 
-Contact and force are calculated by SOFA. `Space`, `[` and `]` are not physics
-controls. Lower the selected tool until the blade or tip reaches the tissue,
-then move along the highlighted corridor.
+Contact and force are calculated by SOFA. `Space` registers the optional
+physical tracker; it is not a keyboard force control. Lower the selected tool
+until the blade or tip reaches the tissue, then move along the highlighted
+corridor.
 
 ### Optional: single-tag 6-DoF stylus
 
-The `test` branch includes an optional Unity-native tracker for one
-`tagStandard41h12` marker using Keijiro's AprilTag package. In Unity, select
-**Surge Prep > Install AprilTag Stylus Tracking**, wait for compilation, then
-run **Surge Prep > Build Chest-Tube Showcase** again. The tracker copies both
-translation and quaternion rotation through the normal controller/API/SOFA
-loop; it never writes directly to SOFA or MongoDB. Setup, marker, mount, and
-Space-to-register instructions are in [`hardware/README.md`](hardware/README.md).
+The `test` branch tracks one existing `36h11` marker through
+`hardware/single_tag_stylus_bridge.py`. It auto-selects the first visible tag
+and sends translation plus quaternion rotation through the normal
+client/controller/API/SOFA loop; it never writes directly to SOFA or MongoDB.
+Setup, mount measurement, and Space-to-register instructions are in
+[`hardware/README.md`](hardware/README.md).
 
 This mode derives contact from tracked tip depth and therefore does not provide
 measured hand force. The existing AprilTag + ESP32 FSR mode remains available

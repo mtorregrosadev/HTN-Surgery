@@ -14,7 +14,7 @@ class Settings:
         return cls(
             mongodb_uri=os.getenv("SURGE_PREP_MONGODB_URI"),
             mongodb_database=os.getenv("SURGE_PREP_MONGODB_DATABASE", "surge_prep"),
-            simulation_backend=os.getenv("SURGE_PREP_SIMULATION_BACKEND", "memory"),
+            simulation_backend=os.getenv("SURGE_PREP_SIMULATION_BACKEND", "sofa"),
             sofa_scene_path=os.getenv(
                 "SURGE_PREP_SOFA_SCENE", "../simulation/sofa_scene.py"
             ),

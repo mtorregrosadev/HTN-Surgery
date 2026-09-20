@@ -30,7 +30,7 @@ def build_simulator(settings: Settings) -> Simulator:
     if settings.simulation_backend == "memory":
         return MemorySimulator()
     if settings.simulation_backend == "sofa":
-        return SofaSimulator(settings.sofa_scene_path)
+        return SofaSimulator(settings.sofa_scene_path, allow_fallback=True)
     raise RuntimeError(f"Unsupported simulation backend: {settings.simulation_backend}")
 
 

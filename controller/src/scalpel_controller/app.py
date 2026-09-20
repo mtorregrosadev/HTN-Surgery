@@ -37,6 +37,7 @@ class ApiUpstream:
         return response.status_code, response.json()
 
 
+from scalpel_controller.amaruco_service import AmarucoService
 from scalpel_controller.hardware import HardwareBridge
 from scalpel_controller.tracking import TrackingBridge
 
@@ -184,12 +185,14 @@ def create_app(
     upstream: Upstream | None = None,
     hardware: HardwareBridge | None = None,
     tracking: TrackingBridge | None = None,
+    amaruco: AmarucoService | None = None,
 ) -> FastAPI:
     selected_upstream = upstream or ApiUpstream(
         os.getenv("SURGE_PREP_API_URL", "http://localhost:8000")
     )
     hardware_bridge = hardware or HardwareBridge()
     tracking_bridge = tracking or TrackingBridge()
+    amaruco_service = amaruco or AmarucoService(tracking_bridge)
     hub = SessionHub(selected_upstream, hardware_bridge, tracking_bridge)
 
     @asynccontextmanager
@@ -248,6 +251,34 @@ def create_app(
     async def tracking_status() -> JSONResponse:
         return JSONResponse(tracking_bridge.to_dict())
 
+    @app.get("/v1/tracking/amaruco/status")
+    async def amaruco_status() -> JSONResponse:
+        return JSONResponse(amaruco_service.status())
+
+    @app.post("/v1/tracking/amaruco/start")
+    async def amaruco_start(body: dict[str, Any] | None = None) -> JSONResponse:
+        payload = body or {}
+        result = amaruco_service.start(
+            camera_index=int(payload.get("cameraIndex", 0)),
+            dictionaries=payload.get("dictionaries"),
+        )
+        return JSONResponse(result, status_code=200 if result.get("started") else 503)
+
+    @app.post("/v1/tracking/amaruco/stop")
+    async def amaruco_stop() -> JSONResponse:
+        amaruco_service.stop()
+        return JSONResponse({"status": "stopped"})
+
+    @app.post("/v1/tracking/amaruco/calibration")
+    async def amaruco_camera_calibration(body: dict[str, Any]) -> JSONResponse:
+        result = amaruco_service.set_camera_calibration(body)
+        return JSONResponse(result, status_code=200 if result.get("accepted") else 422)
+
+    @app.post("/v1/tracking/amaruco/workspace")
+    async def amaruco_workspace(body: dict[str, Any]) -> JSONResponse:
+        result = amaruco_service.set_workspace(body)
+        return JSONResponse(result, status_code=200 if result.get("accepted") else 422)
+
     @app.post("/v1/tracking/pose")
     async def tracking_pose(body: dict[str, Any]) -> JSONResponse:
         tracking_bridge.update_from_dict(body)
@@ -271,6 +302,51 @@ def create_app(
                     })
                 elif msg_type == "ping":
                     await socket.send_json({"type": "pong"})
+        except WebSocketDisconnect:
+            pass
+
+    @app.websocket("/v1/tracking/amaruco/stream")
+    async def amaruco_frame_stream(socket: WebSocket) -> None:
+        """Receive pushed JPEG/PNG frames, detect natively, publish pose.
+
+        Clients that cannot run the detector locally (e.g. the browser demo)
+        send compressed frames; detection runs here in the controller, so the
+        calibrated pose path stays controller-owned.
+        """
+        await socket.accept()
+        try:
+            import base64
+
+            import cv2
+            import numpy as np
+
+            while True:
+                message = await socket.receive_json()
+                msg_type = message.get("type", "frame")
+                if msg_type == "ping":
+                    await socket.send_json({"type": "pong"})
+                    continue
+                if msg_type != "frame":
+                    await socket.send_json({"type": "error", "message": "unsupported frame action"})
+                    continue
+                data_b64 = message.get("dataBase64")
+                if not data_b64:
+                    await socket.send_json({"type": "error", "message": "missing dataBase64"})
+                    continue
+                buf = np.frombuffer(base64.b64decode(data_b64), dtype=np.uint8)
+                image = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+                if image is None:
+                    await socket.send_json({"type": "error", "message": "undecodable frame"})
+                    continue
+                result = amaruco_service.process_frame(
+                    image, timestamp_ms=message.get("timestampMs")
+                )
+                await socket.send_json({
+                    "type": "detections",
+                    "detections": result["detections"],
+                    "pose": result["pose"],
+                    "timestampMs": result["timestampMs"],
+                })
         except WebSocketDisconnect:
             pass
 

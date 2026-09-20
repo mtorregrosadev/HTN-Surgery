@@ -97,6 +97,7 @@ namespace SurgePrep
         {
             UpdateKeyboardState();
             Update_TagFsr();
+            RenderLocalToolPose();
             string latest = null;
             while (received.TryDequeue(out var payload))
             {
@@ -123,6 +124,23 @@ namespace SurgePrep
                 }
                 sceneRenderer.SetTarget(snapshot);
             }
+        }
+
+        private void RenderLocalToolPose()
+        {
+            if (sceneRenderer == null) return;
+            Vector3 position;
+            Quaternion orientation;
+            string selectedTool;
+            lock (stateLock)
+            {
+                position = new Vector3(xMm, yMm, zMm);
+                orientation = hardwareActive && hardwareHasOrientation
+                    ? hardwareOrientation
+                    : new Quaternion(IncisionHold.qx, IncisionHold.qy, IncisionHold.qz, IncisionHold.qw);
+                selectedTool = toolId;
+            }
+            sceneRenderer.SetPredictedToolPose(position, orientation, selectedTool);
         }
 
         private void Update_TagFsr()
@@ -487,6 +505,7 @@ namespace SurgePrep
 
         private async void OnDisable()
         {
+            if (sceneRenderer != null) sceneRenderer.ClearPredictedToolPose();
             cancellation?.Cancel();
             socket?.Dispose();
             socket = null;

@@ -20,6 +20,7 @@ namespace SurgePrep
         private readonly Dictionary<string, MeshView> meshes = new Dictionary<string, MeshView>();
         private Vector3 toolTargetPosition;
         private Quaternion toolTargetRotation = Quaternion.identity;
+        private bool localToolPrediction;
         private GameObject scalpelVisual;
         private GameObject dissectorVisual;
         private GameObject tubeVisual;
@@ -30,7 +31,7 @@ namespace SurgePrep
         public void SetTarget(SimulationSnapshotDto snapshot)
         {
             LatestSnapshot = snapshot;
-            if (snapshot.tool != null)
+            if (snapshot.tool != null && !localToolPrediction)
             {
                 toolTargetPosition = RegisteredPosition(snapshot.tool.positionMm);
                 toolTargetRotation = CoordinateFrame.Rotation(snapshot.tool.orientation);
@@ -49,6 +50,27 @@ namespace SurgePrep
             }
             UpdateIncisionGuide(snapshot);
             SnapshotReceived?.Invoke(snapshot);
+        }
+
+        public void SetPredictedToolPose(Vector3 positionMm, Quaternion orientationApi, string toolId)
+        {
+            localToolPrediction = true;
+            toolTargetPosition = new Vector3(positionMm.x, positionMm.y, -positionMm.z)
+                * CoordinateFrame.MillimetresToMetres;
+            toolTargetRotation = new Quaternion(
+                -orientationApi.x, -orientationApi.y, orientationApi.z, orientationApi.w
+            );
+            UpdateToolVisual(toolId);
+            if (toolTransform != null)
+            {
+                toolTransform.localPosition = toolTargetPosition;
+                toolTransform.localRotation = toolTargetRotation;
+            }
+        }
+
+        public void ClearPredictedToolPose()
+        {
+            localToolPrediction = false;
         }
 
         private static bool LayerVisible(string objectId, SimulationSnapshotDto snapshot)

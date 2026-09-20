@@ -16,7 +16,7 @@ namespace SurgePrep
     /// <see cref="UnityManualDemoClient"/> sends the result through the normal
     /// Unity -> controller -> API -> SOFA path; SOFA still decides contact and carving.
     /// </summary>
-    public sealed class TagFsrInput : MonoBehaviour
+    public sealed class TagFsrInput : TrackedToolInput
     {
         [Header("Network")]
         [SerializeField] private int port = 5005;
@@ -47,7 +47,7 @@ namespace SurgePrep
         private float lastDepth01;
 
         /// <summary>True while the bridge is sending fresh packets.</summary>
-        public bool HasSignal
+        public override bool HasSignal
         {
             get { lock (lockObj) { return latestJson != null && clock.Elapsed.TotalSeconds - receivedAt < staleSeconds; } }
         }
@@ -85,6 +85,27 @@ namespace SurgePrep
             positionMm = lastPose;
             forceN = pressed * maxForceN;
             contact = pressed > 0f;
+        }
+
+        public override bool TryRead(out TrackedToolSample sample)
+        {
+            Read(out var positionMm, out var forceN, out var contact, out var tagsVisible);
+            sample = new TrackedToolSample
+            {
+                PositionMm = positionMm,
+                OrientationApi = Quaternion.identity,
+                HasOrientation = false,
+                ForceN = forceN,
+                Contact = contact,
+                Quality = tagsVisible ? 1f : 0f,
+                SourceHealthy = HasSignal && tagsVisible,
+                ForceMeasurementValid = true,
+                DeviceId = "apriltag-fsr-bridge",
+                Status = tagsVisible
+                    ? "LIVE — AprilTag position, FSR cut depth"
+                    : "AprilTag hidden — tool lifted"
+            };
+            return HasSignal;
         }
 
         private void OnEnable()

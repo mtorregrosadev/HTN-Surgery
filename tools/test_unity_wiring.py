@@ -153,6 +153,16 @@ def test_tag_fsr_packet_fields_match_the_bridge():
         assert key in bridge
 
 
+def test_physical_inputs_share_the_controller_bound_pose_contract():
+    base = read(os.path.join(PACKAGE, "Runtime", "TrackedToolInput.cs"))
+    tag_fsr = read(os.path.join(PACKAGE, "Runtime", "TagFsrInput.cs"))
+    client = read(os.path.join(PACKAGE, "Runtime", "UnityManualDemoClient.cs"))
+    assert "abstract class TrackedToolInput" in base
+    assert "TagFsrInput : TrackedToolInput" in tag_fsr
+    assert "GetComponents<TrackedToolInput>()" in client
+    assert 'inputMode = hardware ? "calibrated-hardware" : "pose-only"' in client
+
+
 # ---------------------------------------------------------------- generated hair mesh
 
 

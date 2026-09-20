@@ -56,6 +56,13 @@ namespace SurgePrep
         private bool hardwareActive;
         private float hardwareForceN;
         private bool hardwareContact;
+        private Quaternion hardwareOrientation = Quaternion.identity;
+        private bool hardwareHasOrientation;
+        private float hardwareQuality = 1f;
+        private bool hardwareSourceHealthy = true;
+        private bool hardwareForceMeasurementValid;
+        private string hardwareDeviceId = "unity-manual-demo";
+        private TrackedToolInput[] trackedInputs;
 
         public bool Connected => socket != null && socket.State == WebSocketState.Open;
         public string SessionId => sessionId;
@@ -120,22 +127,51 @@ namespace SurgePrep
 
         private void Update_TagFsr()
         {
+            if (trackedInputs == null || trackedInputs.Length == 0)
+            {
+                trackedInputs = GetComponents<TrackedToolInput>();
+            }
+            TrackedToolInput activeInput = null;
+            foreach (var candidate in trackedInputs)
+            {
+                if (candidate != null && candidate.isActiveAndEnabled && candidate.HasSignal)
+                {
+                    activeInput = candidate;
+                    break;
+                }
+            }
+            if (activeInput == null && tagInput != null && tagInput.HasSignal)
+            {
+                activeInput = tagInput;
+            }
+            var sample = default(TrackedToolSample);
+            var hasSample = activeInput != null && activeInput.TryRead(out sample);
+
             lock (stateLock)
             {
-                hardwareActive = tagInput != null && tagInput.HasSignal;
+                hardwareActive = hasSample;
                 if (!hardwareActive)
                 {
                     hardwareForceN = 0f;
                     hardwareContact = false;
+                    hardwareHasOrientation = false;
+                    hardwareForceMeasurementValid = false;
                     return;
                 }
-                tagInput.Read(out var pose, out var forceN, out var contact, out _);
-                xMm = pose.x;
-                yMm = pose.y;
-                zMm = pose.z;
-                hardwareForceN = forceN;
-                hardwareContact = contact;
-                Status = "LIVE — AprilTag position, FSR cut depth";
+                xMm = sample.PositionMm.x;
+                yMm = sample.PositionMm.y;
+                zMm = sample.PositionMm.z;
+                hardwareOrientation = sample.OrientationApi;
+                hardwareHasOrientation = sample.HasOrientation;
+                hardwareForceN = sample.ForceN;
+                hardwareContact = sample.Contact;
+                hardwareQuality = sample.Quality;
+                hardwareSourceHealthy = sample.SourceHealthy;
+                hardwareForceMeasurementValid = sample.ForceMeasurementValid;
+                hardwareDeviceId = string.IsNullOrEmpty(sample.DeviceId)
+                    ? "tracked-training-tool"
+                    : sample.DeviceId;
+                Status = sample.Status;
             }
         }
 
@@ -332,6 +368,12 @@ namespace SurgePrep
             bool hardware;
             float sampleForce;
             bool sampleContact;
+            Quaternion sampleOrientation;
+            bool sampleHasOrientation;
+            float sampleQuality;
+            bool sampleSourceHealthy;
+            bool sampleForceValid;
+            string sampleDeviceId;
             lock (stateLock)
             {
                 sampleX = xMm;
@@ -341,24 +383,39 @@ namespace SurgePrep
                 hardware = hardwareActive;
                 sampleForce = hardwareForceN;
                 sampleContact = hardwareContact;
+                sampleOrientation = hardwareOrientation;
+                sampleHasOrientation = hardwareHasOrientation;
+                sampleQuality = hardwareQuality;
+                sampleSourceHealthy = hardwareSourceHealthy;
+                sampleForceValid = hardwareForceMeasurementValid;
+                sampleDeviceId = hardwareDeviceId;
             }
+            var orientation = hardware && sampleHasOrientation
+                ? new QuaternionDto
+                {
+                    qx = sampleOrientation.x,
+                    qy = sampleOrientation.y,
+                    qz = sampleOrientation.z,
+                    qw = sampleOrientation.w
+                }
+                : IncisionHold;
             return new ToolSampleDto
             {
                 contractVersion = "1.1",
                 sessionId = sessionId,
                 toolId = sampleTool,
-                deviceId = "unity-manual-demo",
+                deviceId = hardware ? sampleDeviceId : "unity-manual-demo",
                 calibrationId = calibrationId,
                 sequence = sequence++,
                 timestampMs = clock.ElapsedMilliseconds,
                 positionMm = new Vector3Dto { x = sampleX, y = sampleY, z = sampleZ },
-                orientation = IncisionHold,
+                orientation = orientation,
                 forceN = hardware ? sampleForce : 0f,
                 contact = hardware && sampleContact,
-                quality = 1f,
-                sourceHealthy = true,
+                quality = hardware ? sampleQuality : 1f,
+                sourceHealthy = hardware ? sampleSourceHealthy : true,
                 inputMode = hardware ? "calibrated-hardware" : "pose-only",
-                forceMeasurementValid = hardware
+                forceMeasurementValid = hardware && sampleForceValid
             };
         }
 
